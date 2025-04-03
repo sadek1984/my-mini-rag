@@ -30,3 +30,5 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8001
 ## POSTMAN Collection
 
 Download the POSTMAN collection from [/assets/mini-rag-app.postman_collection.json](/ assets/mini-rag-app.postman_collection.json)
+
+# fastapi boilerplate github --> use template from others
