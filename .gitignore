@@ -1,0 +1,20 @@
+db/journal/
+docker/mongodb/data/journal/
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE / Editor specific
+.vscode/
+.idea/
+
+# Large data or model files (Add your specific files!)
+*.pt
+*.h5
+*.onnx
+large_dataset.csv

@@ -1,0 +1,32 @@
+services:
+  mongodb:
+    image: mongo:7-jammy
+    
+    container_name: mongodb
+
+    storage:
+      journal:
+        enabled: true
+        commitIntervalMs: 100  # Default is 100ms
+      wiredTiger:
+        engineConfig:
+          journalCompressor: snappy  # Better compression
+      
+    ports:
+      - "27007:27017"
+    
+    volumes:
+      - mongodata:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
+    
+    networks:
+      - backend
+    
+    restart: always
+
+networks:
+  backend:
+volumes:
+  mongodata:
