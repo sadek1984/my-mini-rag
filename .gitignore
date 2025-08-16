@@ -18,4 +18,3 @@ __pycache__/
 *.h5
 *.onnx
 large_dataset.csv
-.env

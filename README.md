@@ -38,7 +38,7 @@ uvicorn src.main:app --reload --host 0.0.0.0 --port 8001
 ## POSTMAN Collection
 origin  git@github.com:yourusername/repo.git(fetch)
 
-
+ 
 Download the POSTMAN collection from [/assets/mini-rag-app.postman_collection.json](/ assets/mini-rag-app.postman_collection.json)
 # fastapi boilerplate github --> use template from others
 
@@ -62,4 +62,12 @@ git push -u origin <your-branch-name>
 # to run colab server on local machine
 ngrok
 
+# Make pg_config available
+brew install libpq
+brew link --force libpq
+
+# to create database
+alembic revision --autogenerate -m "Initial Commit" # from minirag folder
+# Apply the migration to the database
+alembic upgrade head
 

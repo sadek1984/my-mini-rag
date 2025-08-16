@@ -4,14 +4,6 @@ services:
     
     container_name: mongodb
 
-    storage:
-      journal:
-        enabled: true
-        commitIntervalMs: 100  # Default is 100ms
-      wiredTiger:
-        engineConfig:
-          journalCompressor: snappy  # Better compression
-      
     ports:
       - "27007:27017"
     
@@ -26,7 +18,26 @@ services:
     
     restart: always
 
+  # PostgreSQL (pgvector)
+  pgvector:
+    image: pgvector/pgvector:0.8.0-pg17
+    container_name: pgvector
+    ports:
+      - "5432:5432"
+    volumes:
+      - 'pgvector_data:/var/lib/postgresql/data'
+    
+    env_file:
+      - /Users/a12/mini-rag/.env
+    networks:
+      - backend
+    restart: always
+    
+
 networks:
   backend:
+  
 volumes:
   mongodata:
+  pgvector_data:
+    

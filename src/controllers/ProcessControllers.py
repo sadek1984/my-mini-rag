@@ -6,6 +6,13 @@ import os
 import nltk
 from langchain_community.document_loaders import PyMuPDFLoader, UnstructuredExcelLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from typing import List
+from dataclasses import dataclass
+
+@dataclass 
+class Document:
+    page_content: str 
+    metadata: dict
 
 def _ensure_nltk_data():
     """
@@ -116,7 +123,42 @@ class ProcessControllers(BaseControllers):
             print(f"Warning: No text content could be extracted from {file_id}.")
             return []
 
-        chunks = text_splitter.create_documents(
-            texts_to_split, metadatas=metadatas_to_split
-        )
+        # chunks = text_splitter.create_documents(
+        #     texts_to_split, metadatas=metadatas_to_split
+        # )
+
+        chunks = self.process_simpler_splitter(
+            texts=texts_to_split, 
+            metadatas=metadatas_to_split, 
+            chunk_size=chunk_size
+            )
+
+        return chunks
+
+    def process_simpler_splitter(self, texts: List[str], metadatas: List[dict], chunk_size: int, splitter_tag: str="\n"):
+        
+        full_text = " ".join(texts)
+
+        # split by splitter_tag
+        lines = [ doc.strip() for doc in full_text.split(splitter_tag) if len(doc.strip()) > 1 ]
+
+        chunks = []
+        current_chunk = ""
+
+        for line in lines:
+            current_chunk += line + splitter_tag
+            if len(current_chunk) >= chunk_size:
+                chunks.append(Document(
+                    page_content=current_chunk.strip(),
+                    metadata={}
+                ))
+
+                current_chunk = ""
+
+        if len(current_chunk) >= 0: 
+            chunks.append(Document(
+                page_content=current_chunk.strip(),
+                metadata={}
+            ))
+
         return chunks
