@@ -1,7 +1,7 @@
 from .BaseControllers import BaseControllers
 from fastapi import UploadFile
-from ..helper.config import get_settings, Settings
-from ..models import ResponseSignal
+from helper.config import get_settings, Settings
+from models import ResponseSignal
 from .ProjectControllers import ProjectControllers
 import re
 import os

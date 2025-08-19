@@ -3,7 +3,7 @@ from ..VectorDBEnum import (DistanceMethodEnums, PgVectorTableSchemeEnums,
                              PgVectorDistanceMethodEnums, PgVectorIndexTypeEnums)
 import logging
 from typing import List
-from ....models.db_schemes import RetrievedDocument
+from models.db_schemes import RetrievedDocument
 from sqlalchemy.sql import text as sql_text
 import json
 

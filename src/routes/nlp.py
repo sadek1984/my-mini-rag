@@ -1,10 +1,10 @@
 from fastapi import FastAPI, APIRouter, status, Request
 from fastapi.responses import JSONResponse
-from ..routes.schemes.nlp import PushRequest, SearchRequest
-from ..models.ProjectModel import ProjectModel
-from ..models.ChunkModel import ChunkModel
-from ..controllers import NLPController
-from ..models import ResponseSignal
+from routes.schemes.nlp import PushRequest, SearchRequest
+from models.ProjectModel import ProjectModel
+from models.ChunkModel import ChunkModel
+from controllers import NLPController
+from models import ResponseSignal
 from tqdm.auto import tqdm
 
 import logging

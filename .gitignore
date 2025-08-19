@@ -3,7 +3,6 @@ docker/mongodb/data/journal/
 # Virtual Environment
 venv/
 .venv/
-env/
 
 # Python cache
 __pycache__/

@@ -1,7 +1,8 @@
-from .providers import QdrantDBProvider, PGVectorProvider
-from .VectorDBEnum import VectorDBEnums
-from ...controllers.BaseControllers import BaseControllers
+from stores.VectorDB.VectorDBEnum import VectorDBEnums
+from controllers.BaseControllers import BaseControllers
 from sqlalchemy.orm import sessionmaker
+from stores.VectorDB.providers.QdrantDBProvider import QdrantDBProvider
+from stores.VectorDB.providers.PGVectorProvider import PGVectorProvider
 
 class VectorDBProviderFactory:
     def __init__(self, config, db_client: sessionmaker=None):

@@ -1,16 +1,20 @@
 
 from fastapi import FastAPI
-from .routes.base import base_router  
-from .routes.data import data_router
-from .routes import nlp
-from .helper.config import get_settings
-from .stores.llm.LLMProviderFactory import LLMProviderFactory
-from .stores.VectorDB.VectorDBProviderFactory import VectorDBProviderFactory
-from .stores.llm.templates.template_parser import TemplateParser
+from routes.base import base_router  
+from routes.data import data_router
+from routes import nlp
+from helper.config import get_settings
+from stores.llm.LLMProviderFactory import LLMProviderFactory
+from stores.VectorDB.VectorDBProviderFactory import VectorDBProviderFactory
+from stores.llm.templates.template_parser import TemplateParser
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from utils.metrics import setup_metrics
 
 app = FastAPI()
+
+# Setup Prometheus metrics
+setup_metrics(app)
 
 async def startup_span():
     settings = get_settings()

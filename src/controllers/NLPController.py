@@ -210,8 +210,8 @@
 
 
 from .BaseControllers import BaseControllers
-from ..models.db_schemes import Project, DataChunk
-from ..stores.llm.LLMEnum import DocumentTypeEnum
+from models.db_schemes import Project, DataChunk
+from stores.llm.LLMEnum import DocumentTypeEnum
 from typing import List
 import json
 
