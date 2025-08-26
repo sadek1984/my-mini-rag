@@ -71,3 +71,15 @@ alembic revision --autogenerate -m "Initial Commit" # from minirag folder
 # Apply the migration to the database
 alembic upgrade head
 
+# gemini-1.5-flash-latest API
+"AIzaSyAND7ureFwWN614Fd6APcNyaBVOm3zkN3c"
+# OpenAi Key
+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
+
+# to browse data from docker
+docker compose exec fastapi ls -la /app/data/2024/Feb/
+# ______________________________________________________
+
+docker compose down
+
+docker compose up --build

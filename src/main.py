@@ -2,6 +2,7 @@
 from fastapi import FastAPI
 from routes.base import base_router  
 from routes.data import data_router
+from routes.data import debug_router
 from routes import nlp
 from helper.config import get_settings
 from stores.llm.LLMProviderFactory import LLMProviderFactory
@@ -10,6 +11,10 @@ from stores.llm.templates.template_parser import TemplateParser
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from utils.metrics import setup_metrics
+from controllers import NLPController
+
+import logging
+from pathlib import Path
 
 app = FastAPI()
 
@@ -64,3 +69,57 @@ app.on_event("shutdown")(shutdown_span)
 app.include_router(base_router)
 app.include_router(data_router)
 app.include_router(nlp.nlp_router)
+app.include_router(debug_router)
+
+def setup_logging():
+    """Setup logging configuration"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
+def main():
+    """Main function to run the RAG system"""
+    setup_logging()
+    
+    # Initialize configuration
+    config = get_settings()
+    
+    # Verify data folder exists
+    if not config.MAIN_FOLDER_PATH.exists():
+        print(f"Data folder not found: {config.MAIN_FOLDER_PATH}")
+        print("Please update MAIN_FOLDER_PATH in config.py")
+        return
+    
+    # Initialize RAG system
+    rag_system = NLPController(config)
+    
+    try:
+        # Process data and create vector store
+        rag_system.initialize_system()
+        
+        # Example queries
+        test_queries = [
+            "What is the reading for All pesticides as 'اسم المبيد Pesticide Name' in all positive readings?",
+            "List readings where النتيجة (result) is 'غير مطابق' for pepper",
+            "Show all non-compliant pesticide readings"
+        ]
+        
+        print("\n" + "="*50)
+        print("TESTING QUERIES")
+        print("="*50)
+        
+        for query in test_queries:
+            print(f"\nQuery: {query}")
+            print("-" * 50)
+            answer = rag_system.answer_query(query)
+            print(answer)
+            print("-" * 50)
+    
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    main()

@@ -9,6 +9,7 @@ services:
       - "8000:8000"
     volumes:
       - fastapi_data:/app/assets
+      - ./chroma_data:/app/chroma_db:rw
     networks:
       - backend
     restart: always

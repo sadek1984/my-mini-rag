@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     INPUT_DAFAULT_MAX_CHARACTERS: int = None
     GENERATION_DAFAULT_MAX_TOKENS: int = None
     GENERATION_DAFAULT_TEMPERATURE: float = None
+    GEMINI_API_KEY: str = None
 
     VECTOR_DB_BACKEND_LITERAL: List[str] = None
     VECTOR_DB_BACKEND: str
@@ -42,6 +43,18 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str
     POSTGRES_PORT: int
     POSTGRES_MAIN_DATABASE: str
+
+    sample_code: str
+    sample_name: str
+    pesticide_name: str
+    limits: str
+    device_reading: str
+    result: str
+    source_file: str 
+    row_index: int
+
+    MAIN_FOLDER_PATH: str
+    MONTHS_IN_ORDER: List[str]
 
 
     model_config = SettingsConfigDict(env_file=".env")

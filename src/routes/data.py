@@ -20,6 +20,10 @@ data_router = APIRouter(
     prefix='/api/v1/data',
     tags=['api_v1', 'data'],
 )
+debug_router = APIRouter(
+    prefix='/api/v1/debug',
+    tags=['debug'],
+)
 
 @data_router.post('/upload/{project_id}')  # ✅ Fixed Path
 async def upload_data(request: Request, project_id: int, file: UploadFile = File(...),  
@@ -146,6 +150,8 @@ async def process_endpoint(request:Request, project_id: int, process_request: Pr
     chunk_model = await ChunkModel.create_instance(
             db_client=request.app.db_client
         )  
+    
+    
     # if do_reset == 1:
     #     _ = await chunk_model.delete_chunks_by_project_id(
     #         project_id=project.id
@@ -182,6 +188,7 @@ async def process_endpoint(request:Request, project_id: int, process_request: Pr
         chunk_size=chunk_size,
         overlap_size=overlap_size
         )
+        print(f"DEBUG: About to save {len(file_chunks)} chunks for project ID: {project_id}")
 
         # ADD MORE DEBUGGING HERE - AFTER splitting into chunks
         print(f"Number of chunks created: {len(file_chunks) if file_chunks else 0}")
@@ -219,3 +226,112 @@ async def process_endpoint(request:Request, project_id: int, process_request: Pr
             "processed_files": no_files
         } 
     ) 
+
+
+
+# Add this to your FastAPI router
+
+@debug_router.get('/excel-processing/{project_id}/{file_id}')  # Fixed route name
+async def debug_excel_processing(request: Request, project_id: int, file_id: str):
+    """Debug Excel processing endpoint with correct route"""
+    try:
+        from controllers.ProcessControllers import ProcessControllers
+        
+        process_controller = ProcessControllers(project_id=str(project_id))
+        
+        # Debug Excel structure
+        file_path = os.path.join(process_controller.project_path, file_id)
+        excel_debug = process_controller.excel_processor.debug_excel_structure(file_path)
+        
+        # Debug content processing
+        content_debug = process_controller.debug_processed_content(file_id)
+        
+        return JSONResponse(content={
+            "file_id": file_id,
+            "excel_structure": excel_debug,
+            "content_processing": content_debug,
+            "status": "success"
+        })
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "file_id": file_id}
+        )
+
+
+# Also add a quick test endpoint
+@data_router.get('/test-search/{project_id}')
+async def test_search_functionality(
+    request: Request, 
+    project_id: int,
+    query: str = "pepper non-compliant"
+):
+    """Test search functionality with debug information"""
+    
+    try:
+        from controllers.NLPController import NLPController
+        
+        # Get project
+        project_model = await ProjectModel.create_instance(db_client=request.app.db_client)
+        project = await project_model.get_project_or_create_one(project_id=project_id)
+        
+        # Create NLP controller (adjust based on your setup)
+        nlp_controller = NLPController(
+            vectordb_client=request.app.vectordb_client,
+            generation_client=getattr(request.app, 'generation_client', None),
+            embedding_client=getattr(request.app, 'embedding_client', None),
+            template_parser=getattr(request.app, 'template_parser', None)
+        )
+        
+        # Test different search strategies
+        search_results = {}
+        
+        # Test 1: Direct query
+        direct_results = await nlp_controller.search_vector_db_collection(project, query, limit=10)
+        search_results["direct_query"] = {
+            "query": query,
+            "results_count": len(direct_results) if direct_results else 0,
+            "sample_results": [
+                {
+                    "text_preview": getattr(doc, 'text', str(doc))[:100] + "...",
+                    "metadata": getattr(doc, 'metadata', {})
+                }
+                for doc in (direct_results[:3] if direct_results else [])
+            ]
+        }
+        
+        # Test 2: Search with individual terms
+        search_terms = ["pepper", "فلفل", "non-compliant", "غير مطابق", "pesticide", "مبيد"]
+        for term in search_terms:
+            term_results = await nlp_controller.search_vector_db_collection(project, term, limit=5)
+            search_results[f"term_{term}"] = {
+                "results_count": len(term_results) if term_results else 0,
+                "sample_results": [
+                    {
+                        "text_preview": getattr(doc, 'text', str(doc))[:100] + "...",
+                        "metadata": getattr(doc, 'metadata', {})
+                    }
+                    for doc in (term_results[:2] if term_results else [])
+                ]
+            }
+        
+        # Test 3: Intent analysis
+        intent_info = nlp_controller.analyze_query_intent(query)
+        
+        # Test 4: Collection info
+        collection_info = await nlp_controller.get_vector_db_collection_info(project)
+        
+        return JSONResponse(content={
+            "query": query,
+            "intent_analysis": intent_info,
+            "collection_info": collection_info,
+            "search_results": search_results
+        })
+        
+    except Exception as e:
+        logger.error(f"Test search failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
