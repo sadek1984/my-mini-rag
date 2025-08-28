@@ -15,9 +15,9 @@ POSTGRES_MAIN_DATABASE="minirag"
 GENERATION_BACKEND = "OPENAI"
 EMBEDDING_BACKEND = "COHERE"
 
-OPENAI_API_KEY="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"
+OPENAI_API_KEY=""
 OPENAI_API_URL="http://localhost:11434/v1"  
-COHERE_API_KEY="RzfaLP5pVvnZ0mTczRqar2F3w8mk06OyTBqz7NCp"
+COHERE_API_KEY=""
 
 GENERATION_MODEL_ID_LITERAL = ["command", "command-light", "command-nightly"]
 GENERATION_MODEL_ID="gemini-1.5-flash-latest" 
