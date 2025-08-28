@@ -368,7 +368,7 @@ async def index_local_data(request: Request, project_id: int, index_request: Loc
 
 @nlp_router.post("/local/answer/{project_id}")
 async def local_answer_endpoint(request: Request, project_id: int, answer_request: LocalAnswerRequest):
-    """Answer queries using locally indexed data"""
+    """Answer queries using locally indexed data - Enhanced with debugging"""
     try:
         gemini_api_key = os.getenv("GEMINI_API_KEY")
         if not gemini_api_key:
@@ -379,6 +379,13 @@ async def local_answer_endpoint(request: Request, project_id: int, answer_reques
                     "message": "Please set GEMINI_API_KEY environment variable"
                 }
             )
+        
+        # Log the incoming request
+        print(f"=== LOCAL ANSWER REQUEST ===")
+        print(f"Project ID: {project_id}")
+        print(f"Query: {answer_request.query}")
+        print(f"N Results: {answer_request.n_results}")
+        print("=" * 30)
         
         # Initialize enhanced controller
         enhanced_controller = EnhancedNLPController(
@@ -396,12 +403,24 @@ async def local_answer_endpoint(request: Request, project_id: int, answer_reques
             n_results=answer_request.n_results
         )
         
+        # Log the result
+        print(f"=== LOCAL ANSWER RESULT ===")
+        print(f"Success: {result.get('success', False)}")
+        if result.get('success'):
+            print(f"Answer length: {len(result.get('answer', ''))}")
+            print(f"Retrieved docs: {result.get('retrieved_docs_count', 0)}")
+            print(f"Debug info: {result.get('debug_info', {})}")
+        else:
+            print(f"Error: {result.get('error', 'Unknown error')}")
+        print("=" * 30)
+        
         if not result.get("success", False):
             return JSONResponse(
                 status_code=400,
                 content={
                     "signal": "LOCAL_ANSWER_ERROR",
-                    "error": result.get("error", "Unknown error occurred")
+                    "error": result.get("error", "Unknown error occurred"),
+                    "debug_info": result.get("debug_info", {})
                 }
             )
         
@@ -412,7 +431,8 @@ async def local_answer_endpoint(request: Request, project_id: int, answer_reques
                 "full_prompt": result.get("full_prompt", ""),
                 "retrieved_docs_count": result.get("retrieved_docs_count", 0),
                 "collection_total": result.get("collection_total", 0),
-                "project_id": project_id
+                "project_id": project_id,
+                "debug_info": result.get("debug_info", {})
             }
         )
         
@@ -423,26 +443,178 @@ async def local_answer_endpoint(request: Request, project_id: int, answer_reques
             status_code=500,
             content={
                 "signal": "LOCAL_ANSWER_ERROR",
-                "error": str(e)
+                "error": str(e),
+                "traceback": traceback.format_exc()
             }
         )
-    
-
 
 # Add this debug endpoint to check collection status
-@nlp_router.get("/local/debug/{project_id}")
-async def debug_collection(request: Request, project_id: int):
-    enhanced_controller = EnhancedNLPController(
-        vectordb_client=request.app.vectordb_client,
-        generation_client=request.app.generation_client,
-        embedding_client=request.app.embedding_client,
-        template_parser=request.app.template_parser,
-        gemini_api_key=os.getenv("GEMINI_API_KEY")
-    )
-    
-    collection_name = f"local_project_{project_id}"
+@nlp_router.post("/local/full-debug/{project_id}")
+async def full_debug_analysis(request: Request, project_id: int, debug_request: LocalAnswerRequest):
+    """Comprehensive debug analysis to compare with Colab"""
     try:
-        collection = enhanced_controller.chroma_client.get_collection(collection_name)
-        return {"collection_exists": True, "count": collection.count()}
-    except:
-        return {"collection_exists": False, "available": [c.name for c in enhanced_controller.chroma_client.list_collections()]}
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
+            return JSONResponse(status_code=400, content={"error": "GEMINI_API_KEY missing"})
+        
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
+        collection_name = f"local_project_{project_id}"
+        
+        # Get collection
+        try:
+            collection = enhanced_controller.chroma_client.get_collection(
+                name=collection_name,
+                embedding_function=enhanced_controller.embed_fn
+            )
+        except Exception as e:
+            return JSONResponse(status_code=404, content={"error": f"Collection not found: {e}"})
+        
+        # Set to query mode
+        enhanced_controller.embed_fn.document_mode = False
+        
+        # Perform the same query
+        result = collection.query(
+            query_texts=[debug_request.query],
+            n_results=min(debug_request.n_results, collection.count())
+        )
+        
+        # Analyze retrieved documents
+        context_docs = result['documents'][0] if result['documents'] else []
+        
+        analysis = {
+            "collection_info": {
+                "name": collection_name,
+                "total_docs": collection.count(),
+                "query": debug_request.query,
+                "n_results_requested": debug_request.n_results,
+                "docs_retrieved": len(context_docs)
+            },
+            "document_analysis": [],
+            "content_analysis": {
+                "total_content_length": 0,
+                "contains_pesticide_terms": False,
+                "contains_pepper_terms": False,
+                "contains_result_terms": False,
+                "sample_content": ""
+            }
+        }
+        
+        # Analyze each retrieved document
+        for i, doc in enumerate(context_docs[:3]):  # First 3 docs
+            doc_analysis = {
+                "doc_index": i,
+                "content_length": len(doc),
+                "content_preview": doc[:300],
+                "contains_terms": {
+                    "pesticide": "pesticide" in doc.lower() or "مبيد" in doc,
+                    "pepper": "pepper" in doc.lower() or "فلفل" in doc,
+                    "result": "result" in doc.lower() or "نتيجة" in doc,
+                    "non_compliant": "غير مطابق" in doc,
+                    "compliant": "مطابق" in doc
+                },
+                "line_count": doc.count('\n'),
+                "word_count": len(doc.split())
+            }
+            analysis["document_analysis"].append(doc_analysis)
+        
+        # Overall content analysis
+        combined_content = " ".join(context_docs)
+        analysis["content_analysis"] = {
+            "total_content_length": len(combined_content),
+            "contains_pesticide_terms": "pesticide" in combined_content.lower() or "مبيد" in combined_content,
+            "contains_pepper_terms": "pepper" in combined_content.lower() or "فلفل" in combined_content,
+            "contains_result_terms": "result" in combined_content.lower() or "نتيجة" in combined_content,
+            "contains_non_compliant": "غير مطابق" in combined_content,
+            "sample_content": combined_content[:500]
+        }
+        
+        # Now try to generate an answer and see what happens
+        try:
+            passages = context_docs
+            combined_passage = " ".join(passages)
+            passage_oneline = combined_passage.replace("\n", " ")
+            query_oneline = debug_request.query.replace("\n", " ")
+            
+            prompt = f"""You are a helpful assistant summarizing pesticide readings.
+List readings where النتيجة (result) is 'غير مطابق' for pepper in a structured format.
+
+QUESTION: {query_oneline}
+PASSAGE: {passage_oneline}
+
+⚠️ Important:
+- Do NOT summarize, list every individual reading.
+- Separate values clearly structured.
+- If there are multiple values, provide all of them.
+
+Example output:
+- كود العينة sample code, اسم العينة Sample Name, اسم المبيد Pesticide Name, الحدود Limits, قراءة الجهاز Reading of device, النتيجة result"""
+            
+            # Generate answer
+            answer = enhanced_controller.generation_model.generate_content(prompt)
+            
+            analysis["generation_analysis"] = {
+                "prompt_length": len(prompt),
+                "answer_length": len(answer.text),
+                "answer_preview": answer.text[:500],
+                "full_answer": answer.text,
+                "prompt_preview": prompt[:500]
+            }
+            
+        except Exception as e:
+            analysis["generation_analysis"] = {
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+        
+        return JSONResponse(content=analysis)
+        
+    except Exception as e:
+        import traceback
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "traceback": traceback.format_exc()}
+        )
+
+
+# Also add a simple test endpoint to check raw ChromaDB data
+@nlp_router.get("/local/raw-data/{project_id}")
+async def get_raw_data_sample(request: Request, project_id: int):
+    """Get raw sample data from ChromaDB to see actual content"""
+    try:
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
+        collection_name = f"local_project_{project_id}"
+        
+        collection = enhanced_controller.chroma_client.get_collection(
+            name=collection_name,
+            embedding_function=enhanced_controller.embed_fn
+        )
+        
+        # Get first few documents without querying
+        raw_data = collection.get(limit=5)
+        
+        sample_data = {
+            "collection_count": collection.count(),
+            "sample_documents": []
+        }
+        
+        for i, (doc, metadata) in enumerate(zip(
+            raw_data.get("documents", []),
+            raw_data.get("metadatas", [])
+        )):
+            sample_data["sample_documents"].append({
+                "index": i,
+                "metadata": metadata,
+                "content_length": len(doc),
+                "content_preview": doc[:1000],  # First 1000 chars
+                "contains_key_terms": {
+                    "pepper": "pepper" in doc.lower() or "فلفل" in doc,
+                    "pesticide": "pesticide" in doc.lower() or "مبيد" in doc,
+                    "result": "result" in doc.lower() or "نتيجة" in doc
+                }
+            })
+        
+        return JSONResponse(content=sample_data)
+        
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})

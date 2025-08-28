@@ -15,6 +15,10 @@ from .BaseControllers import BaseControllers
 from models.db_schemes import Project, DataChunk
 from stores.llm.LLMEnum import DocumentTypeEnum
 
+import re
+from bidi.algorithm import get_display
+import arabic_reshaper
+
 # استيراد الـ Parser المتخصص الجديد لتقارير المبيدات
 from stores.llm.templates.pesticide_templates import PesticideTemplateParser
 
@@ -435,12 +439,23 @@ class EnhancedNLPController:
             self.generation_model = None
         
         self.logger = logging.getLogger(__name__)
-    
+
+    ############### NEW METHODS FOR Arabic text direction ###############
+
+    def fix_arabic_text_direction(self, text):
+        """Simple Arabic text preservation without complex reshaping"""
+        if not isinstance(text, str):
+            return text
+        
+        # Just return the text as-is for now - no reshaping
+        # The libraries are causing text to disappear
+        return text
+
     def process_local_excel_files(self, data_folder_path: str, months: List[str] = None) -> tuple:
         """Process local Excel files from month folders"""
         if months is None:
-            months = ["Feb", "March", "April", "May", "June", 
-                     "July", "Aug", "Sep", "Oct", "Nov", "Dec"]
+            months = ["Feb", "March", "April", "May", "June",
+                    "July", "Aug", "Sep", "Oct", "Nov", "Dec"]
         
         documents = []
         metadata_list = []
@@ -460,24 +475,20 @@ class EnhancedNLPController:
                 
             self.logger.info(f"Processing month: {month_folder}")
             
-            # Process each Excel file in month folder
             for file_path in month_path.glob("*.xlsx"):
                 try:
-                    df = pd.read_excel(file_path, skiprows=7)
+                    # Go back to simple approach - just match Colab exactly
+                    df = pd.read_excel(file_path, skiprows=0)
                     
                     if df.empty:
                         self.logger.warning(f"Empty file skipped: {file_path.name}")
                         continue
                     
-                    # Convert entire DataFrame to string (COLAB approach)
+                    # Simple conversion without Arabic processing
                     document_text = df.to_string(index=False)
+                    
                     documents.append(document_text)
-
-                    # 2. FIX: Convert the 'columns' list to a string
-                    column_list = df.columns.tolist()
-                    columns_str = ", ".join(map(str, column_list)) # Convert list to a string
-
-
+                    
                     metadata_list.append({
                         "source_file": file_path.name,
                         "month": month_folder,
@@ -495,7 +506,10 @@ class EnhancedNLPController:
         
         self.logger.info(f"Total local documents processed: {len(documents)}")
         return documents, metadata_list
-    
+        print(documents[0][:20])  # Print first 5 chars of first document for verification
+
+
+
     def create_local_collection(self, project_id: int, documents: List[str], 
                                metadata_list: List[Dict], do_reset: bool = False):
         """Create ChromaDB collection for local data"""
@@ -548,7 +562,8 @@ class EnhancedNLPController:
                 "success": False,
                 "error": "Gemini API key not configured for local data processing"
             }
-          # Validate n_results parameter
+        
+        # Validate n_results parameter
         if n_results <= 0:
             n_results = 10  # Default fallback
             
@@ -564,23 +579,28 @@ class EnhancedNLPController:
                 "success": False,
                 "error": f"Local collection not found: {collection_name}. Please index local data first."
             }
+        
         # Check if collection has any documents
         count = collection.count()
         if count == 0:
             return {
-                "signal": "LOCAL_ANSWER_ERROR",
+                "success": False,
                 "error": "No documents found in collection. Please index data first."
             }
+        
         # Ensure n_results doesn't exceed available documents
         n_results = min(n_results, count)
+        
         # Set to query mode
         self.embed_fn.document_mode = False
         
         try:
-            # Query vector store
+            # FIX 1: Use the actual query parameter instead of hardcoded query
+            self.logger.info(f"Querying with: {query}")
+            
             result = collection.query(
-                query_texts=[query],
-                n_results=min(n_results, collection.count())
+                query_texts=[query],  # Use the actual query parameter
+                n_results=n_results
             )
             
             if not result["documents"] or not result["documents"][0]:
@@ -589,13 +609,16 @@ class EnhancedNLPController:
                     "error": "No relevant documents found in local data."
                 }
             
-                
             # Prepare context from retrieved documents
             context_docs = result['documents'][0]
             context = "\n\n".join([f"Document {i+1}:\n{doc}" for i, doc in enumerate(context_docs)])
             
+            # Log retrieved documents for debugging
+            self.logger.info(f"Retrieved {len(context_docs)} documents")
+            if context_docs:
+                self.logger.info(f"First document preview: {context_docs[0][:200]}...")
             
-            # Combine all retrieved documents (COLAB style)
+            # Combine all retrieved documents (EXACT COLAB STYLE)
             passages = context_docs
             combined_passage = " ".join(passages)
             
@@ -603,21 +626,41 @@ class EnhancedNLPController:
             passage_oneline = combined_passage.replace("\n", " ")
             query_oneline = query.replace("\n", " ")
             
-            # Create prompt (EXACT COLAB STYLE for pesticide data)
-            prompt = f"""You are a helpful assistant summarizing pesticide readings.
-List readings where النتيجة (result) is 'غير مطابق' for pepper in a structured format.
+            # Create debug info before generation
+            debug_info = {
+                "query_used": query,
+                "docs_found": len(context_docs),
+                "first_doc_preview": context_docs[0][:300] if context_docs else "No docs",
+                "combined_passage_length": len(combined_passage),
+                "contains_pepper_data": "pepper" in combined_passage.lower() or "فلفل" in combined_passage,
+                "contains_pesticide_data": "pesticide" in combined_passage.lower() or "مبيد" in combined_passage,
+                "contains_result_data": "result" in combined_passage.lower() or "نتيجة" in combined_passage,
+                "contains_nan_values": "NaN" in combined_passage,
+                "contains_sample_codes": "P45-" in combined_passage
+            }
+            
+            # Clean up for prompt
+            passage_oneline = combined_passage.replace("\n", " ")
+            query_oneline = query.replace("\n", " ")
+            
+            # FIX 2: Create prompt that handles messy data better
 
-QUESTION: {query_oneline}
-PASSAGE: {passage_oneline}
+            prompt = f"""You are analyzing pesticide test data from Excel files.
 
-⚠️ Important:
-- Do NOT summarize, list every individual reading.
-- Separate values clearly structured.
-- If there are multiple values, provide all of them.
+            TASK: Extract all pesticide readings and test results from the data.
 
-Example output:
-- كود العينة sample code, اسم العينة Sample Name, اسم المبيد Pesticide Name, الحدود Limits, قراءة الجهاز Reading of device, النتيجة result
-"""
+            QUESTION: {query_oneline}
+            DATA: {passage_oneline}
+
+            INSTRUCTIONS:
+            - List each reading with: Sample Code, Sample Name, Pesticide Name, Reading Value, Limit, Result
+            - Focus on actual data, ignore NaN and "لا يوجد" entries
+            - Be precise and complete"""
+
+            # FIX 3: Add more logging before generation    
+            # Log the prompt for debugging
+            self.logger.info(f"Generated prompt length: {len(prompt)}")
+            self.logger.info(f"Prompt preview: {prompt[:300]}...")
             
             # Generate answer
             answer = self.generation_model.generate_content(prompt)
@@ -627,11 +670,19 @@ Example output:
                 "answer": answer.text,
                 "full_prompt": prompt,
                 "retrieved_docs_count": len(passages),
-                "collection_total": collection.count()
+                "collection_total": collection.count(),
+                "debug_info": {
+                    **debug_info,
+                    "answer_length": len(answer.text),
+                    "prompt_length": len(prompt),
+                    "full_answer": answer.text  # Include full answer for debugging
+                }
             }
             
         except Exception as e:
             self.logger.error(f"Error processing local query: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 "success": False,
                 "error": f"Error generating response: {str(e)}"

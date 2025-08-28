@@ -80,6 +80,6 @@ sk-proj-SJMkjuL9CO-Qg5iOrOsLoy6f84nZRjpzfrwEYix9XkeOdmiZhaHIneOONMA3BZ2obXRCV2G-
 docker compose exec fastapi ls -la /app/data/2024/Feb/
 # ______________________________________________________
 
-docker compose down
+docker compose down 
 
 docker compose up --build
