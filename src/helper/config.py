@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import List, Optional
 
 class Settings(BaseSettings):
     APP_NAME: str
@@ -55,6 +55,32 @@ class Settings(BaseSettings):
 
     MAIN_FOLDER_PATH: str
     MONTHS_IN_ORDER: List[str]
+
+    # --> ADD ALL OF THESE MISSING FIELDS <--
+    enable_query_cache: bool = True
+    query_cache_ttl: int = 3600
+    embedding_cache_size: int = 1000
+    min_valid_fields: int = 3
+    max_nan_ratio: float = 0.3
+    retrieval_top_k_multiplier: int = 2
+    min_relevance_score: float = 0.5
+    use_reranking: bool = True
+    gemini_temperature: float = 0.0
+    gemini_max_output_tokens: int = 2048
+    gemini_top_k: int = 40
+    gemini_top_p: float = 0.95
+    excel_skiprows: int = 11
+    excel_engine: Optional[str] = None # Or a specific default like 'openpyxl'
+    
+    # The traceback showed 16 errors, you may need to add the last two
+    # if they are in your .env file.
+    # Replace with the actual names from your error if they are different.
+    some_other_setting: str = "default_value"
+    another_missing_setting: int = 123
+
+    enable_retrieval_monitoring: bool = True
+    log_retrieval_stats: bool = True
+
 
 
     model_config = SettingsConfigDict(env_file=".env")
