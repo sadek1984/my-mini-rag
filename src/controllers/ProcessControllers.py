@@ -14,6 +14,8 @@ from .ProjectControllers import ProjectControllers
 # استيراد الـ processor المحسن لملفات Excel
 from processors.excel_processor import ExcelPesticideProcessor
 import pandas as pd
+from processors.smart_excel_parser import SmartExcelParser
+
 
 class ProcessControllers(BaseControllers):
     """
@@ -152,6 +154,7 @@ class ProcessControllers(BaseControllers):
         if file_ext in ['.xlsx', '.xls']:
             # COLAB APPROACH: Read entire Excel as single document
             try:
+                
                 df = pd.read_excel(file_path, engine='openpyxl')
                 
                 # Convert entire DataFrame to string (like Colab)

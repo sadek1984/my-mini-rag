@@ -22,6 +22,9 @@ import arabic_reshaper
 # استيراد الـ Parser المتخصص الجديد لتقارير المبيدات
 from stores.llm.templates.pesticide_templates import PesticideTemplateParser
 
+from utils.data_cleaning import clean_pesticide_data, load_and_prepare_excel, format_rows_as_text
+
+
 class NLPController(BaseControllers):
     """
     Enhanced NLP Controller that integrates pesticide-specific query analysis
@@ -476,34 +479,44 @@ class EnhancedNLPController:
             self.logger.info(f"Processing month: {month_folder}")
             
             for file_path in month_path.glob("*.xlsx"):
+            
                 try:
                     # Go back to simple approach - just match Colab exactly
-                    df = pd.read_excel(file_path, skiprows=0)
+                    # df = pd.read_excel(file_path, skiprows=10)
                     
-                    if df.empty:
-                        self.logger.warning(f"Empty file skipped: {file_path.name}")
+                    # 1. Use the robust function to load the Excel file into a DataFrame
+                    df = load_and_prepare_excel(str(file_path))
+                    
+                    if df is None or df.empty:
+                        self.logger.warning(f"File skipped, could not find valid headers or data: {file_path.name}")
                         continue
                     
-                    # Simple conversion without Arabic processing
-                    document_text = df.to_string(index=False)
+                    # 2. Clean the DataFrame to remove rows with no pesticide data
+                    cleaned_df = clean_pesticide_data(df)
                     
-                    documents.append(document_text)
+                    if cleaned_df.empty:
+                        self.logger.warning(f"File skipped after cleaning (no valid pesticide rows): {file_path.name}")
+                        continue
+
+                    # 3. NEW: Format each valid row into a descriptive sentence
+                    row_texts = format_rows_as_text(cleaned_df)
                     
-                    metadata_list.append({
-                        "source_file": file_path.name,
-                        "month": month_folder,
-                        "file_path": str(file_path),
-                        "total_rows": len(df),
-                        "doc_id": len(documents) - 1,
-                        "data_type": "local_excel",
-                        "columns": ", ".join(map(str, df.columns.tolist()))
-                    })
+                    # Add each sentence as a separate document to be indexed
+                    for text in row_texts:
+                        documents.append(text)
+                        metadata_list.append({
+                            "source_file": file_path.name,
+                            "month": month_folder,
+                            "file_path": str(file_path),
+                            "data_type": "local_excel_row",
+                        })
                     
-                    self.logger.info(f"Processed: {file_path.name} ({len(df)} rows)")
-                    
+                    self.logger.info(f"Processed: {file_path.name}, created {len(row_texts)} documents from rows.")
+
                 except Exception as e:
-                    self.logger.error(f"Error processing {file_path.name}: {e}")
-        
+                    self.logger.error(f"Critical error processing {file_path.name}: {e}")
+
+
         self.logger.info(f"Total local documents processed: {len(documents)}")
         return documents, metadata_list
         print(documents[0][:20])  # Print first 5 chars of first document for verification
