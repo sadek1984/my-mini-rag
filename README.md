@@ -78,6 +78,6 @@ alembic upgrade head
 docker compose exec fastapi ls -la /app/data/2024/Feb/
 # ______________________________________________________
 
-docker compose down -v
+docker compose down 
 
 docker compose up --build

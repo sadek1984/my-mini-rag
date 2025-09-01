@@ -10,6 +10,7 @@ import google.generativeai as genai
 from google.api_core import retry
 import logging
 from tqdm import tqdm
+import io
 
 from .BaseControllers import BaseControllers
 from models.db_schemes import Project, DataChunk
@@ -17,12 +18,15 @@ from stores.llm.LLMEnum import DocumentTypeEnum
 
 import re
 from bidi.algorithm import get_display
-import arabic_reshaper
 
 # استيراد الـ Parser المتخصص الجديد لتقارير المبيدات
 from stores.llm.templates.pesticide_templates import PesticideTemplateParser
 
 from utils.data_cleaning import clean_pesticide_data, load_and_prepare_excel, format_rows_as_text
+
+from io import BytesIO # <-- Add this import
+from utils.response_parser import parse_llm_response_to_df # <-- Add this import
+
 
 
 class NLPController(BaseControllers):
@@ -443,6 +447,81 @@ class EnhancedNLPController:
         
         self.logger = logging.getLogger(__name__)
 
+        ###  function for excel reporting generation  ###
+
+    # async def answer_and_export_local_data(self, project_id: int, query: str, n_results: int = 100) -> BytesIO | None:
+    #         """
+    #         Answers a query using local ChromaDB data and returns the result as an Excel file in memory.
+    #         """
+    #         # First, get the standard text-based answer from the existing method
+    #         response_data = await self.answer_with_local_data(project_id, query, n_results)
+
+    #         if not response_data.get("success"):
+    #             self.logger.error("Failed to get a successful response from the LLM. Cannot generate Excel file.")
+    #             # In a real app, you might want to return an error message here instead of None.
+    #             return None
+
+    #         answer_text = response_data.get("answer")
+    #         if not answer_text:
+    #             self.logger.error("LLM response was empty. Cannot generate Excel file.")
+    #             return None
+                
+    #         # Use our new utility to parse the markdown table into a DataFrame
+    #         self.logger.info("Parsing LLM response into a DataFrame...")
+    #         df = parse_llm_response_to_df(answer_text)
+
+    #         if df is None:
+    #             self.logger.error("Failed to parse the LLM response into a structured table.")
+    #             return None
+
+    #         # Save the DataFrame to an in-memory Excel file
+    #         self.logger.info(f"Successfully created DataFrame with {len(df)} rows. Saving to Excel format.")
+    #         output_buffer = BytesIO()
+    #         df.to_excel(output_buffer, index=False, sheet_name="Query Results")
+    #         output_buffer.seek(0)  # Rewind the buffer to the beginning
+
+    #         return output_buffer
+
+
+    async def answer_and_export_local_data(self, project_id: int, query: str, n_results: int = 100) -> Optional[io.BytesIO]:
+        """
+        Answers a query using local ChromaDB data and returns the result as an Excel file in memory.
+        (Simplified version)
+        """
+        self.logger.info(f"Received export request for project {project_id} (simplified logic)")
+        # First, get the standard text-based answer from the existing method
+        response_data = await self.answer_with_local_data(project_id, query, n_results)
+
+        if not response_data.get("success"):
+            self.logger.error("Failed to get a successful response from the LLM. Cannot generate Excel file.")
+            return None
+
+        answer_text = response_data.get("answer")
+        if not answer_text:
+            self.logger.error("LLM response was empty. Cannot generate Excel file.")
+            return None
+            
+        # Use our robust utility to parse the markdown table into a DataFrame
+        self.logger.info("Parsing LLM response into a DataFrame...")
+        df = parse_llm_response_to_df(answer_text)
+
+        if df is None or df.empty:
+            self.logger.error("Failed to parse the LLM response into a structured table or the result was empty.")
+            return None
+
+        # Save the resulting DataFrame directly to an in-memory Excel file
+        self.logger.info(f"Successfully created DataFrame with {len(df)} rows. Saving to Excel format.")
+        output_buffer = io.BytesIO()
+        df.to_excel(output_buffer, index=False, sheet_name="Query Results")
+        output_buffer.seek(0)  # Rewind the buffer to the beginning
+
+        return output_buffer
+
+
+
+
+
+
     ############### NEW METHODS FOR Arabic text direction ###############
 
     def fix_arabic_text_direction(self, text):
@@ -457,7 +536,7 @@ class EnhancedNLPController:
     def process_local_excel_files(self, data_folder_path: str, months: List[str] = None) -> tuple:
         """Process local Excel files from month folders"""
         if months is None:
-            months = ["Feb", "March", "April", "May", "June",
+            months = ["Jan","Feb", "March", "April", "May", "June",
                     "July", "Aug", "Sep", "Oct", "Nov", "Dec"]
         
         documents = []
@@ -656,19 +735,28 @@ class EnhancedNLPController:
             passage_oneline = combined_passage.replace("\n", " ")
             query_oneline = query.replace("\n", " ")
             
-            # FIX 2: Create prompt that handles messy data better
 
-            prompt = f"""You are analyzing pesticide test data from Excel files.
+            prompt = f"""
+        **TASK:** Analyze the provided data to answer the user's question. You MUST format your entire response as a single, clean markdown table.
 
-            TASK: Extract all pesticide readings and test results from the data.
+        **RULES:**
+        1.  The table MUST have these exact, single-line headers: `Sample Code`, `Sample Name`, `Pesticide Name`, `Reading Value`, `Limit`, `Result`.
+        2.  Do NOT include any text, explanation, or summary before or after the table.
+        3.  Do NOT use multi-line headers.
+        4.  Each piece of data must be in its own cell.
 
-            QUESTION: {query_oneline}
-            DATA: {passage_oneline}
+        **EXAMPLE OUTPUT FORMAT:**
+        | Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result |
+        |---|---|---|---|---|---|
+        | P45-1234 | Tomato | PesticideA | 10 | 50 | Compliant |
+        | P45-5678 | Pepper | PesticideB | 75 | 20 | Non-Compliant |
 
-            INSTRUCTIONS:
-            - List each reading with: Sample Code, Sample Name, Pesticide Name, Reading Value, Limit, Result
-            - Focus on actual data, ignore NaN and "لا يوجد" entries
-            - Be precise and complete"""
+        ---
+        **USER QUESTION:** {query}
+        ---
+        **DATA:**
+        {context}
+        """
 
             # FIX 3: Add more logging before generation    
             # Log the prompt for debugging

@@ -11,8 +11,8 @@ from controllers.ProcessControllers import DirectPesticideController
 from pydantic import BaseModel
 from typing import Optional, List
 import os
-
-
+from fastapi.responses import StreamingResponse # <-- Add this import
+from routes.schemes.nlp import PostLocalQuery, PostLocalIndex, PostDocQuery, PostDocIndex
 
 
 import logging
@@ -618,3 +618,54 @@ async def get_raw_data_sample(request: Request, project_id: int):
         
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+    
+
+@nlp_router.post(
+    "/local/query/export/{project_id}",
+    summary="Query local data and get the result as an Excel file",
+    tags=["Local Data Processing"],
+    response_description="An Excel file containing the query results.",
+)
+async def query_local_data_export(project_id: int, data: PostLocalQuery):
+    """
+    Sends a query to the local data collection and returns a structured Excel file.
+    """
+    try:
+        # --- THIS IS THE FIX ---
+        # 1. Get the Gemini API Key, which is required by the controller.
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "GEMINI_API_KEY is not configured on the server."}
+            )
+            
+        # 2. Create an instance of the CORRECT controller for local data.
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
+        
+        # 3. Call the method on the created instance.
+        excel_buffer = await enhanced_controller.answer_and_export_local_data(
+            project_id=project_id,
+            query=data.query,
+            n_results=data.n_results
+        )
+        
+        if excel_buffer is None:
+            return JSONResponse(
+                status_code=400, 
+                content={"detail": "Could not generate Excel file. The model's response may not have been in a parsable table format."}
+            )
+        
+        headers = {
+            'Content-Disposition': 'attachment; filename="query_results.xlsx"'
+        }
+        
+        return StreamingResponse(
+            excel_buffer, 
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers=headers
+        )
+    except Exception as e:
+        logger.error(f"Error during Excel export: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"detail": f"An internal error occurred: {str(e)}"})
+
