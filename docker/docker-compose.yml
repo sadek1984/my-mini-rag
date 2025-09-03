@@ -1,5 +1,4 @@
 services:
-  # FastAPI Application
   fastapi:
     build:
       context: ..
@@ -14,8 +13,7 @@ services:
       - backend
     restart: always
     depends_on:
-      pgvector:
-        condition: service_healthy
+      - postgres  # Changed from pgvector to postgres
     env_file:
       - ./env/.env.app
 
@@ -35,9 +33,9 @@ services:
 
 
   # PostgreSQL (pgvector)
-  pgvector:
+  postgres:
     image: pgvector/pgvector:0.8.0-pg17
-    container_name: pgvector
+    container_name: postgres
     ports:
       - "5432:5432"
     volumes:
@@ -131,7 +129,7 @@ services:
     env_file:
       - ./env/.env.postgres-exporter
     depends_on:
-      - pgvector
+      - postgres  # Changed from pgvector to postgres
     networks:
       - backend
     restart: always

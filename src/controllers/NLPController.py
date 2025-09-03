@@ -3,6 +3,7 @@ import json
 from typing import List, Dict, Tuple, Optional, Any
 import os
 import pandas as pd
+import numpy as np
 from pathlib import Path
 import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
@@ -447,41 +448,6 @@ class EnhancedNLPController:
         
         self.logger = logging.getLogger(__name__)
 
-        ###  function for excel reporting generation  ###
-
-    # async def answer_and_export_local_data(self, project_id: int, query: str, n_results: int = 100) -> BytesIO | None:
-    #         """
-    #         Answers a query using local ChromaDB data and returns the result as an Excel file in memory.
-    #         """
-    #         # First, get the standard text-based answer from the existing method
-    #         response_data = await self.answer_with_local_data(project_id, query, n_results)
-
-    #         if not response_data.get("success"):
-    #             self.logger.error("Failed to get a successful response from the LLM. Cannot generate Excel file.")
-    #             # In a real app, you might want to return an error message here instead of None.
-    #             return None
-
-    #         answer_text = response_data.get("answer")
-    #         if not answer_text:
-    #             self.logger.error("LLM response was empty. Cannot generate Excel file.")
-    #             return None
-                
-    #         # Use our new utility to parse the markdown table into a DataFrame
-    #         self.logger.info("Parsing LLM response into a DataFrame...")
-    #         df = parse_llm_response_to_df(answer_text)
-
-    #         if df is None:
-    #             self.logger.error("Failed to parse the LLM response into a structured table.")
-    #             return None
-
-    #         # Save the DataFrame to an in-memory Excel file
-    #         self.logger.info(f"Successfully created DataFrame with {len(df)} rows. Saving to Excel format.")
-    #         output_buffer = BytesIO()
-    #         df.to_excel(output_buffer, index=False, sheet_name="Query Results")
-    #         output_buffer.seek(0)  # Rewind the buffer to the beginning
-
-    #         return output_buffer
-
 
     async def answer_and_export_local_data(self, project_id: int, query: str, n_results: int = 100) -> Optional[io.BytesIO]:
         """
@@ -508,6 +474,12 @@ class EnhancedNLPController:
         if df is None or df.empty:
             self.logger.error("Failed to parse the LLM response into a structured table or the result was empty.")
             return None
+        # --- NEW STEP: Apply calculations based on the query ---
+        df = self._apply_query_calculations(df, query)
+        if df.empty:
+            self.logger.warning("DataFrame is empty after applying calculations. No data to export.")
+            # Still return an empty file so the user knows the query yielded no results
+            pass
 
         # Save the resulting DataFrame directly to an in-memory Excel file
         self.logger.info(f"Successfully created DataFrame with {len(df)} rows. Saving to Excel format.")
@@ -646,7 +618,7 @@ class EnhancedNLPController:
         final_count = collection.count()
         self.logger.info(f"Local collection created: {final_count} documents indexed")
         return collection
-    
+
     async def answer_with_local_data(self, project_id: int, query: str, n_results: int = 100) -> Dict:
         """Answer query using local ChromaDB data"""
         if not self.chroma_client or not self.embed_fn or not self.generation_model:
@@ -687,11 +659,11 @@ class EnhancedNLPController:
         self.embed_fn.document_mode = False
         
         try:
-            # FIX 1: Use the actual query parameter instead of hardcoded query
+            # Use the actual query parameter
             self.logger.info(f"Querying with: {query}")
             
             result = collection.query(
-                query_texts=[query],  # Use the actual query parameter
+                query_texts=[query],
                 n_results=n_results
             )
             
@@ -710,13 +682,9 @@ class EnhancedNLPController:
             if context_docs:
                 self.logger.info(f"First document preview: {context_docs[0][:200]}...")
             
-            # Combine all retrieved documents (EXACT COLAB STYLE)
+            # Combine all retrieved documents
             passages = context_docs
             combined_passage = " ".join(passages)
-            
-            # Clean up for prompt
-            passage_oneline = combined_passage.replace("\n", " ")
-            query_oneline = query.replace("\n", " ")
             
             # Create debug info before generation
             debug_info = {
@@ -730,11 +698,6 @@ class EnhancedNLPController:
                 "contains_nan_values": "NaN" in combined_passage,
                 "contains_sample_codes": "P45-" in combined_passage
             }
-            
-            # Clean up for prompt
-            passage_oneline = combined_passage.replace("\n", " ")
-            query_oneline = query.replace("\n", " ")
-            
 
             prompt = f"""
         **TASK:** Analyze the provided data to answer the user's question. You MUST format your entire response as a single, clean markdown table.
@@ -758,25 +721,58 @@ class EnhancedNLPController:
         {context}
         """
 
-            # FIX 3: Add more logging before generation    
             # Log the prompt for debugging
             self.logger.info(f"Generated prompt length: {len(prompt)}")
             self.logger.info(f"Prompt preview: {prompt[:300]}...")
             
             # Generate answer
             answer = self.generation_model.generate_content(prompt)
+
+            # Parse the LLM response and apply calculations if needed
+            final_answer = answer.text  # Default to original answer
+
+            try:
+                # Parse the markdown table response into a DataFrame
+                df = parse_llm_response_to_df(answer.text)
+                
+                if df is not None and not df.empty:
+                    self.logger.info(f"Successfully parsed LLM response into DataFrame with {len(df)} rows")
+                    
+                    # Apply query calculations (filtering)
+                    df_filtered = self._apply_query_calculations(df, query)
+                    
+                    # Check if filtering was applied
+                    if len(df_filtered) != len(df):
+                        self.logger.info(f"Filtering applied: {len(df)} -> {len(df_filtered)} rows")
+                        
+                        if not df_filtered.empty:
+                            # Convert filtered DataFrame back to markdown table
+                            filtered_answer = df_filtered.to_markdown(index=False)
+                            final_answer = filtered_answer
+                        else:
+                            # All rows were filtered out
+                            final_answer = "No data matches the specified criteria."
+                    else:
+                        self.logger.info("No filtering was applied - using original LLM response")
+                else:
+                    self.logger.warning("Could not parse LLM response into DataFrame - using original response")
+                    
+            except Exception as e:
+                self.logger.error(f"Error applying calculations: {e}")
+                # Fall back to original answer if calculation fails
+                final_answer = answer.text
             
             return {
                 "success": True,
-                "answer": answer.text,
+                "answer": final_answer,
                 "full_prompt": prompt,
                 "retrieved_docs_count": len(passages),
                 "collection_total": collection.count(),
                 "debug_info": {
                     **debug_info,
-                    "answer_length": len(answer.text),
+                    "answer_length": len(final_answer),
                     "prompt_length": len(prompt),
-                    "full_answer": answer.text  # Include full answer for debugging
+                    "full_answer": final_answer
                 }
             }
             
@@ -788,3 +784,214 @@ class EnhancedNLPController:
                 "success": False,
                 "error": f"Error generating response: {str(e)}"
             }
+        
+
+    ############### NEW METHODS FOR DataFrame calculations ###############
+         ############### e.g. reading > (X * limit) ###############
+    
+
+    def find_column_robust(self, df: pd.DataFrame, keywords: List[str]) -> str | None:
+        """
+        Robustly finds a column in a DataFrame by searching for keywords.
+        Handles variations like newlines, extra spaces, and mixed languages.
+        """
+        for col in df.columns:
+            # Normalize the column name to make matching more reliable
+            normalized_col = re.sub(r'\s+', ' ', str(col)).strip().lower()
+            for keyword in keywords:
+                if keyword.lower() in normalized_col:
+                    return col
+        return None
+
+    def analyze_pesticide_contamination_levels(self, df: pd.DataFrame, multiplier_threshold: float = 1.0) -> pd.DataFrame:
+        """
+        Analyzes pesticide contamination levels by comparing reading values with limits.
+        Filters for samples where reading > (multiplier_threshold * limit).
+        """
+        self.logger.error(f"DEBUG: Starting analyze_pesticide_contamination_levels with threshold {multiplier_threshold}")
+        
+        try:
+            self.logger.info(f"Analyzing contamination levels with threshold: {multiplier_threshold}x the limit")
+            self.logger.info(f"Input DataFrame shape: {df.shape}")
+            
+            # Find the required columns using robust search
+            self.logger.error(f"DEBUG: About to search for columns")
+            reading_col = self.find_column_robust(df, ['قراءة الجهاز', 'reading of device', 'reading value', 'قراءة'])
+            limit_col = self.find_column_robust(df, ['الحدود', 'limits', 'limit', 'حدود'])
+            pesticide_col = self.find_column_robust(df, ['اسم المبيد', 'pesticide name', 'pesticide'])
+            sample_col = self.find_column_robust(df, ['كود العينة', 'sample code', 'code'])
+            
+            self.logger.error(f"DEBUG: Found columns - Reading: {reading_col}, Limit: {limit_col}")
+            self.logger.error(f"DEBUG: Additional columns - Pesticide: {pesticide_col}, Sample: {sample_col}")
+            
+            # Check if essential columns were found
+            if not reading_col or not limit_col:
+                self.logger.error("Cannot analyze contamination - missing essential columns (reading or limit)")
+                self.logger.error(f"Available columns: {df.columns.tolist()}")
+                return pd.DataFrame()
+            
+            # Create a working copy
+            self.logger.error(f"DEBUG: Creating working copy of DataFrame")
+            df_work = df.copy()
+            
+            # Log sample values before processing
+            self.logger.error(f"DEBUG: Logging sample data before processing")
+            for i in range(min(3, len(df_work))):
+                row = df_work.iloc[i]
+                reading_val = row.get(reading_col, 'N/A')
+                limit_val = row.get(limit_col, 'N/A')
+                self.logger.error(f"  Row {i}: Reading={reading_val}, Limit={limit_val}")
+            
+            # Clean and convert data
+            self.logger.error(f"DEBUG: Starting data cleaning")
+            # Handle Arabic "لا يوجد" (no data) values
+            df_work[limit_col] = df_work[limit_col].replace(['لا يوجد', 'N/A', ''], pd.NA)
+            df_work[reading_col] = df_work[reading_col].replace(['لا يوجد', 'N/A', ''], pd.NA)
+            
+            # Convert to numeric, handling errors gracefully
+            self.logger.error(f"DEBUG: Converting to numeric")
+            df_work[reading_col] = pd.to_numeric(df_work[reading_col], errors='coerce')
+            df_work[limit_col] = pd.to_numeric(df_work[limit_col], errors='coerce')
+            
+            # Log conversion results
+            self.logger.error(f"DEBUG: Logging data after numeric conversion")
+            for i in range(min(3, len(df_work))):
+                row = df_work.iloc[i]
+                reading_val = row.get(reading_col, 'N/A')
+                limit_val = row.get(limit_col, 'N/A')
+                self.logger.error(f"  Row {i} after conversion: Reading={reading_val}, Limit={limit_val}")
+            
+            # Remove rows with missing or invalid data
+            self.logger.error(f"DEBUG: About to drop NaN values")
+            initial_count = len(df_work)
+            df_work = df_work.dropna(subset=[reading_col, limit_col])
+            final_count = len(df_work)
+            
+            self.logger.error(f"DEBUG: Data cleaning: {initial_count} -> {final_count} rows")
+            
+            if df_work.empty:
+                self.logger.error("DEBUG: No valid data remaining after cleaning")
+                return pd.DataFrame()
+            
+            # Calculate the contamination ratio for each sample
+            self.logger.error(f"DEBUG: Calculating contamination ratios")
+            df_work['contamination_ratio'] = df_work[reading_col] / df_work[limit_col]
+            
+            # Apply the filter: reading > (multiplier_threshold * limit)
+            self.logger.error(f"DEBUG: About to apply contamination filter")
+            contaminated_samples = df_work[df_work[reading_col] > (multiplier_threshold * df_work[limit_col])]
+            
+            self.logger.error(f"DEBUG: Contamination analysis results:")
+            self.logger.error(f"  Samples analyzed: {len(df_work)}")
+            self.logger.error(f"  Samples exceeding {multiplier_threshold}x limit: {len(contaminated_samples)}")
+            
+            # Log some examples
+            if not contaminated_samples.empty:
+                self.logger.error(f"DEBUG: Examples of contaminated samples:")
+                for i, (idx, row) in enumerate(contaminated_samples.head(3).iterrows()):
+                    reading_val = row[reading_col]
+                    limit_val = row[limit_col]
+                    ratio = row['contamination_ratio']
+                    sample_name = row.get(sample_col, f'Row {idx}') if sample_col else f'Row {idx}'
+                    pesticide_name = row.get(pesticide_col, 'Unknown') if pesticide_col else 'Unknown'
+                    
+                    self.logger.error(f"  {sample_name}: {pesticide_name} - Reading: {reading_val}, Limit: {limit_val}, Ratio: {ratio:.1f}x")
+            else:
+                self.logger.error(f"DEBUG: No samples found exceeding the threshold")
+            
+            # Remove the temporary calculation column before returning
+            self.logger.error(f"DEBUG: Removing temporary calculation column")
+            contaminated_samples = contaminated_samples.drop('contamination_ratio', axis=1)
+            
+            self.logger.error(f"DEBUG: Returning filtered DataFrame with {len(contaminated_samples)} rows")
+            return contaminated_samples
+            
+        except Exception as e:
+            self.logger.error(f"DEBUG: Exception in analyze_pesticide_contamination_levels: {e}")
+            import traceback
+            self.logger.error(f"DEBUG: Full traceback: {traceback.format_exc()}")
+            return df
+
+    def get_contamination_summary(self, df: pd.DataFrame) -> Dict:
+        """
+        Provides a summary of contamination levels in the dataset.
+        
+        Args:
+            df: DataFrame containing pesticide test results
+        
+        Returns:
+            Dictionary with contamination statistics
+        """
+        # Find required columns
+        reading_col = self.find_column_robust(df, ['قراءة الجهاز', 'reading of device', 'reading value'])
+        limit_col = self.find_column_robust(df, ['الحدود', 'limits', 'limit'])
+        
+        if not reading_col or not limit_col:
+            return {"error": "Required columns not found"}
+        
+        # Clean and convert data
+        df_work = df.copy()
+        df_work[reading_col] = pd.to_numeric(df_work[reading_col], errors='coerce')
+        df_work[limit_col] = pd.to_numeric(df_work[limit_col], errors='coerce')
+        df_work = df_work.dropna(subset=[reading_col, limit_col])
+        
+        if df_work.empty:
+            return {"error": "No valid data for analysis"}
+        
+        # Calculate ratios
+        ratios = df_work[reading_col] / df_work[limit_col]
+        
+        # Generate summary statistics
+        summary = {
+            "total_samples": len(df_work),
+            "samples_above_limit": len(ratios[ratios > 1.0]),
+            "samples_above_2x_limit": len(ratios[ratios > 2.0]),
+            "samples_above_5x_limit": len(ratios[ratios > 5.0]),
+            "samples_above_10x_limit": len(ratios[ratios > 10.0]),
+            "max_contamination_ratio": float(ratios.max()),
+            "mean_contamination_ratio": float(ratios.mean()),
+            "median_contamination_ratio": float(ratios.median())
+        }
+        
+        return summary
+
+    def _apply_query_calculations(self, df: pd.DataFrame, query: str) -> pd.DataFrame:
+        """
+        Simplified contamination filtering to avoid tabulate issues
+        """
+        self.logger.error(f"DEBUG: Starting simplified filtering")
+        
+        # Extract multiplier from query
+        more_than_match = re.search(r'more than (\d+\.?\d*)\s*times the limit', query, re.IGNORECASE)
+        
+        if not more_than_match:
+            self.logger.info("No pattern found")
+            return df
+        
+        multiplier = float(more_than_match.group(1))
+        self.logger.error(f"DEBUG: Using multiplier: {multiplier}")
+        
+        try:
+            # Simple column finding
+            reading_col = 'Reading Value'
+            limit_col = 'Limit'
+            
+            # Convert to numeric
+            df_work = df.copy()
+            df_work[reading_col] = pd.to_numeric(df_work[reading_col], errors='coerce')
+            df_work[limit_col] = pd.to_numeric(df_work[limit_col], errors='coerce')
+            
+            # Apply filter
+            threshold = multiplier * df_work[limit_col]
+            filtered_df = df_work[df_work[reading_col] > threshold]
+            
+            self.logger.error(f"DEBUG: Filtered {len(df)} -> {len(filtered_df)} rows")
+            
+            return filtered_df
+            
+        except Exception as e:
+            self.logger.error(f"DEBUG: Error in simplified filtering: {e}")
+            return df
+        
+#######################################################################################
+
