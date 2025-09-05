@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from utils.metrics import setup_metrics
 from controllers import NLPController
+from routes.risk_assessment_routes import risk_router
 
 import logging
 from pathlib import Path
@@ -70,6 +71,8 @@ app.include_router(base_router)
 app.include_router(data_router)
 app.include_router(nlp.nlp_router)
 app.include_router(debug_router)
+app.include_router(risk_router, prefix="/api/v1")
+
 
 def setup_logging():
     """Setup logging configuration"""

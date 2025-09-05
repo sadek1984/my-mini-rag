@@ -13,6 +13,10 @@ from typing import Optional, List
 import os
 from fastapi.responses import StreamingResponse # <-- Add this import
 from routes.schemes.nlp import PostLocalQuery, PostLocalIndex, PostDocQuery, PostDocIndex
+from models.risk_assessment_models import LocalAnswerRequest
+from pydantic import Field
+from models.risk_assessment_models import RiskAssessmentSummary, PopulationType
+
 
 
 import logging
@@ -32,6 +36,13 @@ class LocalIndexRequest(BaseModel):
 class LocalAnswerRequest(BaseModel):
     query: str
     n_results: Optional[int] = 100
+    llm_provider: str = Field(default="openai")
+    prompt_template: Optional[str] = Field(default="en")
+    
+    # Add the missing field and population type for the assessment
+    include_risk_assessment: Optional[bool] = Field(default=False, description="Flag to run health risk assessment on the results")
+    population_type: Optional[PopulationType] = Field(default=PopulationType.ADULT_AVERAGE, description="Target population for risk assessment")
+
 
 
 @nlp_router.post("/index/push/{project_id}")
@@ -366,9 +377,96 @@ async def index_local_data(request: Request, project_id: int, index_request: Loc
             }
         )
 
+# @nlp_router.post("/local/answer/{project_id}")
+# async def local_answer_endpoint(request: Request, project_id: int, answer_request: LocalAnswerRequest):
+#     """Answer queries using locally indexed data - Enhanced with debugging"""
+#     try:
+#         gemini_api_key = os.getenv("GEMINI_API_KEY")
+#         if not gemini_api_key:
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={
+#                     "signal": "GEMINI_API_KEY_MISSING",
+#                     "message": "Please set GEMINI_API_KEY environment variable"
+#                 }
+#             )
+        
+#         # Log the incoming request
+#         print(f"=== LOCAL ANSWER REQUEST ===")
+#         print(f"Project ID: {project_id}")
+#         print(f"Query: {answer_request.query}")
+#         print(f"N Results: {answer_request.n_results}")
+#         print("=" * 30)
+        
+#         # Initialize enhanced controller
+#         enhanced_controller = EnhancedNLPController(
+#             vectordb_client=request.app.vectordb_client,
+#             generation_client=request.app.generation_client,
+#             embedding_client=request.app.embedding_client,
+#             template_parser=request.app.template_parser,
+#             gemini_api_key=gemini_api_key
+#         )
+        
+#         # Get answer from local data
+#         result = await enhanced_controller.answer_with_local_data(
+#             project_id=project_id,
+#             query=answer_request.query,
+#             n_results=answer_request.n_results
+#         )
+        
+#         # Log the result
+#         print(f"=== LOCAL ANSWER RESULT ===")
+#         print(f"Success: {result.get('success', False)}")
+#         if result.get('success'):
+#             print(f"Answer length: {len(result.get('answer', ''))}")
+#             print(f"Retrieved docs: {result.get('retrieved_docs_count', 0)}")
+#             print(f"Debug info: {result.get('debug_info', {})}")
+#         else:
+#             print(f"Error: {result.get('error', 'Unknown error')}")
+#         print("=" * 30)
+        
+#         if not result.get("success", False):
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={
+#                     "signal": "LOCAL_ANSWER_ERROR",
+#                     "error": result.get("error", "Unknown error occurred"),
+#                     "debug_info": result.get("debug_info", {})
+#                 }
+#             )
+        
+#         return JSONResponse(
+#             content={
+#                 "signal": "LOCAL_ANSWER_SUCCESS",
+#                 "answer": result["answer"],
+#                 "full_prompt": result.get("full_prompt", ""),
+#                 "retrieved_docs_count": result.get("retrieved_docs_count", 0),
+#                 "collection_total": result.get("collection_total", 0),
+#                 "project_id": project_id,
+#                 "debug_info": result.get("debug_info", {})
+#             }
+#         )
+        
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         return JSONResponse(
+#             status_code=500,
+#             content={
+#                 "signal": "LOCAL_ANSWER_ERROR",
+#                 "error": str(e),
+#                 "traceback": traceback.format_exc()
+#             }
+#         )
+
+
+
+
 @nlp_router.post("/local/answer/{project_id}")
-async def local_answer_endpoint(request: Request, project_id: int, answer_request: LocalAnswerRequest):
-    """Answer queries using locally indexed data - Enhanced with debugging"""
+async def local_answer_endpoint(request: Request, project_id: int, 
+                               answer_request: LocalAnswerRequest):
+    """Answer queries using locally indexed data with optional health risk assessment"""
+    
     try:
         gemini_api_key = os.getenv("GEMINI_API_KEY")
         if not gemini_api_key:
@@ -379,14 +477,16 @@ async def local_answer_endpoint(request: Request, project_id: int, answer_reques
                     "message": "Please set GEMINI_API_KEY environment variable"
                 }
             )
-        
+
         # Log the incoming request
         print(f"=== LOCAL ANSWER REQUEST ===")
         print(f"Project ID: {project_id}")
         print(f"Query: {answer_request.query}")
         print(f"N Results: {answer_request.n_results}")
+        print(f"Include Risk Assessment: {answer_request.include_risk_assessment}")
+        print(f"Population Type: {answer_request.population_type}")
         print("=" * 30)
-        
+
         # Initialize enhanced controller
         enhanced_controller = EnhancedNLPController(
             vectordb_client=request.app.vectordb_client,
@@ -395,25 +495,27 @@ async def local_answer_endpoint(request: Request, project_id: int, answer_reques
             template_parser=request.app.template_parser,
             gemini_api_key=gemini_api_key
         )
-        
-        # Get answer from local data
+
+        # Get answer from local data with optional risk assessment
         result = await enhanced_controller.answer_with_local_data(
             project_id=project_id,
             query=answer_request.query,
-            n_results=answer_request.n_results
+            n_results=answer_request.n_results,
+            include_risk_assessment=answer_request.include_risk_assessment,
+            population_type=answer_request.population_type.value
         )
-        
+
         # Log the result
         print(f"=== LOCAL ANSWER RESULT ===")
         print(f"Success: {result.get('success', False)}")
         if result.get('success'):
             print(f"Answer length: {len(result.get('answer', ''))}")
             print(f"Retrieved docs: {result.get('retrieved_docs_count', 0)}")
-            print(f"Debug info: {result.get('debug_info', {})}")
+            print(f"Risk assessment included: {result.get('risk_assessment') is not None}")
         else:
             print(f"Error: {result.get('error', 'Unknown error')}")
         print("=" * 30)
-        
+
         if not result.get("success", False):
             return JSONResponse(
                 status_code=400,
@@ -423,19 +525,24 @@ async def local_answer_endpoint(request: Request, project_id: int, answer_reques
                     "debug_info": result.get("debug_info", {})
                 }
             )
-        
-        return JSONResponse(
-            content={
-                "signal": "LOCAL_ANSWER_SUCCESS",
-                "answer": result["answer"],
-                "full_prompt": result.get("full_prompt", ""),
-                "retrieved_docs_count": result.get("retrieved_docs_count", 0),
-                "collection_total": result.get("collection_total", 0),
-                "project_id": project_id,
-                "debug_info": result.get("debug_info", {})
-            }
-        )
-        
+
+        # Prepare response
+        response_content = {
+            "signal": "LOCAL_ANSWER_SUCCESS",
+            "answer": result["answer"],
+            "full_prompt": result.get("full_prompt", ""),
+            "retrieved_docs_count": result.get("retrieved_docs_count", 0),
+            "collection_total": result.get("collection_total", 0),
+            "project_id": project_id,
+            "debug_info": result.get("debug_info", {})
+        }
+
+        # Add risk assessment if available
+        if result.get("risk_assessment"):
+            response_content["risk_assessment"] = result["risk_assessment"]
+
+        return JSONResponse(content=response_content)
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -447,6 +554,7 @@ async def local_answer_endpoint(request: Request, project_id: int, answer_reques
                 "traceback": traceback.format_exc()
             }
         )
+
 
 # Add this debug endpoint to check collection status
 @nlp_router.post("/local/full-debug/{project_id}")

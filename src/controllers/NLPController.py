@@ -26,7 +26,11 @@ from stores.llm.templates.pesticide_templates import PesticideTemplateParser
 from utils.data_cleaning import clean_pesticide_data, load_and_prepare_excel, format_rows_as_text
 
 from io import BytesIO # <-- Add this import
-from utils.response_parser import parse_llm_response_to_df # <-- Add this import
+from utils.response_parser import parse_llm_response_to_df
+from services.risk_assessment_service import RiskAssessmentService
+from models.risk_assessment_models import PopulationType, RiskAssessmentSummary
+
+
 
 
 
@@ -619,172 +623,6 @@ class EnhancedNLPController:
         self.logger.info(f"Local collection created: {final_count} documents indexed")
         return collection
 
-    async def answer_with_local_data(self, project_id: int, query: str, n_results: int = 100) -> Dict:
-        """Answer query using local ChromaDB data"""
-        if not self.chroma_client or not self.embed_fn or not self.generation_model:
-            return {
-                "success": False,
-                "error": "Gemini API key not configured for local data processing"
-            }
-        
-        # Validate n_results parameter
-        if n_results <= 0:
-            n_results = 10  # Default fallback
-            
-        collection_name = f"local_project_{project_id}"
-        
-        try:
-            collection = self.chroma_client.get_collection(
-                name=collection_name,
-                embedding_function=self.embed_fn
-            )
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Local collection not found: {collection_name}. Please index local data first."
-            }
-        
-        # Check if collection has any documents
-        count = collection.count()
-        if count == 0:
-            return {
-                "success": False,
-                "error": "No documents found in collection. Please index data first."
-            }
-        
-        # Ensure n_results doesn't exceed available documents
-        n_results = min(n_results, count)
-        
-        # Set to query mode
-        self.embed_fn.document_mode = False
-        
-        try:
-            # Use the actual query parameter
-            self.logger.info(f"Querying with: {query}")
-            
-            result = collection.query(
-                query_texts=[query],
-                n_results=n_results
-            )
-            
-            if not result["documents"] or not result["documents"][0]:
-                return {
-                    "success": False,
-                    "error": "No relevant documents found in local data."
-                }
-            
-            # Prepare context from retrieved documents
-            context_docs = result['documents'][0]
-            context = "\n\n".join([f"Document {i+1}:\n{doc}" for i, doc in enumerate(context_docs)])
-            
-            # Log retrieved documents for debugging
-            self.logger.info(f"Retrieved {len(context_docs)} documents")
-            if context_docs:
-                self.logger.info(f"First document preview: {context_docs[0][:200]}...")
-            
-            # Combine all retrieved documents
-            passages = context_docs
-            combined_passage = " ".join(passages)
-            
-            # Create debug info before generation
-            debug_info = {
-                "query_used": query,
-                "docs_found": len(context_docs),
-                "first_doc_preview": context_docs[0][:300] if context_docs else "No docs",
-                "combined_passage_length": len(combined_passage),
-                "contains_pepper_data": "pepper" in combined_passage.lower() or "فلفل" in combined_passage,
-                "contains_pesticide_data": "pesticide" in combined_passage.lower() or "مبيد" in combined_passage,
-                "contains_result_data": "result" in combined_passage.lower() or "نتيجة" in combined_passage,
-                "contains_nan_values": "NaN" in combined_passage,
-                "contains_sample_codes": "P45-" in combined_passage
-            }
-
-            prompt = f"""
-        **TASK:** Analyze the provided data to answer the user's question. You MUST format your entire response as a single, clean markdown table.
-
-        **RULES:**
-        1.  The table MUST have these exact, single-line headers: `Sample Code`, `Sample Name`, `Pesticide Name`, `Reading Value`, `Limit`, `Result`.
-        2.  Do NOT include any text, explanation, or summary before or after the table.
-        3.  Do NOT use multi-line headers.
-        4.  Each piece of data must be in its own cell.
-
-        **EXAMPLE OUTPUT FORMAT:**
-        | Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result |
-        |---|---|---|---|---|---|
-        | P45-1234 | Tomato | PesticideA | 10 | 50 | Compliant |
-        | P45-5678 | Pepper | PesticideB | 75 | 20 | Non-Compliant |
-
-        ---
-        **USER QUESTION:** {query}
-        ---
-        **DATA:**
-        {context}
-        """
-
-            # Log the prompt for debugging
-            self.logger.info(f"Generated prompt length: {len(prompt)}")
-            self.logger.info(f"Prompt preview: {prompt[:300]}...")
-            
-            # Generate answer
-            answer = self.generation_model.generate_content(prompt)
-
-            # Parse the LLM response and apply calculations if needed
-            final_answer = answer.text  # Default to original answer
-
-            try:
-                # Parse the markdown table response into a DataFrame
-                df = parse_llm_response_to_df(answer.text)
-                
-                if df is not None and not df.empty:
-                    self.logger.info(f"Successfully parsed LLM response into DataFrame with {len(df)} rows")
-                    
-                    # Apply query calculations (filtering)
-                    df_filtered = self._apply_query_calculations(df, query)
-                    
-                    # Check if filtering was applied
-                    if len(df_filtered) != len(df):
-                        self.logger.info(f"Filtering applied: {len(df)} -> {len(df_filtered)} rows")
-                        
-                        if not df_filtered.empty:
-                            # Convert filtered DataFrame back to markdown table
-                            filtered_answer = df_filtered.to_markdown(index=False)
-                            final_answer = filtered_answer
-                        else:
-                            # All rows were filtered out
-                            final_answer = "No data matches the specified criteria."
-                    else:
-                        self.logger.info("No filtering was applied - using original LLM response")
-                else:
-                    self.logger.warning("Could not parse LLM response into DataFrame - using original response")
-                    
-            except Exception as e:
-                self.logger.error(f"Error applying calculations: {e}")
-                # Fall back to original answer if calculation fails
-                final_answer = answer.text
-            
-            return {
-                "success": True,
-                "answer": final_answer,
-                "full_prompt": prompt,
-                "retrieved_docs_count": len(passages),
-                "collection_total": collection.count(),
-                "debug_info": {
-                    **debug_info,
-                    "answer_length": len(final_answer),
-                    "prompt_length": len(prompt),
-                    "full_answer": final_answer
-                }
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error processing local query: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                "success": False,
-                "error": f"Error generating response: {str(e)}"
-            }
-        
 
     ############### NEW METHODS FOR DataFrame calculations ###############
          ############### e.g. reading > (X * limit) ###############
@@ -955,43 +793,186 @@ class EnhancedNLPController:
         
         return summary
 
+
+    # --- METHOD WITH CORRECTIONS APPLIED ---
+    async def answer_with_local_data(self,
+                                     project_id: int,
+                                     query: str,
+                                     n_results: int = 100,
+                                     include_risk_assessment: bool = False,
+                                     population_type: PopulationType = PopulationType.ADULT_AVERAGE
+                                     ) -> Dict:
+        """Answer query using local ChromaDB data with optional risk assessment"""
+        if not self.chroma_client or not self.embed_fn or not self.generation_model:
+            return {"success": False, "error": "Gemini API key not configured"}
+
+        collection_name = f"local_project_{project_id}"
+        try:
+            collection = self.chroma_client.get_collection(name=collection_name, embedding_function=self.embed_fn)
+            count = collection.count()
+            if count == 0:
+                return {"success": False, "error": "No documents in collection"}
+        except Exception:
+            return {"success": False, "error": f"Local collection not found: {collection_name}"}
+
+        n_results = min(n_results, count)
+        self.embed_fn.document_mode = False
+
+        try:
+            result = collection.query(query_texts=[query], n_results=n_results)
+            if not result["documents"] or not result["documents"][0]:
+                return {"success": False, "error": "No relevant documents found"}
+
+            context_docs = result['documents'][0]
+            context = "\n\n".join([doc for doc in context_docs])
+
+            prompt = f"""
+            **TASK:** Analyze the provided data to answer the user's question. You MUST format your entire response as a single, clean markdown table.
+            **RULES:**
+            1.  The table MUST have these exact, single-line headers: `Sample Code`, `Sample Name`, `Pesticide Name`, `Reading Value`, `Limit`, `Result`.
+            2.  Do NOT include any text, explanation, or summary before or after the table.
+            ---
+            **USER QUESTION:** {query}
+            ---
+            **DATA:**
+            {context}
+            """
+
+            answer = self.generation_model.generate_content(prompt)
+            final_answer = answer.text
+            df_for_risk = pd.DataFrame()
+
+            try:
+                df = parse_llm_response_to_df(answer.text)
+                if df is not None and not df.empty:
+                    self.logger.info(f"Successfully parsed LLM response into DataFrame with {len(df)} rows")
+                   
+                    self.logger.error(f"DEBUG: Initial DataFrame shape: {df.shape}")
+                    self.logger.error(f"DEBUG: DataFrame columns: {df.columns.tolist()}")
+                    self.logger.error(f"DEBUG: First row data types:\n{df.dtypes}")
+                    
+                    df_filtered = self._apply_query_calculations(df, query)
+                    
+                    self.logger.error(f"DEBUG: After filtering shape: {df_filtered.shape}")
+                    self.logger.error(f"DEBUG: df_for_risk is empty: {df_filtered.empty}")
+                    
+                    # Add this critical debug before risk assessment
+                    if include_risk_assessment and not df_filtered.empty:
+                        self.logger.error(f"DEBUG: About to call risk assessment with {len(df_filtered)} rows")
+    
+                        # 🔧 FIX: Prepare data for risk assessment
+                        df_for_risk_clean = df_filtered.copy()
+                        
+                        # Convert numeric columns from strings to numbers
+                        df_for_risk_clean['Reading Value'] = pd.to_numeric(df_for_risk_clean['Reading Value'], errors='coerce')
+                        df_for_risk_clean['Limit'] = pd.to_numeric(df_for_risk_clean['Limit'], errors='coerce')
+                        
+                        # Remove any rows where conversion failed
+                        df_for_risk_clean = df_for_risk_clean.dropna(subset=['Reading Value', 'Limit'])
+                        
+                        self.logger.error(f"DEBUG: After numeric conversion - Shape: {df_for_risk_clean.shape}")
+                        self.logger.error(f"DEBUG: Data types after conversion:\n{df_for_risk_clean.dtypes}")
+                        
+                        if not df_for_risk_clean.empty:
+                            try:
+                                # 🔧 FIX: Ensure population_type is proper enum
+                                risk_assessment_results = await self._perform_risk_assessment(
+                                    df_for_risk_clean,  # Use cleaned DataFrame
+                                    population_type     # This should already be PopulationType enum
+                                )
+                            except Exception as e:
+                                self.logger.error(f"Risk assessment failed: {e}")
+                                import traceback
+                                self.logger.error(f"Full traceback: {traceback.format_exc()}")
+                    if not df_filtered.equals(df):
+                        self.logger.info(f"Filtering applied: {len(df)} -> {len(df_filtered)} rows")
+                        final_answer = df_filtered.to_markdown(index=False) if not df_filtered.empty else "No data matches the specified criteria."
+                        df_for_risk = df_filtered
+                    else:
+                        df_for_risk = df
+                else:
+                    self.logger.warning("Could not parse LLM response into DataFrame")
+
+            except Exception as e:
+                self.logger.error(f"Error applying calculations: {e}")
+
+            risk_assessment_results = None
+            # FIX: Use the 'include_risk_assessment' parameter passed into the method
+            if include_risk_assessment and not df_for_risk.empty:
+                try:
+                    # 🔧 FIX: Convert string to enum if needed
+                    if isinstance(population_type, str):
+                        population_type = PopulationType(population_type)
+                        self.logger.error(f"DEBUG: Converted to enum: {type(population_type)}, value: {population_type}")
+                    
+                    risk_assessment_results = await self._perform_risk_assessment(
+                        df_for_risk_clean,
+                        population_type
+                    )
+                except Exception as e:
+                    self.logger.error(f"Risk assessment failed: {e}")
+
+            return {
+                "success": True,
+                "answer": final_answer,
+                "risk_assessment": risk_assessment_results.dict() if risk_assessment_results else None,
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error processing local query: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": f"Error generating response: {str(e)}"}
+
+    async def _perform_risk_assessment(self, df: pd.DataFrame,
+                                 population_type: PopulationType) -> RiskAssessmentSummary:
+        """Perform health risk assessment on DataFrame"""
+        self.logger.info(f"Performing risk assessment for {len(df)} samples")
+        self.logger.error(f"DEBUG: Risk assessment input - Shape: {df.shape}")
+        self.logger.error(f"DEBUG: population_type type: {type(population_type)}")
+        self.logger.error(f"DEBUG: population_type value: {population_type}")
+        self.logger.error(f"DEBUG: DataFrame dtypes:\n{df.dtypes}")
+        
+        # Check if Reading Value and Limit are actually numeric
+        sample_reading = df['Reading Value'].iloc[0] if not df.empty else None
+        sample_limit = df['Limit'].iloc[0] if not df.empty else None
+        self.logger.error(f"DEBUG: Sample reading type: {type(sample_reading)}, value: {sample_reading}")
+        self.logger.error(f"DEBUG: Sample limit type: {type(sample_limit)}, value: {sample_limit}")
+        
+        risk_service = RiskAssessmentService()
+        assessment_summary = risk_service.assess_dataframe_risk(
+            df=df,
+            population_type=population_type
+        )
+        self.logger.info(f"Risk assessment completed for {assessment_summary.total_samples_assessed} samples")
+        return assessment_summary
+        
     def _apply_query_calculations(self, df: pd.DataFrame, query: str) -> pd.DataFrame:
         """
         Simplified contamination filtering to avoid tabulate issues
         """
-        self.logger.error(f"DEBUG: Starting simplified filtering")
-        
-        # Extract multiplier from query
         more_than_match = re.search(r'more than (\d+\.?\d*)\s*times the limit', query, re.IGNORECASE)
-        
         if not more_than_match:
-            self.logger.info("No pattern found")
             return df
-        
+
         multiplier = float(more_than_match.group(1))
-        self.logger.error(f"DEBUG: Using multiplier: {multiplier}")
-        
         try:
-            # Simple column finding
-            reading_col = 'Reading Value'
-            limit_col = 'Limit'
-            
-            # Convert to numeric
             df_work = df.copy()
-            df_work[reading_col] = pd.to_numeric(df_work[reading_col], errors='coerce')
-            df_work[limit_col] = pd.to_numeric(df_work[limit_col], errors='coerce')
-            
-            # Apply filter
-            threshold = multiplier * df_work[limit_col]
-            filtered_df = df_work[df_work[reading_col] > threshold]
-            
-            self.logger.error(f"DEBUG: Filtered {len(df)} -> {len(filtered_df)} rows")
-            
-            return filtered_df
-            
+            # Ensure columns exist before trying to convert
+            if 'Reading Value' in df_work.columns and 'Limit' in df_work.columns:
+                df_work['Reading Value'] = pd.to_numeric(df_work['Reading Value'], errors='coerce')
+                df_work['Limit'] = pd.to_numeric(df_work['Limit'], errors='coerce')
+                
+                # Drop rows where conversion might have failed
+                df_work.dropna(subset=['Reading Value', 'Limit'], inplace=True)
+
+                threshold = multiplier * df_work['Limit']
+                filtered_df = df_work[df_work['Reading Value'] > threshold]
+                return filtered_df
+            else:
+                self.logger.warning("Could not find 'Reading Value' or 'Limit' columns for calculation.")
+                return df
+
         except Exception as e:
             self.logger.error(f"DEBUG: Error in simplified filtering: {e}")
             return df
-        
-#######################################################################################
-
