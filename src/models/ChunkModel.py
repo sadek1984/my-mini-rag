@@ -5,12 +5,19 @@ from bson.objectid import ObjectId
 from pymongo import InsertOne
 from sqlalchemy.future import select
 from sqlalchemy import func, delete
+from typing import Optional, Dict, Any
+from pydantic import Field, BaseModel
 
-class ChunkModel(BaseDataModel):
+class ChunkModel(BaseModel):
+    id: str = Field(..., alias="_id")
+    asset_id: str
+    project_id: str
+    content: str
+    metadata: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        allow_population_by_field_name = True
 
-    def __init__(self, db_client: object):
-        super().__init__(db_client=db_client)
-        self.collection = db_client
     @classmethod
     async def create_instance(cls, db_client: object):
         instance = cls(db_client)

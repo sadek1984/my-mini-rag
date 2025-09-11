@@ -387,6 +387,59 @@ class NLPController(BaseControllers):
             except Exception as e:
                 return f"Error generating response: {e}", "", []
             
+    # --- NEW METHOD FOR ISO 17025 ---
+    async def answer_iso_question(
+        self,
+        project: dict,
+        query: str,
+        limit: int = 5,
+    ) -> tuple[str, str, list]:
+        """
+        Answers a question using RAG with special metadata filtering for ISO documents.
+        This method is the core of the intelligent search.
+        """
+        # 1. Create a metadata filter based on keywords in the user's question.
+        metadata_filter: Dict[str, Any] = {}
+        question_lower = query.lower()
+
+        if "procedure" in question_lower or "sop" in question_lower:
+            metadata_filter = {"document_type": "Procedure"}
+        elif "quality manual" in question_lower or "policy" in question_lower:
+            metadata_filter = {"document_type": "Quality Manual"}
+        elif "work instruction" in question_lower or "how to" in question_lower:
+            metadata_filter = {"document_type": "Work Instruction"}
+        
+        # 2. Perform similarity search using the vector DB
+        # Note: We assume the search method is updated to accept a metadata_filter
+        embedding = await self.embedding_client.embed_query(query)
+        chunks = await self.vectordb_client.search(
+            project_id=project.get("id"),
+            embedding=embedding,
+            limit=limit,
+            metadata_filter=metadata_filter  # <-- The key improvement
+        )
+
+        if not chunks:
+            return None, None, None
+
+        # 3. Generate the prompt and get the answer from the LLM
+        context = "\n---\n".join([chunk.get("content") for chunk in chunks])
+        full_prompt = self.template_parser.get_prompt(
+            context=context,
+            query=query,
+            template_name="rag_en" # Or your default template
+        )
+        answer = await self.generation_client.generate(full_prompt)
+        
+        # 4. Prepare sources from the retrieved chunks' metadata
+        sources = list(set([
+            chunk.get("metadata", {}).get('source_file', 'Unknown') 
+            for chunk in chunks
+        ]))
+        
+        return answer, full_prompt, sources
+
+            
 
 
 class GeminiEmbeddingFunction(EmbeddingFunction):

@@ -39,3 +39,16 @@ class PostDocIndex(BaseModel):
     """
     content: str
     metadata: dict
+
+class NLPQuery(BaseModel):
+    """
+    Pydantic model for the intelligent ISO query request.
+    """
+    question: str = Field(
+        ..., 
+        description="The natural language question to ask about ISO documents."
+    )
+    project_id: str = Field(
+        ..., 
+        description="The ID of the project to search within."
+    )

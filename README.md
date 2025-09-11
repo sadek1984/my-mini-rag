@@ -53,7 +53,7 @@ docker rm $(docker ps -aq)}
 
 # push to github
 git push -u origin <your-branch-name>
-
+git push -u origin Excel_mrl_adi
 # ollama serve from cli
 /usr/local/bin/ollama serve
 # run serve in colab background
@@ -80,4 +80,10 @@ docker compose exec fastapi ls -la /app/data/2024/Feb/
 
 docker compose down 
 
+docker compose up 
+
 docker compose up --build
+
+docker cp models/ fastapi:/app/models/
+docker cp services/ fastapi:/app/services/  
+docker cp routes/prediction.py fastapi:/app/routes/prediction.py

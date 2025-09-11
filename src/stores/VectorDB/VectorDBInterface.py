@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional, Dict, Any
 from models.db_schemes import RetrievedDocument
 
 class VectorDBInterface(ABC):
@@ -47,6 +47,15 @@ class VectorDBInterface(ABC):
         pass
 
     @abstractmethod
-    def search_by_vector(self, collection_name: str, vector: list, limit: int)-> List[RetrievedDocument]:
+    def search_by_vector(self, 
+                    project_id: str,
+                    embedding: List[float],
+                    limit: int,
+                    metadata_filter: Optional[Dict[str, Any]] = None # <-- Add this parameter
+            )-> List[dict]:
         pass
+
+    # @abstractmethod
+    # def search_by_vector(self, collection_name: str, vector: list, limit: int)-> List[RetrievedDocument]:
+    #     pass
     

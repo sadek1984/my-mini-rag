@@ -3,12 +3,23 @@ from .db_schemes import Asset
 from .enums.DataBaseEnum import DataBaseEnum
 from bson import ObjectId
 from sqlalchemy.future import select
+from typing import Optional, Dict, Any
+from pydantic import Field, BaseModel
 
-class AssetModel(BaseDataModel):
+class AssetModel(BaseModel):
 
     def __init__(self, db_client: object):
         super().__init__(db_client=db_client)
         self.db_client = db_client
+
+    id: str = Field(..., alias="_id")
+    asset_id: str
+    project_id: str
+    content: str
+    metadata: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        allow_population_by_field_name = True
 
     @classmethod
     async def create_instance(cls, db_client: object):
