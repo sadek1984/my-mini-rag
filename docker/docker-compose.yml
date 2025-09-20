@@ -9,6 +9,7 @@ services:
     volumes:
       - fastapi_data:/app/assets
       - ./chroma_data:/app/chroma_db:rw
+      - /Users/a12/mini-rag/src/data:/app/data
     networks:
       - backend
     restart: always

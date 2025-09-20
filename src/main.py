@@ -17,8 +17,8 @@ from routes.risk_assessment_routes import risk_router
 from routes import iso
 from dependencies import init_dependencies
 from motor.motor_asyncio import AsyncIOMotorClient
-# REMOVE THIS LINE: from src.routes.prediction import prediction_router
-
+from routes.time_series import timeseries_router, load_and_train_models
+from routes.dashboards import dashboard_router
 import logging
 from pathlib import Path
 
@@ -83,6 +83,16 @@ async def startup_span():
             print(f"{route.methods} {route.path}")
     print("=== End Routes ===\n")
 
+    load_and_train_models()
+    
+    # Debug routes at startup
+    print("\n=== All Registered Routes ===")
+    for route in app.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            print(f"{route.methods} {route.path}")
+    print("=== End Routes ===\n")
+
+
 async def shutdown_span():
     app.db_engine.dispose()
     await app.vectordb_client.disconnect()
@@ -97,6 +107,8 @@ app.include_router(nlp.nlp_router)
 app.include_router(debug_router)
 app.include_router(risk_router, prefix="/api/v1")
 app.include_router(iso.router)
+app.include_router(timeseries_router)
+app.include_router(dashboard_router, prefix="/api/v1")
 
 # Include prediction router
 if prediction_router:
@@ -105,5 +117,13 @@ if prediction_router:
     print(f"Prediction endpoints added with prefix: {prediction_router.prefix}")
 else:
     print("ERROR: prediction_router is None!")
+
+# In main.py startup_span function:
+try:
+    load_and_train_models()
+    logger.info("Model training completed successfully")
+except Exception as e:
+    logger.error(f"Model training failed: {e}")
+    # Don't let this crash the entire app
 
 # ... rest of your main.py code ...

@@ -938,6 +938,17 @@ def main():
         if result:
             training_results, patterns = result
             
+            # --- Save the processed data to an Excel file ---
+
+            # df_processed = training_results['processed_data']
+            # output_filename = "processed_data_output.xlsx"
+            # try:
+            #     df_processed.to_excel(output_filename, index=False, engine='openpyxl')
+            #     print(f"\n✅ Successfully saved the processed data to '{output_filename}'")
+            # except Exception as e:
+            #     print(f"\n❌ Could not save the processed data file: {e}")
+            # ---
+
             # Demonstrate capabilities
             system.demonstrate_capabilities(patterns)
             
