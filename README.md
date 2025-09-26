@@ -85,3 +85,4 @@ docker compose up
 docker compose up --build
 
 
+docker volume rm docker_fastapi_data

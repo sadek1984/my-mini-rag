@@ -20,7 +20,7 @@ OPENAI_API_URL="http://localhost:11434/v1"
 COHERE_API_KEY=""
 
 GENERATION_MODEL_ID_LITERAL = ["command", "command-light", "command-nightly"]
-GENERATION_MODEL_ID="gemini-1.5-flash-latest" 
+GENERATION_MODEL_ID="gemini-2.5-flash" 
 EMBEDDING_MODEL_ID="embed-multilingual-v3.0"
 EMBEDDING_MODEL_SIZE=1024
 
