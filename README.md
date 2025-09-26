@@ -84,4 +84,4 @@ docker compose up
 
 docker compose up --build
 
-Successfully installed protobuf-6.32.1 tensorboard-2.20.0 tensorflow-2.20.0
+

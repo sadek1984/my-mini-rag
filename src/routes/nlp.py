@@ -462,40 +462,64 @@ async def index_local_data(request: Request, project_id: int, index_request: Loc
 
 
 
-@nlp_router.post("/local/answer/{project_id}")
-async def local_answer_endpoint(request: Request, project_id: int, 
-                               answer_request: LocalAnswerRequest):
-    """Answer queries using locally indexed data with optional health risk assessment"""
+# @nlp_router.post("/local/answer/{project_id}")
+# async def local_answer_endpoint(request: Request, project_id: int, 
+#                                answer_request: LocalAnswerRequest):
+#     """Answer queries using locally indexed data with optional health risk assessment"""
     
+#     try:
+#         gemini_api_key = os.getenv("GEMINI_API_KEY")
+#         if not gemini_api_key:
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={
+#                     "signal": "GEMINI_API_KEY_MISSING",
+#                     "message": "Please set GEMINI_API_KEY environment variable"
+#                 }
+#             )
+
+#         # Log the incoming request
+#         print(f"=== LOCAL ANSWER REQUEST ===")
+#         print(f"Project ID: {project_id}")
+#         print(f"Query: {answer_request.query}")
+#         print(f"N Results: {answer_request.n_results}")
+#         print(f"Include Risk Assessment: {answer_request.include_risk_assessment}")
+#         print(f"Population Type: {answer_request.population_type}")
+#         print("=" * 30)
+
+#         # Initialize enhanced controller
+#         enhanced_controller = EnhancedNLPController(
+#             vectordb_client=request.app.vectordb_client,
+#             generation_client=request.app.generation_client,
+#             embedding_client=request.app.embedding_client,
+#             template_parser=request.app.template_parser,
+#             gemini_api_key=gemini_api_key
+#         )
+
+@nlp_router.post("/local/answer/{project_id}")
+async def local_answer_endpoint(request: Request, project_id: int,
+                               answer_request: LocalAnswerRequest):
+    """Answer queries using locally indexed data with OpenAI"""
     try:
-        gemini_api_key = os.getenv("GEMINI_API_KEY")
-        if not gemini_api_key:
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
             return JSONResponse(
                 status_code=400,
                 content={
-                    "signal": "GEMINI_API_KEY_MISSING",
-                    "message": "Please set GEMINI_API_KEY environment variable"
+                    "signal": "OPENAI_API_KEY_MISSING",
+                    "message": "Please set OPENAI_API_KEY environment variable"
                 }
             )
 
-        # Log the incoming request
-        print(f"=== LOCAL ANSWER REQUEST ===")
-        print(f"Project ID: {project_id}")
-        print(f"Query: {answer_request.query}")
-        print(f"N Results: {answer_request.n_results}")
-        print(f"Include Risk Assessment: {answer_request.include_risk_assessment}")
-        print(f"Population Type: {answer_request.population_type}")
-        print("=" * 30)
-
-        # Initialize enhanced controller
+        # Initialize controller with OpenAI
         enhanced_controller = EnhancedNLPController(
             vectordb_client=request.app.vectordb_client,
             generation_client=request.app.generation_client,
             embedding_client=request.app.embedding_client,
             template_parser=request.app.template_parser,
-            gemini_api_key=gemini_api_key
+            gemini_api_key=None  # Not needed anymore
         )
-
+        
         # Get answer from local data with optional risk assessment
         result = await enhanced_controller.answer_with_local_data(
             project_id=project_id,

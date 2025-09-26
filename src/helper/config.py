@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
+from pydantic import Field
 
 class Settings(BaseSettings):
     APP_NAME: str
@@ -28,6 +29,8 @@ class Settings(BaseSettings):
     GENERATION_DAFAULT_MAX_TOKENS: int = None
     GENERATION_DAFAULT_TEMPERATURE: float = None
     GEMINI_API_KEY: str = None
+    GEMINI_MODEL: str = Field(default="gemini-1.5-flash")
+
 
     VECTOR_DB_BACKEND_LITERAL: List[str] = None
     VECTOR_DB_BACKEND: str

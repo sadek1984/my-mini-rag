@@ -469,8 +469,48 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
 
 
 # ========== ENHANCED NLP CONTROLLER ==========
+# class EnhancedNLPController:
+#     """Enhanced NLP Controller with local data processing"""
+    
+#     def __init__(self, 
+#                  vectordb_client=None,
+#                  generation_client=None,
+#                  embedding_client=None,
+#                  template_parser=None,
+#                  gemini_api_key: str = None):
+        
+#         # Keep existing clients for compatibility
+#         self.vectordb_client = vectordb_client
+#         self.generation_client = generation_client
+#         self.embedding_client = embedding_client
+#         self.template_parser = template_parser
+        
+#         # New ChromaDB setup for local data
+#         self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
+#         if self.gemini_api_key:
+#             # Use PersistentClient to save data to disk
+#             self.chroma_client = chromadb.PersistentClient(path="/app/chroma_db")
+#             self.embed_fn = GeminiEmbeddingFunction(
+#                 api_key=self.gemini_api_key,
+#                 model="models/text-embedding-004"
+#             )
+            
+#             # Configure Gemini for generation
+#             genai.configure(api_key=self.gemini_api_key)
+#             self.generation_model = genai.GenerativeModel("gemini-1.5-flash")
+#         else:
+#             self.chroma_client = None
+#             self.embed_fn = None
+#             self.generation_model = None
+        
+#         self.logger = logging.getLogger(__name__)
+
+
+import openai
+from openai import OpenAI
+
 class EnhancedNLPController:
-    """Enhanced NLP Controller with local data processing"""
+    """Enhanced NLP Controller with OpenAI integration"""
     
     def __init__(self, 
                  vectordb_client=None,
@@ -494,14 +534,21 @@ class EnhancedNLPController:
                 api_key=self.gemini_api_key,
                 model="models/text-embedding-004"
             )
+
+        # Use OpenAI instead of Gemini
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if openai_api_key:
+            # Initialize OpenAI client
+            self.openai_client = OpenAI(api_key=openai_api_key)
             
-            # Configure Gemini for generation
-            genai.configure(api_key=self.gemini_api_key)
-            self.generation_model = genai.GenerativeModel("gemini-1.5-flash-latest")
+            # Use ChromaDB with your existing embedding setup
+            self.chroma_client = chromadb.PersistentClient(path="/app/chroma_db")
+            
+            # Use your existing embedding function instead of Gemini
+            # You'll need to implement an OpenAI embedding function or use your existing one
+          
         else:
-            self.chroma_client = None
-            self.embed_fn = None
-            self.generation_model = None
+            raise ValueError("OPENAI_API_KEY not found in environment variables")
         
         self.logger = logging.getLogger(__name__)
 
@@ -848,137 +895,257 @@ class EnhancedNLPController:
 
 
     # --- METHOD WITH CORRECTIONS APPLIED ---
-    async def answer_with_local_data(self,
-                                     project_id: int,
-                                     query: str,
-                                     n_results: int = 100,
-                                     include_risk_assessment: bool = False,
-                                     population_type: PopulationType = PopulationType.ADULT_AVERAGE
-                                     ) -> Dict:
-        """Answer query using local ChromaDB data with optional risk assessment"""
-        if not self.chroma_client or not self.embed_fn or not self.generation_model:
-            return {"success": False, "error": "Gemini API key not configured"}
+    # async def answer_with_local_data(self,
+    #                                  project_id: int,
+    #                                  query: str,
+    #                                  n_results: int = 100,
+    #                                  include_risk_assessment: bool = False,
+    #                                  population_type: PopulationType = PopulationType.ADULT_AVERAGE
+    #                                  ) -> Dict:
+    #     """Answer query using local ChromaDB data with optional risk assessment"""
+    #     if not self.chroma_client or not self.embed_fn or not self.generation_model:
+    #         return {"success": False, "error": "Gemini API key not configured"}
 
-        collection_name = f"local_project_{project_id}"
-        try:
-            collection = self.chroma_client.get_collection(name=collection_name, embedding_function=self.embed_fn)
-            count = collection.count()
-            if count == 0:
-                return {"success": False, "error": "No documents in collection"}
-        except Exception:
-            return {"success": False, "error": f"Local collection not found: {collection_name}"}
+    #     collection_name = f"local_project_{project_id}"
+    #     try:
+    #         collection = self.chroma_client.get_collection(name=collection_name, embedding_function=self.embed_fn)
+    #         count = collection.count()
+    #         if count == 0:
+    #             return {"success": False, "error": "No documents in collection"}
+    #     except Exception:
+    #         return {"success": False, "error": f"Local collection not found: {collection_name}"}
 
-        n_results = min(n_results, count)
-        self.embed_fn.document_mode = False
+    #     n_results = min(n_results, count)
+    #     self.embed_fn.document_mode = False
 
-        try:
-            result = collection.query(query_texts=[query], n_results=n_results)
-            if not result["documents"] or not result["documents"][0]:
-                return {"success": False, "error": "No relevant documents found"}
+    #     try:
+    #         result = collection.query(query_texts=[query], n_results=n_results)
+    #         if not result["documents"] or not result["documents"][0]:
+    #             return {"success": False, "error": "No relevant documents found"}
 
-            context_docs = result['documents'][0]
-            context = "\n\n".join([doc for doc in context_docs])
+    #         context_docs = result['documents'][0]
+    #         context = "\n\n".join([doc for doc in context_docs])
 
-            prompt = f"""
-            **TASK:** Analyze the provided data to answer the user's question. You MUST format your entire response as a single, clean markdown table.
-            **RULES:**
-            1.  The table MUST have these exact, single-line headers: `Sample Code`, `Sample Name`, `Pesticide Name`, `Reading Value`, `Limit`, `Result`.
-            2.  Do NOT include any text, explanation, or summary before or after the table.
-            ---
-            **USER QUESTION:** {query}
-            ---
-            **DATA:**
-            {context}
-            """
+    #         prompt = f"""
+    #         **TASK:** Analyze the provided data to answer the user's question. You MUST format your entire response as a single, clean markdown table.
+    #         **RULES:**
+    #         1.  The table MUST have these exact, single-line headers: `Sample Code`, `Sample Name`, `Pesticide Name`, `Reading Value`, `Limit`, `Result`.
+    #         2.  Do NOT include any text, explanation, or summary before or after the table.
+    #         ---
+    #         **USER QUESTION:** {query}
+    #         ---
+    #         **DATA:**
+    #         {context}
+    #         """
 
-            answer = self.generation_model.generate_content(prompt)
-            final_answer = answer.text
-            df_for_risk = pd.DataFrame()
+    #         answer = self.generation_model.generate_content(prompt)
+    #         final_answer = answer.text
+    #         df_for_risk = pd.DataFrame()
 
-            try:
-                df = parse_llm_response_to_df(answer.text)
-                if df is not None and not df.empty:
-                    self.logger.info(f"Successfully parsed LLM response into DataFrame with {len(df)} rows")
+    #         try:
+    #             df = parse_llm_response_to_df(answer.text)
+    #             if df is not None and not df.empty:
+    #                 self.logger.info(f"Successfully parsed LLM response into DataFrame with {len(df)} rows")
                    
-                    self.logger.error(f"DEBUG: Initial DataFrame shape: {df.shape}")
-                    self.logger.error(f"DEBUG: DataFrame columns: {df.columns.tolist()}")
-                    self.logger.error(f"DEBUG: First row data types:\n{df.dtypes}")
+    #                 self.logger.error(f"DEBUG: Initial DataFrame shape: {df.shape}")
+    #                 self.logger.error(f"DEBUG: DataFrame columns: {df.columns.tolist()}")
+    #                 self.logger.error(f"DEBUG: First row data types:\n{df.dtypes}")
                     
-                    df_filtered = self._apply_query_calculations(df, query)
+    #                 df_filtered = self._apply_query_calculations(df, query)
                     
-                    self.logger.error(f"DEBUG: After filtering shape: {df_filtered.shape}")
-                    self.logger.error(f"DEBUG: df_for_risk is empty: {df_filtered.empty}")
+    #                 self.logger.error(f"DEBUG: After filtering shape: {df_filtered.shape}")
+    #                 self.logger.error(f"DEBUG: df_for_risk is empty: {df_filtered.empty}")
                     
-                    # Add this critical debug before risk assessment
-                    if include_risk_assessment and not df_filtered.empty:
-                        self.logger.error(f"DEBUG: About to call risk assessment with {len(df_filtered)} rows")
+    #                 # Add this critical debug before risk assessment
+    #                 if include_risk_assessment and not df_filtered.empty:
+    #                     self.logger.error(f"DEBUG: About to call risk assessment with {len(df_filtered)} rows")
     
-                        # 🔧 FIX: Prepare data for risk assessment
-                        df_for_risk_clean = df_filtered.copy()
+    #                     # 🔧 FIX: Prepare data for risk assessment
+    #                     df_for_risk_clean = df_filtered.copy()
                         
-                        # Convert numeric columns from strings to numbers
-                        df_for_risk_clean['Reading Value'] = pd.to_numeric(df_for_risk_clean['Reading Value'], errors='coerce')
-                        df_for_risk_clean['Limit'] = pd.to_numeric(df_for_risk_clean['Limit'], errors='coerce')
+    #                     # Convert numeric columns from strings to numbers
+    #                     df_for_risk_clean['Reading Value'] = pd.to_numeric(df_for_risk_clean['Reading Value'], errors='coerce')
+    #                     df_for_risk_clean['Limit'] = pd.to_numeric(df_for_risk_clean['Limit'], errors='coerce')
                         
-                        # Remove any rows where conversion failed
-                        df_for_risk_clean = df_for_risk_clean.dropna(subset=['Reading Value', 'Limit'])
+    #                     # Remove any rows where conversion failed
+    #                     df_for_risk_clean = df_for_risk_clean.dropna(subset=['Reading Value', 'Limit'])
                         
-                        self.logger.error(f"DEBUG: After numeric conversion - Shape: {df_for_risk_clean.shape}")
-                        self.logger.error(f"DEBUG: Data types after conversion:\n{df_for_risk_clean.dtypes}")
+    #                     self.logger.error(f"DEBUG: After numeric conversion - Shape: {df_for_risk_clean.shape}")
+    #                     self.logger.error(f"DEBUG: Data types after conversion:\n{df_for_risk_clean.dtypes}")
                         
-                        if not df_for_risk_clean.empty:
-                            try:
-                                # 🔧 FIX: Ensure population_type is proper enum
-                                risk_assessment_results = await self._perform_risk_assessment(
-                                    df_for_risk_clean,  # Use cleaned DataFrame
-                                    population_type     # This should already be PopulationType enum
-                                )
-                            except Exception as e:
-                                self.logger.error(f"Risk assessment failed: {e}")
-                                import traceback
-                                self.logger.error(f"Full traceback: {traceback.format_exc()}")
-                    if not df_filtered.equals(df):
-                        self.logger.info(f"Filtering applied: {len(df)} -> {len(df_filtered)} rows")
-                        final_answer = df_filtered.to_markdown(index=False) if not df_filtered.empty else "No data matches the specified criteria."
-                        df_for_risk = df_filtered
+    #                     if not df_for_risk_clean.empty:
+    #                         try:
+    #                             # 🔧 FIX: Ensure population_type is proper enum
+    #                             risk_assessment_results = await self._perform_risk_assessment(
+    #                                 df_for_risk_clean,  # Use cleaned DataFrame
+    #                                 population_type     # This should already be PopulationType enum
+    #                             )
+    #                         except Exception as e:
+    #                             self.logger.error(f"Risk assessment failed: {e}")
+    #                             import traceback
+    #                             self.logger.error(f"Full traceback: {traceback.format_exc()}")
+    #                 if not df_filtered.equals(df):
+    #                     self.logger.info(f"Filtering applied: {len(df)} -> {len(df_filtered)} rows")
+    #                     final_answer = df_filtered.to_markdown(index=False) if not df_filtered.empty else "No data matches the specified criteria."
+    #                     df_for_risk = df_filtered
+    #                 else:
+    #                     df_for_risk = df
+    #             else:
+    #                 self.logger.warning("Could not parse LLM response into DataFrame")
+
+    #         except Exception as e:
+    #             self.logger.error(f"Error applying calculations: {e}")
+
+    #         risk_assessment_results = None
+    #         # FIX: Use the 'include_risk_assessment' parameter passed into the method
+    #         if include_risk_assessment and not df_for_risk.empty:
+    #             try:
+    #                 # 🔧 FIX: Convert string to enum if needed
+    #                 if isinstance(population_type, str):
+    #                     population_type = PopulationType(population_type)
+    #                     self.logger.error(f"DEBUG: Converted to enum: {type(population_type)}, value: {population_type}")
+                    
+    #                 risk_assessment_results = await self._perform_risk_assessment(
+    #                     df_for_risk_clean,
+    #                     population_type
+    #                 )
+    #             except Exception as e:
+    #                 self.logger.error(f"Risk assessment failed: {e}")
+
+    #         return {
+    #             "success": True,
+    #             "answer": final_answer,
+    #             "risk_assessment": risk_assessment_results.dict() if risk_assessment_results else None,
+    #         }
+
+    #     except Exception as e:
+    #         self.logger.error(f"Error processing local query: {e}")
+    #         import traceback
+    #         traceback.print_exc()
+    #         return {"success": False, "error": f"Error generating response: {str(e)}"}
+
+
+    async def answer_with_local_data(self,
+                                        project_id: int,
+                                        query: str,
+                                        n_results: int = 100,
+                                        include_risk_assessment: bool = False,
+                                        population_type: PopulationType = PopulationType.ADULT_AVERAGE
+                                        ) -> Dict:
+            """Answer query using local ChromaDB data with OpenAI"""
+            
+            if not self.chroma_client or not self.embed_fn:
+                return {"success": False, "error": "OpenAI API key not configured"}
+
+            collection_name = f"local_project_{project_id}"
+            try:
+                collection = self.chroma_client.get_collection(name=collection_name, embedding_function=self.embed_fn)
+                count = collection.count()
+                if count == 0:
+                    return {"success": False, "error": "No documents in collection"}
+            except Exception:
+                return {"success": False, "error": f"Local collection not found: {collection_name}"}
+
+            n_results = min(n_results, count)
+            
+            try:
+                result = collection.query(query_texts=[query], n_results=n_results)
+                if not result["documents"] or not result["documents"][0]:
+                    return {"success": False, "error": "No relevant documents found"}
+
+                context_docs = result['documents'][0]
+                context = "\n\n".join([doc for doc in context_docs])
+
+                prompt = f"""
+                **TASK:** Analyze the provided data to answer the user's question. You MUST format your entire response as a single, clean markdown table.
+                **RULES:**
+                1.  The table MUST have these exact, single-line headers: `Sample Code`, `Sample Name`, `Pesticide Name`, `Reading Value`, `Limit`, `Result`.
+                2.  Do NOT include any text, explanation, or summary before or after the table.
+                ---
+                **USER QUESTION:** {query}
+                ---
+                **DATA:**
+                {context}
+                """
+
+                # Use OpenAI instead of Gemini
+                response = self.openai_client.chat.completions.create(
+                    model=os.getenv("GENERATION_MODEL_ID", "gpt-4o-mini"),
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant that analyzes pesticide test data."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=int(os.getenv("GENERATION_DAFAULT_MAX_TOKENS", 2000)),
+                    temperature=float(os.getenv("GENERATION_DAFAULT_TEMPERATURE", 0.1))
+                )
+                
+                final_answer = response.choices[0].message.content
+                df_for_risk = pd.DataFrame()
+
+                try:
+                    df = parse_llm_response_to_df(final_answer)
+                    if df is not None and not df.empty:
+                        self.logger.info(f"Successfully parsed LLM response into DataFrame with {len(df)} rows")
+                    
+                        df_filtered = self._apply_query_calculations(df, query)
+                        
+                        if include_risk_assessment and not df_filtered.empty:
+                            # Prepare data for risk assessment
+                            df_for_risk_clean = df_filtered.copy()
+                            df_for_risk_clean['Reading Value'] = pd.to_numeric(df_for_risk_clean['Reading Value'], errors='coerce')
+                            df_for_risk_clean['Limit'] = pd.to_numeric(df_for_risk_clean['Limit'], errors='coerce')
+                            df_for_risk_clean = df_for_risk_clean.dropna(subset=['Reading Value', 'Limit'])
+                            
+                            if not df_for_risk_clean.empty:
+                                try:
+                                    risk_assessment_results = await self._perform_risk_assessment(
+                                        df_for_risk_clean,
+                                        population_type
+                                    )
+                                except Exception as e:
+                                    self.logger.error(f"Risk assessment failed: {e}")
+                        
+                        if not df_filtered.equals(df):
+                            self.logger.info(f"Filtering applied: {len(df)} -> {len(df_filtered)} rows")
+                            final_answer = df_filtered.to_markdown(index=False) if not df_filtered.empty else "No data matches the specified criteria."
+                            df_for_risk = df_filtered
+                        else:
+                            df_for_risk = df
                     else:
-                        df_for_risk = df
-                else:
-                    self.logger.warning("Could not parse LLM response into DataFrame")
+                        self.logger.warning("Could not parse LLM response into DataFrame")
+
+                except Exception as e:
+                    self.logger.error(f"Error applying calculations: {e}")
+
+                risk_assessment_results = None
+                if include_risk_assessment and not df_for_risk.empty:
+                    try:
+                        if isinstance(population_type, str):
+                            population_type = PopulationType(population_type)
+                        
+                        risk_assessment_results = await self._perform_risk_assessment(
+                            df_for_risk_clean,
+                            population_type
+                        )
+                    except Exception as e:
+                        self.logger.error(f"Risk assessment failed: {e}")
+
+                return {
+                    "success": True,
+                    "answer": final_answer,
+                    "risk_assessment": risk_assessment_results.dict() if risk_assessment_results else None,
+                }
 
             except Exception as e:
-                self.logger.error(f"Error applying calculations: {e}")
+                self.logger.error(f"Error processing local query: {e}")
+                import traceback
+                traceback.print_exc()
+                return {"success": False, "error": f"Error generating response: {str(e)}"}
 
-            risk_assessment_results = None
-            # FIX: Use the 'include_risk_assessment' parameter passed into the method
-            if include_risk_assessment and not df_for_risk.empty:
-                try:
-                    # 🔧 FIX: Convert string to enum if needed
-                    if isinstance(population_type, str):
-                        population_type = PopulationType(population_type)
-                        self.logger.error(f"DEBUG: Converted to enum: {type(population_type)}, value: {population_type}")
-                    
-                    risk_assessment_results = await self._perform_risk_assessment(
-                        df_for_risk_clean,
-                        population_type
-                    )
-                except Exception as e:
-                    self.logger.error(f"Risk assessment failed: {e}")
-
-            return {
-                "success": True,
-                "answer": final_answer,
-                "risk_assessment": risk_assessment_results.dict() if risk_assessment_results else None,
-            }
-
-        except Exception as e:
-            self.logger.error(f"Error processing local query: {e}")
-            import traceback
-            traceback.print_exc()
-            return {"success": False, "error": f"Error generating response: {str(e)}"}
+        # Keep all your other methods unchanged...
 
     async def _perform_risk_assessment(self, df: pd.DataFrame,
-                                 population_type: PopulationType) -> RiskAssessmentSummary:
+                                population_type: PopulationType) -> RiskAssessmentSummary:
         """Perform health risk assessment on DataFrame"""
         self.logger.info(f"Performing risk assessment for {len(df)} samples")
         self.logger.error(f"DEBUG: Risk assessment input - Shape: {df.shape}")
@@ -999,7 +1166,8 @@ class EnhancedNLPController:
         )
         self.logger.info(f"Risk assessment completed for {assessment_summary.total_samples_assessed} samples")
         return assessment_summary
-        
+
+            
     def _apply_query_calculations(self, df: pd.DataFrame, query: str) -> pd.DataFrame:
         """
         Simplified contamination filtering to avoid tabulate issues
