@@ -4,6 +4,7 @@ from typing import List
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Form, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+import re
 
 # --- Project Imports ---
 from dependencies import get_db
@@ -157,6 +158,7 @@ async def upload_iso_document(
             os.remove(file_path)
 
 
+
 @router.post("/answer/{project_id}")
 async def answer_iso_question(
     project_id: str,
@@ -210,21 +212,34 @@ async def answer_iso_question(
         context = "\n---\n".join(results["documents"][0])
         
         prompt = f"""
-        بناءً على مستندات ISO 17025 التالية، أجب على السؤال:
+        Based on the following ISO 17025 documents, answer the question directly and concisely.
 
-        السياق: {context}
-        
-        السؤال: {query_text}
-        
-        أجب بتنسيق واضح ومفصل.
+        Context: {context}
+
+        Question: {query_text}
+
+        IMPORTANT INSTRUCTIONS:
+        - Answer in the same language as the question (English question → English answer, Arabic question → Arabic answer)
+        - Be concise and direct
+        - Use clear formatting without asterisks or special characters
+        - Focus only on what the question asks for
+
+        Answer:
         """
         
+        # تحسينات الإجابة
+        language = detect_query_language(query_text)
+        context = "\n---\n".join(results["documents"][0])
+        prompt = create_language_specific_prompt(query_text, context, language)
+
         answer = nlp_controller.generation_model.generate_content(prompt)
+        cleaned_answer = clean_answer_text(answer.text)
+
         
         return {
             "project_id": project_id,
             "query": query_text,
-            "answer": answer.text,
+            "answer": cleaned_answer,
             "success": True,
             "sources": list(set([meta.get("source_file", "Unknown") for meta in results["metadatas"][0]])),
             "status": "success"
@@ -233,6 +248,67 @@ async def answer_iso_question(
     except Exception as e:
         logger.error(f"Query failed: {e}")
         return {"error": str(e)}
+    
+##### New methods for language selectivity ######
+
+def detect_query_language(query: str) -> str:
+    """كشف لغة الاستعلام"""
+    # البحث عن أحرف عربية
+    arabic_pattern = re.compile(r'[\u0600-\u06FF]')
+    if arabic_pattern.search(query):
+        return "arabic"
+    else:
+        return "english"
+
+def create_language_specific_prompt(query: str, context: str, language: str) -> str:
+    """إنشاء prompt حسب اللغة"""
+    
+    if language == "arabic":
+        return f"""
+        بناءً على مستندات ISO 17025 التالية، أجب على السؤال بوضوح وإيجاز.
+
+        السياق: {context}
+        السؤال: {query}
+
+        تعليمات مهمة:
+        - أجب بالعربية
+        - كن مباشر ومختصر
+        - ركز على ما يطلبه السؤال فقط
+        - استخدم تنسيق واضح بدون رموز خاصة
+
+        الجواب:
+        """
+    else:
+        return f"""
+        Based on the following ISO 17025 documents, answer the question clearly and concisely.
+
+        Context: {context}
+        Question: {query}
+
+        Important instructions:
+        - Answer in English
+        - Be direct and concise  
+        - Focus only on what the question asks for
+        - Use clear formatting without special characters
+
+        Answer:
+        """
+
+def clean_answer_text(text: str) -> str:
+    """تنظيف النص من الرموز الغريبة"""
+    # إزالة الـ markdown asterisks
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # **bold** → bold
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)      # *italic* → italic
+    
+    # إزالة \n الغريبة
+    text = text.replace('\\n', '\n')
+    
+    # إزالة المسافات الزائدة
+    text = re.sub(r'\s+', ' ', text)
+    text = text.strip()
+    
+    return text
+
 
 async def simple_text_search(request, project_id: str, query: str):
     """بحث نصي بسيط كبديل لـ vector search"""
