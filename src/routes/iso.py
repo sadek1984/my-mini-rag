@@ -197,7 +197,7 @@ async def answer_iso_question(
         # البحث
         results = collection.query(
             query_texts=[query_text],
-            n_results=5
+            n_results=15
         )
         
         if not results["documents"] or not results["documents"][0]:
@@ -226,22 +226,50 @@ async def answer_iso_question(
 
         Answer:
         """
+
+        # تصفية وإعادة ترتيب النتائج
+        enhanced_results = hybrid_search(collection, query_text, n_results=15)
         
+        if not enhanced_results:
+            return {
+                "project_id": project_id,
+                "query": query_text,
+                "answer": "لم يتم العثور على معلومات ذات صلة",
+                "status": "no_results"
+            }
+        # إعادة ترتيب حسب الأولوية
+        reranked_results = rerank_chunks_by_relevance(enhanced_results, query_text)
+        # أخذ أفضل النتائج للسياق
+        top_chunks = reranked_results[:5]
+        context = "\n---\n".join([chunk["document"] for chunk in top_chunks])
         # تحسينات الإجابة
         language = detect_query_language(query_text)
-        context = "\n---\n".join(results["documents"][0])
         prompt = create_language_specific_prompt(query_text, context, language)
-
         answer = nlp_controller.generation_model.generate_content(prompt)
         cleaned_answer = clean_answer_text(answer.text)
-
+        # فلترة المصادر المساهمة فعلياً
+        contributing_sources = []
+        for chunk in top_chunks:
+            if verify_content_contribution(chunk["document"], cleaned_answer):
+                source_file = chunk["metadata"].get("source_file", "Unknown")
+                if source_file not in contributing_sources:
+                    contributing_sources.append(source_file)
         
         return {
             "project_id": project_id,
             "query": query_text,
             "answer": cleaned_answer,
+            "language_detected": language,
             "success": True,
-            "sources": list(set([meta.get("source_file", "Unknown") for meta in results["metadatas"][0]])),
+            "sources": contributing_sources,  # فقط المصادر المساهمة
+            "all_searched_sources": list(set([chunk["metadata"].get("source_file") for chunk in top_chunks])),  # للتشخيص
+            "document_priorities": [
+                {
+                    "source": chunk["metadata"].get("source_file"),
+                    "type": chunk["metadata"].get("document_type"),
+                    "priority_score": chunk.get("priority_score", 0)
+                } for chunk in top_chunks[:3]
+            ],
             "status": "success"
         }
         
@@ -249,7 +277,7 @@ async def answer_iso_question(
         logger.error(f"Query failed: {e}")
         return {"error": str(e)}
     
-##### New methods for language selectivity ######
+##### Methods for language selectivity ######
 
 def detect_query_language(query: str) -> str:
     """كشف لغة الاستعلام"""
@@ -308,6 +336,225 @@ def clean_answer_text(text: str) -> str:
     text = text.strip()
     
     return text
+
+########## تصفية المصادر بناءً على المساهمة الفعلية ##########
+
+def verify_content_contribution(chunk_text, answer_text, threshold=0.15):  # خفض threshold
+    """التحقق من مساهمة chunk معين في الإجابة"""
+    
+    # إزالة كلمات شائعة
+    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did'}
+    
+    # تنظيف النصوص
+    chunk_words = set([w.lower().strip('.,!?;:()[]') for w in chunk_text.split() if w.lower() not in stop_words and len(w) > 2])
+    answer_words = set([w.lower().strip('.,!?;:()[]') for w in answer_text.split() if w.lower() not in stop_words and len(w) > 2])
+    
+    # حساب التداخل
+    overlap = len(chunk_words.intersection(answer_words))
+    
+    # شروط أكثر مرونة
+    if overlap >= 3:  # 3 كلمات مطابقة على الأقل
+        return True
+    
+    # أو نسبة تداخل معقولة
+    if len(chunk_words) > 0:
+        contribution_ratio = overlap / len(chunk_words)
+        return contribution_ratio >= threshold
+    
+    return False
+
+def calculate_document_priority(query, chunk_metadata):
+    """حساب أولوية المستند مع معالجة للأنواع غير المعروفة"""
+    
+    doc_type = chunk_metadata.get("document_type", "Unknown")
+    source_file = chunk_metadata.get("source_file", "").lower()
+    query_lower = query.lower()
+    
+    # إذا كان النوع Unknown، حاول استنتاجه من اسم الملف
+    if doc_type == "Unknown":
+        if "work instruction" in source_file or "wi-" in source_file:
+            doc_type = "Work Instruction"
+        elif "procedure" in source_file or "proc-" in source_file:
+            doc_type = "Procedure"
+        elif "quality" in source_file or "manual" in source_file or "qm-" in source_file:
+            doc_type = "Quality Manual"
+        elif "form" in source_file or "record" in source_file:
+            doc_type = "Form/Record"
+    
+    # باقي منطق حساب الأولوية...
+    technical_keywords = ["مواصفات", "specifications", "كيف", "how", "طريقة", "method", "إعداد", "preparation", "standard", "primary", "stock"]
+    policy_keywords = ["سياسة", "policy", "إدارة", "management", "متطلبات", "requirements"]
+    
+    is_technical_query = any(kw in query_lower for kw in technical_keywords)
+    is_policy_query = any(kw in query_lower for kw in policy_keywords)
+    
+    priority_scores = {
+        "Work Instruction": 10 if is_technical_query else 5,
+        "Procedure": 8 if is_technical_query else 7,
+        "Quality Manual": 3 if is_technical_query else 10,
+        "Form/Record": 6 if is_technical_query else 4,
+        "Unknown": 5  # قيمة متوسطة
+    }
+    
+    return priority_scores.get(doc_type, 5)
+
+def rerank_chunks_by_relevance(chunks, query):
+    """إعادة ترتيب chunks حسب الصلة والأولوية"""
+    
+    ranked_chunks = []
+    
+    for chunk in chunks:
+        priority_score = calculate_document_priority(query, chunk["metadata"])
+        word_matches = chunk.get("word_matches", 0)
+        
+        # نتيجة مُجمعة: أولوية المستند + مطابقة الكلمات
+        combined_score = priority_score * 2 + word_matches * 3
+        
+        ranked_chunks.append({
+            **chunk,
+            "priority_score": priority_score,
+            "combined_score": combined_score
+        })
+    
+    # ترتيب حسب النتيجة المُجمعة
+    ranked_chunks.sort(key=lambda x: x["combined_score"], reverse=True)
+    
+    return ranked_chunks
+
+def hybrid_search(collection, query_text, n_results=15):
+    """بحث مختلط محسن مع فلترة أفضل"""
+    
+    results = collection.query(
+        query_texts=[query_text],
+        n_results=n_results
+    )
+    
+    query_keywords = set(query_text.lower().split())
+    scored_results = []
+    
+    for i, doc in enumerate(results["documents"][0]):
+        doc_words = set(doc.lower().split())
+        keyword_matches = len(query_keywords.intersection(doc_words))
+        
+        # فقط chunks التي تحتوي على كلمة مفتاحية واحدة على الأقل
+        if keyword_matches > 0:
+            scored_results.append({
+                "document": doc,
+                "metadata": results["metadatas"][0][i],
+                "embedding_rank": i,
+                "word_matches": keyword_matches,
+                "combined_score": keyword_matches * 3 + (n_results - i)
+            })
+    
+    scored_results.sort(key=lambda x: x["combined_score"], reverse=True)
+    return scored_results[:10]
+#     _______________________________________________________________________________
+
+@router.post("/reupload_with_type/{project_id}")
+async def reupload_with_correct_types(project_id: str):
+    """إعادة تحديد أنواع المستندات الموجودة"""
+    
+    try:
+        collection_name = f"local_project_{project_id}"
+        from controllers.NLPController import EnhancedNLPController
+            
+        nlp_controller = EnhancedNLPController(
+            gemini_api_key=os.getenv("GEMINI_API_KEY")
+        )
+        
+        collection = nlp_controller.chroma_client.get_collection(name=collection_name)
+        
+        # الحصول على جميع chunks
+        all_data = collection.get()
+        
+        updates = []
+        for i, metadata in enumerate(all_data["metadatas"]):
+            source_file = metadata.get("source_file", "").lower()
+            
+            # تحديد النوع من اسم الملف
+            if "work instruction" in source_file:
+                new_type = "Work Instruction"
+            elif "quality" in source_file or "manual" in source_file:
+                new_type = "Quality Manual"
+            elif "proc" in source_file:
+                new_type = "Procedure"
+            else:
+                new_type = metadata.get("document_type", "Unknown")
+            
+            # تحديث metadata
+            updated_metadata = metadata.copy()
+            updated_metadata["document_type"] = new_type
+            
+            updates.append({
+                "id": all_data["ids"][i],
+                "metadata": updated_metadata
+            })
+        
+        # تطبيق التحديثات
+        for update in updates:
+            collection.update(
+                ids=[update["id"]],
+                metadatas=[update["metadata"]]
+            )
+        
+        return {
+            "message": f"Updated {len(updates)} chunks with correct document types",
+            "project_id": project_id
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+    
+
+@router.post("/debug_search/{project_id}")
+async def debug_search(
+    project_id: str,
+    query_data: dict
+):
+    """Debug search to see what chunks are being retrieved"""
+    try:
+        query_text = query_data.get("text", "")
+        
+        from controllers.NLPController import EnhancedNLPController
+        nlp_controller = EnhancedNLPController(
+            gemini_api_key=os.getenv("GEMINI_API_KEY")
+        )
+        
+        collection_name = f"local_project_{project_id}"
+        collection = nlp_controller.chroma_client.get_collection(
+            name=collection_name,
+            embedding_function=nlp_controller.embed_fn
+        )
+        
+        # بحث موسع للتشخيص
+        results = collection.query(
+            query_texts=[query_text],
+            n_results=15,  # زيادة العدد
+            include=["documents", "metadatas", "distances"]
+        )
+        
+        debug_info = []
+        for i, doc in enumerate(results["documents"][0]):
+            debug_info.append({
+                "rank": i + 1,
+                "distance": results["distances"][0][i],
+                "source": results["metadatas"][0][i].get("source_file", "Unknown"),
+                "chunk_preview": doc[:200] + "...",
+                "contains_keywords": {
+                    "primary": "primary" in doc.lower(),
+                    "stock": "stock" in doc.lower(), 
+                    "standard": "standard" in doc.lower()
+                }
+            })
+        
+        return {
+            "query": query_text,
+            "total_results": len(debug_info),
+            "debug_results": debug_info
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
 
 
 async def simple_text_search(request, project_id: str, query: str):
