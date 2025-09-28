@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import List
+from typing import Dict, List, Any, Optional
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Form, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -697,6 +697,8 @@ async def query_iso_hierarchical(
             query=query_data.get("text", ""),
             project_id=project_id
         )
+        if isinstance(result, dict) and "hierarchical_answer" in result:
+            result["hierarchical_answer"] = clean_answer_text(result["hierarchical_answer"])
         
         return {
             "project_id": project_id,
@@ -756,3 +758,294 @@ async def index_hierarchical_documents(nlp_controller, hierarchy_data, project_i
         logger.error(f"Hierarchical indexing failed: {e}")
         raise e
         
+
+@router.post("/upload_multiple/{project_id}")
+async def upload_multiple_files(
+    project_id: str,
+    files: List[UploadFile] = File(...),
+    document_type_1: str = Form(default="Unknown"),
+    document_type_2: str = Form(default="Unknown"), 
+    document_type_3: str = Form(default="Unknown"),
+    document_type_4: str = Form(default="Unknown")
+):
+    """رفع ملفات متعددة مع تتبع مفصل للتشخيص"""
+    try:
+        logger.info(f"=== UPLOAD DEBUG START ===")
+        logger.info(f"Received {len(files)} files for project {project_id}")
+        
+        # تجميع الأنواع
+        document_types = [document_type_1, document_type_2, document_type_3, document_type_4]
+        logger.info(f"Document types: {document_types}")
+        
+        # إنشاء مجلد مؤقت
+        temp_folder = f"/tmp/iso_project_{project_id}"
+        os.makedirs(temp_folder, exist_ok=True)
+        logger.info(f"Created temp folder: {temp_folder}")
+        
+        # إنشاء المجلدات الفرعية
+        subfolders = {
+            "Quality Manual": "1_quality_manual",
+            "Procedure": "2_procedures", 
+            "Work Instruction": "3_work_instructions",
+            "Form/Record": "4_forms_and_records"
+        }
+        
+        for subfolder in subfolders.values():
+            subfolder_path = f"{temp_folder}/{subfolder}"
+            os.makedirs(subfolder_path, exist_ok=True)
+            logger.info(f"Created subfolder: {subfolder_path}")
+        
+        # حفظ الملفات في المجلدات المناسبة
+        saved_files = []
+        for i, file in enumerate(files):
+            doc_type = document_types[i] if i < len(document_types) else "Unknown"
+            logger.info(f"Processing file {i}: {file.filename}, type: {doc_type}")
+            
+            if doc_type in subfolders:
+                subfolder = subfolders[doc_type]
+                file_path = f"{temp_folder}/{subfolder}/{file.filename}"
+                
+                try:
+                    content = await file.read()
+                    with open(file_path, "wb") as buffer:
+                        buffer.write(content)
+                    
+                    # التحقق من حفظ الملف
+                    if os.path.exists(file_path):
+                        file_size = os.path.getsize(file_path)
+                        logger.info(f"File saved successfully: {file_path}, size: {file_size} bytes")
+                        
+                        saved_files.append({
+                            "filename": file.filename,
+                            "type": doc_type,
+                            "path": file_path,
+                            "size": file_size
+                        })
+                    else:
+                        logger.error(f"File NOT saved: {file_path}")
+                        
+                except Exception as file_error:
+                    logger.error(f"Error saving file {file.filename}: {file_error}")
+            else:
+                logger.warning(f"Unknown document type '{doc_type}' for file {file.filename}")
+        
+        logger.info(f"Total files saved: {len(saved_files)}")
+        
+        # فحص محتويات المجلد قبل المعالجة الهرمية
+        logger.info("=== FOLDER CONTENTS BEFORE PROCESSING ===")
+        for root, dirs, files_in_dir in os.walk(temp_folder):
+            logger.info(f"Directory: {root}")
+            for filename in files_in_dir:
+                full_path = os.path.join(root, filename)
+                size = os.path.getsize(full_path)
+                logger.info(f"  File: {filename}, Size: {size} bytes")
+        
+        # المعالجة الهرمية
+        try:
+            from processors.iso_hierarchical_processor import ISO17025HierarchicalProcessor
+            
+            processor = ISO17025HierarchicalProcessor()
+            logger.info("Starting hierarchical processing...")
+            
+            hierarchy_data = processor.process_iso_folder_structure(temp_folder)
+            logger.info(f"Hierarchy data: {len(hierarchy_data['documents'])} documents found")
+            
+            if hierarchy_data["documents"]:
+                for i, doc in enumerate(hierarchy_data["documents"]):
+                    logger.info(f"Document {i}: {doc['metadata']['source_file']}, level: {doc.get('hierarchy_level', 'Unknown')}")
+            else:
+                logger.warning("No documents found in hierarchy data!")
+            
+            # فهرسة هرمية
+            from controllers.NLPController import EnhancedNLPController
+            nlp_controller = EnhancedNLPController(
+                gemini_api_key=os.getenv("GEMINI_API_KEY")
+            )
+            
+            indexed_count = await index_hierarchical_documents(
+                nlp_controller, hierarchy_data, project_id
+            )
+            
+            logger.info(f"Indexed {indexed_count} chunks")
+            status_message = "Hierarchical processing completed"
+            
+        except Exception as hierarchy_error:
+            logger.error(f"Hierarchical processing failed: {hierarchy_error}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # fallback للمعالجة العادية
+            status_message = f"Hierarchical failed, using standard processing: {str(hierarchy_error)}"
+            indexed_count = 0
+        
+        # تنظيف المجلد المؤقت
+        import shutil
+        shutil.rmtree(temp_folder)
+        logger.info("Cleaned up temp folder")
+        logger.info(f"=== UPLOAD DEBUG END ===")
+        
+        return {
+            "message": f"Multiple files uploaded: {status_message}",
+            "project_id": project_id,
+            "files_received": len(files),
+            "files_processed": len(saved_files),
+            "chunks_indexed": indexed_count,
+            "processed_files": saved_files,
+            "debug_info": {
+                "temp_folder": temp_folder,
+                "document_types_received": document_types
+            },
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"Multiple upload failed: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        
+        # تنظيف في حالة الخطأ
+        if 'temp_folder' in locals() and os.path.exists(temp_folder):
+            import shutil
+            shutil.rmtree(temp_folder)
+        
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+@router.get("/debug_logs/{project_id}")
+async def get_debug_logs(project_id: str):
+    """استرجاع آخر logs للتشخيص"""
+    try:
+        # قراءة logs من الذاكرة أو ملف
+        # هذا مثال بسيط
+        return {
+            "project_id": project_id,
+            "message": "Check FastAPI logs in console for detailed debug info",
+            "suggestion": "Run upload again and watch the logs"
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    
+
+@router.post("/upload_smart_multiple/{project_id}")
+async def upload_smart_multiple_files(
+    project_id: str,
+    files: List[UploadFile] = File(...)
+):
+    """رفع ملفات متعددة مع اكتشاف تلقائي للنوع"""
+    try:
+        logger.info(f"=== SMART UPLOAD START ===")
+        logger.info(f"Received {len(files)} files for project {project_id}")
+        
+        # إنشاء مجلد مؤقت
+        temp_folder = f"/tmp/iso_project_{project_id}"
+        os.makedirs(temp_folder, exist_ok=True)
+        
+        # إنشاء المجلدات الفرعية
+        subfolders = {
+            "Quality Manual": "1_quality_manual",
+            "Procedure": "2_procedures", 
+            "Work Instruction": "3_work_instructions",
+            "Form/Record": "4_forms_and_records"
+        }
+        
+        for subfolder in subfolders.values():
+            os.makedirs(f"{temp_folder}/{subfolder}", exist_ok=True)
+        
+        # معالجة كل ملف مع اكتشاف النوع
+        saved_files = []
+        for file in files:
+            # اكتشاف النوع من اسم الملف
+            doc_type = detect_document_type_from_filename(file.filename)
+            logger.info(f"File: {file.filename}, Detected type: {doc_type}")
+            
+            if doc_type in subfolders:
+                subfolder = subfolders[doc_type]
+                file_path = f"{temp_folder}/{subfolder}/{file.filename}"
+                
+                content = await file.read()
+                with open(file_path, "wb") as buffer:
+                    buffer.write(content)
+                
+                if os.path.exists(file_path):
+                    file_size = os.path.getsize(file_path)
+                    logger.info(f"File saved: {file_path}, size: {file_size}")
+                    
+                    saved_files.append({
+                        "filename": file.filename,
+                        "detected_type": doc_type,
+                        "path": file_path,
+                        "size": file_size
+                    })
+        
+        logger.info(f"Total files saved: {len(saved_files)}")
+        
+        # المعالجة الهرمية
+        from processors.iso_hierarchical_processor import ISO17025HierarchicalProcessor
+        processor = ISO17025HierarchicalProcessor()
+        hierarchy_data = processor.process_iso_folder_structure(temp_folder)
+        
+        logger.info(f"Hierarchy processing found {len(hierarchy_data['documents'])} documents")
+        
+        # فهرسة
+        from controllers.NLPController import EnhancedNLPController
+        nlp_controller = EnhancedNLPController(
+            gemini_api_key=os.getenv("GEMINI_API_KEY")
+        )
+        
+        indexed_count = await index_hierarchical_documents(
+            nlp_controller, hierarchy_data, project_id
+        )
+        
+        # تنظيف
+        import shutil
+        shutil.rmtree(temp_folder)
+        
+        logger.info(f"Successfully indexed {indexed_count} chunks")
+        
+        return {
+            "message": "Smart multiple upload completed",
+            "project_id": project_id,
+            "files_processed": len(saved_files),
+            "chunks_indexed": indexed_count,
+            "file_details": saved_files,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"Smart upload failed: {e}")
+        if 'temp_folder' in locals() and os.path.exists(temp_folder):
+            import shutil
+            shutil.rmtree(temp_folder)
+        raise HTTPException(status_code=500, detail=str(e))
+
+def detect_document_type_from_filename(filename: str) -> str:
+    """اكتشاف نوع المستند من اسم الملف"""
+    filename_lower = filename.lower()
+    
+    # Quality Manual
+    if any(keyword in filename_lower for keyword in ["quality", "manual", "qm-", "qm_"]):
+        return "Quality Manual"
+    
+    # Work Instructions  
+    elif any(keyword in filename_lower for keyword in ["work instruction", "wi-", "wi_", "instruction"]):
+        return "Work Instruction"
+    
+    # Procedures
+    elif any(keyword in filename_lower for keyword in ["proc-", "proc_", "procedure", "sop"]):
+        return "Procedure"
+    
+    # Forms and Records
+    elif any(keyword in filename_lower for keyword in ["form", "record", "rec-", "rec_"]):
+        return "Form/Record"
+    
+    # اكتشاف خاص للملفات المرفوعة
+    elif "gc-ms" in filename_lower and ("work" in filename_lower or "instruction" in filename_lower):
+        return "Work Instruction"
+    elif "quality" in filename_lower and "manual" in filename_lower:
+        return "Quality Manual"
+    
+    # افتراضي
+    else:
+        return "Work Instruction"  # معظم الملفات 
+    
+

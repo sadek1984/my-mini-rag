@@ -39,6 +39,31 @@ class ISO17025HierarchicalProcessor:
             }
         }
     
+    def _discover_cross_references(self, documents: List[Dict]) -> List[Dict]:
+        """نسخة مبسطة لاكتشاف العلاقات"""
+        # إرجاع قائمة فارغة للآن - يمكن تطويرها لاحقاً
+        return []
+    
+    def _get_level_by_prefix(self, prefix: str) -> int:
+        """تحديد المستوى الهرمي بناءً على البادئة"""
+        level_map = {
+            "QM": 1,
+            "PROC": 2, 
+            "WI": 3,
+            "FORM": 4,
+            "REC": 4
+        }
+        return level_map.get(prefix, 2)
+    
+    def _extract_compliance_requirements(self, text: str) -> List[str]:
+        """استخراج متطلبات الامتثال - نسخة مبسطة"""
+        # البحث عن بنود ISO 17025
+        import re
+        iso_clauses = re.findall(r'ISO\s+17025\s+(\d+\.\d+(?:\.\d+)?)', text, re.IGNORECASE)
+        requirements = re.findall(r'(?:shall|must|يجب)\s+([^.]{10,50})', text, re.IGNORECASE)
+        
+        return list(set(iso_clauses + requirements))[:10]
+
     def process_iso_folder_structure(self, base_path: str) -> Dict[str, Any]:
         """معالجة كامل المجلد بفهم هرمي"""
         base_path = Path(base_path)
