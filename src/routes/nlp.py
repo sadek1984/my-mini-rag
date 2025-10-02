@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, status, Request, Depends
+from fastapi import FastAPI, APIRouter, status, Request, Depends, Query
 from fastapi.responses import JSONResponse
 from routes.schemes.nlp import PushRequest, SearchRequest
 from models.ProjectModel import ProjectModel
@@ -16,6 +16,7 @@ from routes.schemes.nlp import PostLocalQuery, PostLocalIndex, PostDocQuery, Pos
 from models.risk_assessment_models import LocalAnswerRequest
 from pydantic import Field
 from models.risk_assessment_models import RiskAssessmentSummary, PopulationType
+from datetime import datetime
 
 
 
@@ -32,6 +33,8 @@ class LocalIndexRequest(BaseModel):
     data_folder_path: str
     months: Optional[List[str]] = None
     do_reset: Optional[bool] = False
+    year: str
+
 
 class LocalAnswerRequest(BaseModel):
     query: str
@@ -298,34 +301,56 @@ def validate_and_clean_pesticide_data(raw_data: str) -> str:
     
     return '\n'.join(cleaned_lines)
 
-
 @nlp_router.post("/local/index/{project_id}")
-async def index_local_data(request: Request, project_id: int, index_request: LocalIndexRequest):
-    """Index local Excel files for a project"""
+async def index_local_data(
+    request: Request, 
+    project_id: int, 
+    index_request: LocalIndexRequest
+):
+    """Index local Excel files for a specific year"""
     try:
-        # Check if GEMINI_API_KEY exists
-        gemini_api_key = os.getenv("GEMINI_API_KEY")
-        if not gemini_api_key:
+        # Validate year
+        if index_request.year not in ["2022", "2023", "2024", "2025"]:
             return JSONResponse(
                 status_code=400,
                 content={
-                    "signal": "GEMINI_API_KEY_MISSING",
-                    "message": "Please set GEMINI_API_KEY environment variable"
+                    "signal": "INVALID_YEAR",
+                    "message": f"Year must be one of: 2022, 2023, 2024, 2025. Got: {index_request.year}"
                 }
             )
         
-        # Initialize enhanced controller
+        # Check OpenAI API key
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "signal": "OPENAI_API_KEY_MISSING",
+                    "message": "Please set OPENAI_API_KEY environment variable"
+                }
+            )
+        
+        # Initialize controller
         enhanced_controller = EnhancedNLPController(
             vectordb_client=request.app.vectordb_client,
             generation_client=request.app.generation_client,
             embedding_client=request.app.embedding_client,
             template_parser=request.app.template_parser,
-            gemini_api_key=gemini_api_key
+            gemini_api_key=None
         )
         
-        # Process local Excel files
+        # *** FIX: Construct the FULL path including the year ***
+        year_folder_path = f"{index_request.data_folder_path}/{index_request.year}"
+        
+        print(f"=== INDEXING DEBUG ===")
+        print(f"Year: {index_request.year}")
+        print(f"Base path: {index_request.data_folder_path}")
+        print(f"Year folder path: {year_folder_path}")
+        print("=" * 30)
+        
+        # Process Excel files - pass the YEAR-SPECIFIC path
         documents, metadata = enhanced_controller.process_local_excel_files(
-            data_folder_path=index_request.data_folder_path,
+            data_folder_path=year_folder_path,  # <-- This should be /app/data/2022
             months=index_request.months
         )
         
@@ -334,26 +359,23 @@ async def index_local_data(request: Request, project_id: int, index_request: Loc
                 status_code=400,
                 content={
                     "signal": "NO_LOCAL_DATA_FOUND",
-                    "message": f"No Excel files found in {index_request.data_folder_path}",
-                    "searched_months": index_request.months or "all default months"
+                    "message": f"No Excel files found in {year_folder_path}",
+                    "year": index_request.year,
+                    "searched_path": year_folder_path
                 }
             )
-        # --- ADD YOUR DEBUG CODE HERE ---
-        # This is the perfect place to inspect the documents
-        print(f"--- DEBUG: Inspecting Documents ---")
-        print(f"Found {len(documents)} documents to index.")
+        
+        print(f"Found {len(documents)} documents to index")
         if documents:
-            print("Sample of the first document:")
-            print(f"Content: {documents[0][:500]}...") # Print the first 500 characters
-            print(f"Metadata: {metadata[0]}")
-        print(f"--- END DEBUG ---")
-
-        # Create ChromaDB collection
+            print(f"Sample: {documents[0][:200]}...")
+        
+        # Create collection
         collection = enhanced_controller.create_local_collection(
             project_id=project_id,
             documents=documents,
             metadata_list=metadata,
-            do_reset=index_request.do_reset
+            do_reset=index_request.do_reset,
+            year=index_request.year
         )
         
         return JSONResponse(
@@ -361,8 +383,10 @@ async def index_local_data(request: Request, project_id: int, index_request: Loc
                 "signal": "LOCAL_INDEX_SUCCESS",
                 "indexed_documents": len(documents),
                 "project_id": project_id,
-                "collection_name": f"local_project_{project_id}",
-                "data_folder": index_request.data_folder_path
+                "year": index_request.year,
+                "collection_name": f"local_project_{project_id}_year_{index_request.year}",
+                "data_folder": year_folder_path,
+                "indexed_at": datetime.now().isoformat()
             }
         )
             
@@ -373,199 +397,72 @@ async def index_local_data(request: Request, project_id: int, index_request: Loc
             status_code=500,
             content={
                 "signal": "LOCAL_INDEX_ERROR",
-                "error": str(e)
+                "error": str(e),
+                "traceback": traceback.format_exc()
             }
         )
-
-# @nlp_router.post("/local/answer/{project_id}")
-# async def local_answer_endpoint(request: Request, project_id: int, answer_request: LocalAnswerRequest):
-#     """Answer queries using locally indexed data - Enhanced with debugging"""
-#     try:
-#         gemini_api_key = os.getenv("GEMINI_API_KEY")
-#         if not gemini_api_key:
-#             return JSONResponse(
-#                 status_code=400,
-#                 content={
-#                     "signal": "GEMINI_API_KEY_MISSING",
-#                     "message": "Please set GEMINI_API_KEY environment variable"
-#                 }
-#             )
-        
-#         # Log the incoming request
-#         print(f"=== LOCAL ANSWER REQUEST ===")
-#         print(f"Project ID: {project_id}")
-#         print(f"Query: {answer_request.query}")
-#         print(f"N Results: {answer_request.n_results}")
-#         print("=" * 30)
-        
-#         # Initialize enhanced controller
-#         enhanced_controller = EnhancedNLPController(
-#             vectordb_client=request.app.vectordb_client,
-#             generation_client=request.app.generation_client,
-#             embedding_client=request.app.embedding_client,
-#             template_parser=request.app.template_parser,
-#             gemini_api_key=gemini_api_key
-#         )
-        
-#         # Get answer from local data
-#         result = await enhanced_controller.answer_with_local_data(
-#             project_id=project_id,
-#             query=answer_request.query,
-#             n_results=answer_request.n_results
-#         )
-        
-#         # Log the result
-#         print(f"=== LOCAL ANSWER RESULT ===")
-#         print(f"Success: {result.get('success', False)}")
-#         if result.get('success'):
-#             print(f"Answer length: {len(result.get('answer', ''))}")
-#             print(f"Retrieved docs: {result.get('retrieved_docs_count', 0)}")
-#             print(f"Debug info: {result.get('debug_info', {})}")
-#         else:
-#             print(f"Error: {result.get('error', 'Unknown error')}")
-#         print("=" * 30)
-        
-#         if not result.get("success", False):
-#             return JSONResponse(
-#                 status_code=400,
-#                 content={
-#                     "signal": "LOCAL_ANSWER_ERROR",
-#                     "error": result.get("error", "Unknown error occurred"),
-#                     "debug_info": result.get("debug_info", {})
-#                 }
-#             )
-        
-#         return JSONResponse(
-#             content={
-#                 "signal": "LOCAL_ANSWER_SUCCESS",
-#                 "answer": result["answer"],
-#                 "full_prompt": result.get("full_prompt", ""),
-#                 "retrieved_docs_count": result.get("retrieved_docs_count", 0),
-#                 "collection_total": result.get("collection_total", 0),
-#                 "project_id": project_id,
-#                 "debug_info": result.get("debug_info", {})
-#             }
-#         )
-        
-#     except Exception as e:
-#         import traceback
-#         traceback.print_exc()
-#         return JSONResponse(
-#             status_code=500,
-#             content={
-#                 "signal": "LOCAL_ANSWER_ERROR",
-#                 "error": str(e),
-#                 "traceback": traceback.format_exc()
-#             }
-#         )
-
-
-
-
-# @nlp_router.post("/local/answer/{project_id}")
-# async def local_answer_endpoint(request: Request, project_id: int, 
-#                                answer_request: LocalAnswerRequest):
-#     """Answer queries using locally indexed data with optional health risk assessment"""
-    
-#     try:
-#         gemini_api_key = os.getenv("GEMINI_API_KEY")
-#         if not gemini_api_key:
-#             return JSONResponse(
-#                 status_code=400,
-#                 content={
-#                     "signal": "GEMINI_API_KEY_MISSING",
-#                     "message": "Please set GEMINI_API_KEY environment variable"
-#                 }
-#             )
-
-#         # Log the incoming request
-#         print(f"=== LOCAL ANSWER REQUEST ===")
-#         print(f"Project ID: {project_id}")
-#         print(f"Query: {answer_request.query}")
-#         print(f"N Results: {answer_request.n_results}")
-#         print(f"Include Risk Assessment: {answer_request.include_risk_assessment}")
-#         print(f"Population Type: {answer_request.population_type}")
-#         print("=" * 30)
-
-#         # Initialize enhanced controller
-#         enhanced_controller = EnhancedNLPController(
-#             vectordb_client=request.app.vectordb_client,
-#             generation_client=request.app.generation_client,
-#             embedding_client=request.app.embedding_client,
-#             template_parser=request.app.template_parser,
-#             gemini_api_key=gemini_api_key
-#         )
-
 @nlp_router.post("/local/answer/{project_id}")
 async def local_answer_endpoint(request: Request, project_id: int,
-                               answer_request: LocalAnswerRequest):
-    """Answer queries using locally indexed data with OpenAI"""
+                               answer_request: LocalAnswerRequest,
+                               year: Optional[str] = Query(default=None)):
+    """Answer queries using locally indexed data with Gemini"""
     try:
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not openai_api_key:
+        # Get year from query parameter
+        target_year = year or str(datetime.now().year)
+        
+        # Get GEMINI API key (you're using Gemini, not OpenAI!)
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
             return JSONResponse(
                 status_code=400,
                 content={
-                    "signal": "OPENAI_API_KEY_MISSING",
-                    "message": "Please set OPENAI_API_KEY environment variable"
+                    "signal": "GEMINI_API_KEY_MISSING",
+                    "message": "Please set GEMINI_API_KEY environment variable"
                 }
             )
 
-        # Initialize controller with OpenAI
+        # Initialize controller WITH Gemini key
         enhanced_controller = EnhancedNLPController(
             vectordb_client=request.app.vectordb_client,
             generation_client=request.app.generation_client,
             embedding_client=request.app.embedding_client,
             template_parser=request.app.template_parser,
-            gemini_api_key=None  # Not needed anymore
+            gemini_api_key=gemini_api_key  # Pass the actual key!
         )
         
-        # Get answer from local data with optional risk assessment
+        # Get answer from local data
         result = await enhanced_controller.answer_with_local_data(
             project_id=project_id,
             query=answer_request.query,
             n_results=answer_request.n_results,
             include_risk_assessment=answer_request.include_risk_assessment,
-            population_type=answer_request.population_type.value
+            population_type=answer_request.population_type,  # Remove .value
+            year=target_year
         )
-
-        # Log the result
-        print(f"=== LOCAL ANSWER RESULT ===")
-        print(f"Success: {result.get('success', False)}")
-        if result.get('success'):
-            print(f"Answer length: {len(result.get('answer', ''))}")
-            print(f"Retrieved docs: {result.get('retrieved_docs_count', 0)}")
-            print(f"Risk assessment included: {result.get('risk_assessment') is not None}")
-        else:
-            print(f"Error: {result.get('error', 'Unknown error')}")
-        print("=" * 30)
 
         if not result.get("success", False):
             return JSONResponse(
                 status_code=400,
                 content={
                     "signal": "LOCAL_ANSWER_ERROR",
-                    "error": result.get("error", "Unknown error occurred"),
+                    "error": result.get("error", "Unknown error"),
                     "debug_info": result.get("debug_info", {})
                 }
             )
 
-        # Prepare response
-        response_content = {
+        # Return response
+        return JSONResponse(content={
             "signal": "LOCAL_ANSWER_SUCCESS",
             "answer": result["answer"],
-            "full_prompt": result.get("full_prompt", ""),
+            "data_frame": result.get("data_frame", []),
+            "columns": result.get("columns", []),
             "retrieved_docs_count": result.get("retrieved_docs_count", 0),
+            "full_prompt": result.get("full_prompt", ""),
             "collection_total": result.get("collection_total", 0),
+            "risk_assessment": result.get("risk_assessment"),
             "project_id": project_id,
-            "debug_info": result.get("debug_info", {})
-        }
-
-        # Add risk assessment if available
-        if result.get("risk_assessment"):
-            response_content["risk_assessment"] = result["risk_assessment"]
-
-        return JSONResponse(content=response_content)
+            "year": target_year
+        })
 
     except Exception as e:
         import traceback
@@ -578,136 +475,7 @@ async def local_answer_endpoint(request: Request, project_id: int,
                 "traceback": traceback.format_exc()
             }
         )
-
-
-# Add this debug endpoint to check collection status
-@nlp_router.post("/local/full-debug/{project_id}")
-async def full_debug_analysis(request: Request, project_id: int, debug_request: LocalAnswerRequest):
-    """Comprehensive debug analysis to compare with Colab"""
-    try:
-        gemini_api_key = os.getenv("GEMINI_API_KEY")
-        if not gemini_api_key:
-            return JSONResponse(status_code=400, content={"error": "GEMINI_API_KEY missing"})
-        
-        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
-        collection_name = f"local_project_{project_id}"
-        
-        # Get collection
-        try:
-            collection = enhanced_controller.chroma_client.get_collection(
-                name=collection_name,
-                embedding_function=enhanced_controller.embed_fn
-            )
-        except Exception as e:
-            return JSONResponse(status_code=404, content={"error": f"Collection not found: {e}"})
-        
-        # Set to query mode
-        enhanced_controller.embed_fn.document_mode = False
-        
-        # Perform the same query
-        result = collection.query(
-            query_texts=[debug_request.query],
-            n_results=min(debug_request.n_results, collection.count())
-        )
-        
-        # Analyze retrieved documents
-        context_docs = result['documents'][0] if result['documents'] else []
-        
-        analysis = {
-            "collection_info": {
-                "name": collection_name,
-                "total_docs": collection.count(),
-                "query": debug_request.query,
-                "n_results_requested": debug_request.n_results,
-                "docs_retrieved": len(context_docs)
-            },
-            "document_analysis": [],
-            "content_analysis": {
-                "total_content_length": 0,
-                "contains_pesticide_terms": False,
-                "contains_pepper_terms": False,
-                "contains_result_terms": False,
-                "sample_content": ""
-            }
-        }
-        
-        # Analyze each retrieved document
-        for i, doc in enumerate(context_docs[:3]):  # First 3 docs
-            doc_analysis = {
-                "doc_index": i,
-                "content_length": len(doc),
-                "content_preview": doc[:300],
-                "contains_terms": {
-                    "pesticide": "pesticide" in doc.lower() or "مبيد" in doc,
-                    "pepper": "pepper" in doc.lower() or "فلفل" in doc,
-                    "result": "result" in doc.lower() or "نتيجة" in doc,
-                    "non_compliant": "غير مطابق" in doc,
-                    "compliant": "مطابق" in doc
-                },
-                "line_count": doc.count('\n'),
-                "word_count": len(doc.split())
-            }
-            analysis["document_analysis"].append(doc_analysis)
-        
-        # Overall content analysis
-        combined_content = " ".join(context_docs)
-        analysis["content_analysis"] = {
-            "total_content_length": len(combined_content),
-            "contains_pesticide_terms": "pesticide" in combined_content.lower() or "مبيد" in combined_content,
-            "contains_pepper_terms": "pepper" in combined_content.lower() or "فلفل" in combined_content,
-            "contains_result_terms": "result" in combined_content.lower() or "نتيجة" in combined_content,
-            "contains_non_compliant": "غير مطابق" in combined_content,
-            "sample_content": combined_content[:500]
-        }
-        
-        # Now try to generate an answer and see what happens
-        try:
-            passages = context_docs
-            combined_passage = " ".join(passages)
-            passage_oneline = combined_passage.replace("\n", " ")
-            query_oneline = debug_request.query.replace("\n", " ")
-            
-            prompt = f"""You are a helpful assistant summarizing pesticide readings.
-List readings where النتيجة (result) is 'غير مطابق' for pepper in a structured format.
-
-QUESTION: {query_oneline}
-PASSAGE: {passage_oneline}
-
-⚠️ Important:
-- Do NOT summarize, list every individual reading.
-- Separate values clearly structured.
-- If there are multiple values, provide all of them.
-
-Example output:
-- كود العينة sample code, اسم العينة Sample Name, اسم المبيد Pesticide Name, الحدود Limits, قراءة الجهاز Reading of device, النتيجة result"""
-            
-            # Generate answer
-            answer = enhanced_controller.generation_model.generate_content(prompt)
-            
-            analysis["generation_analysis"] = {
-                "prompt_length": len(prompt),
-                "answer_length": len(answer.text),
-                "answer_preview": answer.text[:500],
-                "full_answer": answer.text,
-                "prompt_preview": prompt[:500]
-            }
-            
-        except Exception as e:
-            analysis["generation_analysis"] = {
-                "error": str(e),
-                "traceback": traceback.format_exc()
-            }
-        
-        return JSONResponse(content=analysis)
-        
-    except Exception as e:
-        import traceback
-        return JSONResponse(
-            status_code=500,
-            content={"error": str(e), "traceback": traceback.format_exc()}
-        )
-
-
+    
 # Also add a simple test endpoint to check raw ChromaDB data
 @nlp_router.get("/local/raw-data/{project_id}")
 async def get_raw_data_sample(request: Request, project_id: int):
@@ -800,4 +568,212 @@ async def query_local_data_export(project_id: int, data: PostLocalQuery):
     except Exception as e:
         logger.error(f"Error during Excel export: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"detail": f"An internal error occurred: {str(e)}"})
+
+
+
+@nlp_router.get("/local/debug-path/{year}")
+async def debug_data_path(year: str):
+    """Debug endpoint to check folder structure"""
+    import os
+    from pathlib import Path
+    
+    base_path = f"/app/data/{year}"
+    
+    debug_info = {
+        "year": year,
+        "base_path": base_path,
+        "exists": os.path.exists(base_path),
+        "is_dir": os.path.isdir(base_path) if os.path.exists(base_path) else False,
+        "contents": []
+    }
+    
+    if os.path.exists(base_path):
+        try:
+            # List all items in the directory
+            for item in os.listdir(base_path):
+                item_path = os.path.join(base_path, item)
+                item_info = {
+                    "name": item,
+                    "is_dir": os.path.isdir(item_path),
+                    "is_file": os.path.isfile(item_path),
+                }
+                
+                if os.path.isdir(item_path):
+                    # If it's a directory, list its contents
+                    try:
+                        subcontents = os.listdir(item_path)
+                        item_info["files_count"] = len([f for f in subcontents if f.endswith('.xlsx')])
+                        item_info["sample_files"] = [f for f in subcontents if f.endswith('.xlsx')][:3]
+                    except Exception as e:
+                        item_info["error"] = str(e)
+                
+                debug_info["contents"].append(item_info)
+        except Exception as e:
+            debug_info["error"] = str(e)
+    
+    return JSONResponse(content=debug_info)
+
+
+
+
+# @nlp_router.post("/local/index/{project_id}")
+# async def index_local_data(request: Request, project_id: int, index_request: LocalIndexRequest):
+#     """Index local Excel files for a project"""
+#     try:
+#         # Check if GEMINI_API_KEY exists
+#         gemini_api_key = os.getenv("GEMINI_API_KEY")
+#         if not gemini_api_key:
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={
+#                     "signal": "GEMINI_API_KEY_MISSING",
+#                     "message": "Please set GEMINI_API_KEY environment variable"
+#                 }
+#             )
+        
+#         # Initialize enhanced controller
+#         enhanced_controller = EnhancedNLPController(
+#             vectordb_client=request.app.vectordb_client,
+#             generation_client=request.app.generation_client,
+#             embedding_client=request.app.embedding_client,
+#             template_parser=request.app.template_parser,
+#             gemini_api_key=gemini_api_key
+#         )
+        
+#         # Process local Excel files
+#         documents, metadata = enhanced_controller.process_local_excel_files(
+#             data_folder_path=index_request.data_folder_path,
+#             months=index_request.months
+#         )
+        
+#         if not documents:
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={
+#                     "signal": "NO_LOCAL_DATA_FOUND",
+#                     "message": f"No Excel files found in {index_request.data_folder_path}",
+#                     "searched_months": index_request.months or "all default months"
+#                 }
+#             )
+#         # --- ADD YOUR DEBUG CODE HERE ---
+#         # This is the perfect place to inspect the documents
+#         print(f"--- DEBUG: Inspecting Documents ---")
+#         print(f"Found {len(documents)} documents to index.")
+#         if documents:
+#             print("Sample of the first document:")
+#             print(f"Content: {documents[0][:500]}...") # Print the first 500 characters
+#             print(f"Metadata: {metadata[0]}")
+#         print(f"--- END DEBUG ---")
+
+#         # Create ChromaDB collection
+#         collection = enhanced_controller.create_local_collection(
+#             project_id=project_id,
+#             documents=documents,
+#             metadata_list=metadata,
+#             do_reset=index_request.do_reset
+#         )
+        
+#         return JSONResponse(
+#             content={
+#                 "signal": "LOCAL_INDEX_SUCCESS",
+#                 "indexed_documents": len(documents),
+#                 "project_id": project_id,
+#                 "collection_name": f"local_project_{project_id}",
+#                 "data_folder": index_request.data_folder_path
+#             }
+#         )
+            
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         return JSONResponse(
+#             status_code=500,
+#             content={
+#                 "signal": "LOCAL_INDEX_ERROR",
+#                 "error": str(e)
+#             }
+#         )
+
+
+# @nlp_router.post("/local/answer/{project_id}")
+# async def local_answer_endpoint(request: Request, project_id: int, answer_request: LocalAnswerRequest):
+#     """Answer queries using locally indexed data - Enhanced with debugging"""
+#     try:
+#         gemini_api_key = os.getenv("GEMINI_API_KEY")
+#         if not gemini_api_key:
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={
+#                     "signal": "GEMINI_API_KEY_MISSING",
+#                     "message": "Please set GEMINI_API_KEY environment variable"
+#                 }
+#             )
+        
+#         # Log the incoming request
+#         print(f"=== LOCAL ANSWER REQUEST ===")
+#         print(f"Project ID: {project_id}")
+#         print(f"Query: {answer_request.query}")
+#         print(f"N Results: {answer_request.n_results}")
+#         print("=" * 30)
+        
+#         # Initialize enhanced controller
+#         enhanced_controller = EnhancedNLPController(
+#             vectordb_client=request.app.vectordb_client,
+#             generation_client=request.app.generation_client,
+#             embedding_client=request.app.embedding_client,
+#             template_parser=request.app.template_parser,
+#             gemini_api_key=gemini_api_key
+#         )
+        
+#         # Get answer from local data
+#         result = await enhanced_controller.answer_with_local_data(
+#             project_id=project_id,
+#             query=answer_request.query,
+#             n_results=answer_request.n_results
+#         )
+        
+#         # Log the result
+#         print(f"=== LOCAL ANSWER RESULT ===")
+#         print(f"Success: {result.get('success', False)}")
+#         if result.get('success'):
+#             print(f"Answer length: {len(result.get('answer', ''))}")
+#             print(f"Retrieved docs: {result.get('retrieved_docs_count', 0)}")
+#             print(f"Debug info: {result.get('debug_info', {})}")
+#         else:
+#             print(f"Error: {result.get('error', 'Unknown error')}")
+#         print("=" * 30)
+        
+#         if not result.get("success", False):
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={
+#                     "signal": "LOCAL_ANSWER_ERROR",
+#                     "error": result.get("error", "Unknown error occurred"),
+#                     "debug_info": result.get("debug_info", {})
+#                 }
+#             )
+        
+#         return JSONResponse(
+#             content={
+#                 "signal": "LOCAL_ANSWER_SUCCESS",
+#                 "answer": result["answer"],
+#                 "full_prompt": result.get("full_prompt", ""),
+#                 "retrieved_docs_count": result.get("retrieved_docs_count", 0),
+#                 "collection_total": result.get("collection_total", 0),
+#                 "project_id": project_id,
+#                 "debug_info": result.get("debug_info", {})
+#             }
+#         )
+        
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         return JSONResponse(
+#             status_code=500,
+#             content={
+#                 "signal": "LOCAL_ANSWER_ERROR",
+#                 "error": str(e),
+#                 "traceback": traceback.format_exc()
+#             }
+#         )
 

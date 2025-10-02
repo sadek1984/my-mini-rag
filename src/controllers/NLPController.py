@@ -562,11 +562,77 @@ class EnhancedNLPController:
         # The libraries are causing text to disappear
         return text
 
+    # def process_local_excel_files(self, data_folder_path: str, months: List[str] = None) -> tuple:
+    #     """Process local Excel files from month folders"""
+    #     if months is None:
+    #         months = ["Jan","Feb", "March", "April", "May", "June",
+    #                 "July", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        
+    #     documents = []
+    #     metadata_list = []
+    #     data_path = Path(data_folder_path)
+        
+    #     if not data_path.exists():
+    #         raise ValueError(f"Data folder not found: {data_path}")
+        
+    #     self.logger.info(f"Processing local Excel files from: {data_path}")
+        
+    #     for month_folder in months:
+    #         month_path = data_path / month_folder
+            
+    #         if not month_path.exists():
+    #             self.logger.warning(f"Month folder not found: {month_path}")
+    #             continue
+                
+    #         self.logger.info(f"Processing month: {month_folder}")
+            
+    #         for file_path in month_path.glob("*.xlsx"):
+            
+    #             try:
+    #                 # Go back to simple approach - just match Colab exactly
+    #                 # df = pd.read_excel(file_path, skiprows=10)
+                    
+    #                 # 1. Use the robust function to load the Excel file into a DataFrame
+    #                 df = load_and_prepare_excel(str(file_path))
+                    
+    #                 if df is None or df.empty:
+    #                     self.logger.warning(f"File skipped, could not find valid headers or data: {file_path.name}")
+    #                     continue
+                    
+    #                 # 2. Clean the DataFrame to remove rows with no pesticide data
+    #                 cleaned_df = clean_pesticide_data(df)
+                    
+    #                 if cleaned_df.empty:
+    #                     self.logger.warning(f"File skipped after cleaning (no valid pesticide rows): {file_path.name}")
+    #                     continue
+
+    #                 # 3. NEW: Format each valid row into a descriptive sentence
+    #                 row_texts = format_rows_as_text(cleaned_df)
+                    
+    #                 # Add each sentence as a separate document to be indexed
+    #                 for text in row_texts:
+    #                     documents.append(text)
+    #                     metadata_list.append({
+    #                         "source_file": file_path.name,
+    #                         "month": month_folder,
+    #                         "file_path": str(file_path),
+    #                         "data_type": "local_excel_row",
+    #                     })
+                    
+    #                 self.logger.info(f"Processed: {file_path.name}, created {len(row_texts)} documents from rows.")
+
+    #             except Exception as e:
+    #                 self.logger.error(f"Critical error processing {file_path.name}: {e}")
+
+
+    #     self.logger.info(f"Total local documents processed: {len(documents)}")
+    #     return documents, metadata_list
+    #     print(documents[0][:20])  # Print first 5 chars of first document for verification
+
+
+
     def process_local_excel_files(self, data_folder_path: str, months: List[str] = None) -> tuple:
         """Process local Excel files from month folders"""
-        if months is None:
-            months = ["Jan","Feb", "March", "April", "May", "June",
-                    "July", "Aug", "Sep", "Oct", "Nov", "Dec"]
         
         documents = []
         metadata_list = []
@@ -577,39 +643,49 @@ class EnhancedNLPController:
         
         self.logger.info(f"Processing local Excel files from: {data_path}")
         
+        # AUTO-DISCOVER all subdirectories if months not specified
+        if not months:
+            all_folders = [f.name for f in data_path.iterdir() if f.is_dir()]
+            months = all_folders
+            self.logger.info(f"Auto-discovered {len(months)} folders: {months}")
+        
         for month_folder in months:
             month_path = data_path / month_folder
             
-            if not month_path.exists():
-                self.logger.warning(f"Month folder not found: {month_path}")
+            if not month_path.exists() or not month_path.is_dir():
+                self.logger.warning(f"Skipping non-directory: {month_path}")
                 continue
                 
-            self.logger.info(f"Processing month: {month_folder}")
+            self.logger.info(f"Processing folder: {month_folder}")
             
-            for file_path in month_path.glob("*.xlsx"):
+            # Find all Excel files
+            excel_files = list(month_path.glob("*.xlsx"))
+            self.logger.info(f"Found {len(excel_files)} Excel files in {month_folder}")
             
+            for file_path in excel_files:
                 try:
-                    # Go back to simple approach - just match Colab exactly
-                    # df = pd.read_excel(file_path, skiprows=10)
-                    
-                    # 1. Use the robust function to load the Excel file into a DataFrame
+                    # Load Excel file
                     df = load_and_prepare_excel(str(file_path))
                     
                     if df is None or df.empty:
-                        self.logger.warning(f"File skipped, could not find valid headers or data: {file_path.name}")
+                        self.logger.warning(f"Skipped (no valid data): {file_path.name}")
                         continue
                     
-                    # 2. Clean the DataFrame to remove rows with no pesticide data
+                    # Clean the data
                     cleaned_df = clean_pesticide_data(df)
                     
                     if cleaned_df.empty:
-                        self.logger.warning(f"File skipped after cleaning (no valid pesticide rows): {file_path.name}")
+                        self.logger.warning(f"Skipped (empty after cleaning): {file_path.name}")
                         continue
-
-                    # 3. NEW: Format each valid row into a descriptive sentence
+                    
+                    # Format rows as text
                     row_texts = format_rows_as_text(cleaned_df)
                     
-                    # Add each sentence as a separate document to be indexed
+                    if not row_texts:
+                        self.logger.warning(f"Skipped (no text generated): {file_path.name}")
+                        continue
+                    
+                    # Add documents
                     for text in row_texts:
                         documents.append(text)
                         metadata_list.append({
@@ -619,28 +695,37 @@ class EnhancedNLPController:
                             "data_type": "local_excel_row",
                         })
                     
-                    self.logger.info(f"Processed: {file_path.name}, created {len(row_texts)} documents from rows.")
-
+                    self.logger.info(f"✓ Processed {file_path.name}: {len(row_texts)} documents")
+                    
                 except Exception as e:
-                    self.logger.error(f"Critical error processing {file_path.name}: {e}")
-
-
-        self.logger.info(f"Total local documents processed: {len(documents)}")
+                    self.logger.error(f"Error processing {file_path.name}: {e}")
+                    import traceback
+                    self.logger.error(traceback.format_exc())
+        
+        self.logger.info(f"Total documents processed: {len(documents)}")
         return documents, metadata_list
-        print(documents[0][:20])  # Print first 5 chars of first document for verification
 
 
-
-    def create_local_collection(self, project_id: int, documents: List[str], 
-                               metadata_list: List[Dict], do_reset: bool = False):
-        """Create ChromaDB collection for local data"""
+    def create_local_collection(self, project_id: int, documents: List[str],
+                        metadata_list: List[Dict], do_reset: bool = False,
+                        year: Optional[str] = None) -> Any:
+        
+        self.logger.error(f"DEBUG: create_local_collection called with year={year}")
+        self.logger.error(f"DEBUG: project_id={project_id}, do_reset={do_reset}")
+        self.logger.error(f"DEBUG: Number of documents={len(documents)}")
+    
+        """Create ChromaDB collection for local data with year-specific naming"""
         if not self.chroma_client:
             raise ValueError("ChromaDB not initialized. Check GEMINI_API_KEY.")
         
         # Set to document mode for indexing
         self.embed_fn.document_mode = True
         
-        collection_name = f"local_project_{project_id}"
+        # Use year in collection name if provided
+        if year:
+            collection_name = f"local_project_{project_id}_year_{year}"
+        else:
+            collection_name = f"local_project_{project_id}"
         
         # Delete existing collection if reset requested
         if do_reset:
@@ -653,15 +738,21 @@ class EnhancedNLPController:
         # Create or get collection
         collection = self.chroma_client.get_or_create_collection(
             name=collection_name,
-            embedding_function=self.embed_fn
+            embedding_function=self.embed_fn,
+            metadata={"project_id": project_id, "year": year} if year else {"project_id": project_id}
         )
         
         # Add documents in batches
         batch_size = 50
-        for i in tqdm(range(0, len(documents), batch_size), desc="Indexing local data"):
+        for i in tqdm(range(0, len(documents), batch_size), desc=f"Indexing {year or 'local'} data"):
             batch_docs = documents[i:i+batch_size]
             batch_metadata = metadata_list[i:i+batch_size]
-            batch_ids = [f"doc_{j}" for j in range(i, i+len(batch_docs))]
+            
+            # Include year in document IDs for better tracking
+            if year:
+                batch_ids = [f"{year}_doc_{j}" for j in range(i, i+len(batch_docs))]
+            else:
+                batch_ids = [f"doc_{j}" for j in range(i, i+len(batch_docs))]
             
             try:
                 collection.add(
@@ -673,9 +764,8 @@ class EnhancedNLPController:
                 self.logger.error(f"Error adding batch {i//batch_size + 1}: {e}")
         
         final_count = collection.count()
-        self.logger.info(f"Local collection created: {final_count} documents indexed")
+        self.logger.info(f"Local collection '{collection_name}' created: {final_count} documents indexed")
         return collection
-
 
     ############### NEW METHODS FOR DataFrame calculations ###############
          ############### e.g. reading > (X * limit) ###############
@@ -845,45 +935,70 @@ class EnhancedNLPController:
         }
         
         return summary
-
-
-    # --- METHOD WITH CORRECTIONS APPLIED ---
     async def answer_with_local_data(self,
-                                     project_id: int,
-                                     query: str,
-                                     n_results: int = 100,
-                                     include_risk_assessment: bool = False,
-                                     population_type: PopulationType = PopulationType.ADULT_AVERAGE
-                                     ) -> Dict:
+                                    project_id: int,
+                                    query: str,
+                                    n_results: int = 100,
+                                    include_risk_assessment: bool = False,
+                                    population_type: PopulationType = PopulationType.ADULT_AVERAGE,
+                                    year: Optional[str] = None) -> Dict:
         """Answer query using local ChromaDB data with optional risk assessment"""
+        
+        # Check initialization
         if not self.chroma_client or not self.embed_fn or not self.generation_model:
             return {"success": False, "error": "Gemini API key not configured"}
+        
+        self.logger.error(f"DEBUG QUERY: project_id={project_id}, year={year}")
 
-        collection_name = f"local_project_{project_id}"
+        # Use year-specific collection name
+        if year:
+            collection_name = f"local_project_{project_id}_year_{year}"
+        else:
+            collection_name = f"local_project_{project_id}"
+        self.logger.error(f"DEBUG QUERY: Looking for collection: {collection_name}")
+        # Get collection
         try:
-            collection = self.chroma_client.get_collection(name=collection_name, embedding_function=self.embed_fn)
+            # CRITICAL: Set to query mode before querying
+            self.embed_fn.document_mode = False
+            self.logger.error(f"DEBUG QUERY: Set embed_fn.document_mode = False")
+            collection = self.chroma_client.get_collection(
+                name=collection_name, 
+                embedding_function=self.embed_fn
+            )
             count = collection.count()
+            self.logger.error(f"DEBUG QUERY: Found collection with {count} documents")
             if count == 0:
-                return {"success": False, "error": "No documents in collection"}
-        except Exception:
-            return {"success": False, "error": f"Local collection not found: {collection_name}"}
+                return {
+                    "success": False, 
+                    "error": f"No documents in collection for year {year or 'all'}"
+                }
+        except Exception as e:
+            return {
+                "success": False, 
+                "error": f"Collection not found: {collection_name}. Error: {str(e)}"
+            }
 
         n_results = min(n_results, count)
-        self.embed_fn.document_mode = False
 
         try:
+            # Query the collection
             result = collection.query(query_texts=[query], n_results=n_results)
+            
             if not result["documents"] or not result["documents"][0]:
                 return {"success": False, "error": "No relevant documents found"}
 
             context_docs = result['documents'][0]
             context = "\n\n".join([doc for doc in context_docs])
+            self.logger.error(f"DEBUG: First retrieved doc:\n{context_docs[0][:500] if context_docs else 'NO DOCS'}")
+            self.logger.error(f"DEBUG: Query was: {query}")
+            self.logger.error(f"DEBUG: Does doc contain 'pyridaben'? {'pyridaben' in context_docs[0].lower() if context_docs else False}")
 
+            # Generate answer with LLM
             prompt = f"""
             **TASK:** Analyze the provided data to answer the user's question. You MUST format your entire response as a single, clean markdown table.
             **RULES:**
-            1.  The table MUST have these exact, single-line headers: `Sample Code`, `Sample Name`, `Pesticide Name`, `Reading Value`, `Limit`, `Result`.
-            2.  Do NOT include any text, explanation, or summary before or after the table.
+            1. The table MUST have these exact, single-line headers: `Sample Code`, `Sample Name`, `Pesticide Name`, `Reading Value`, `Limit`, `Result`.
+            2. Do NOT include any text, explanation, or summary before or after the table.
             ---
             **USER QUESTION:** {query}
             ---
@@ -891,91 +1006,72 @@ class EnhancedNLPController:
             {context}
             """
 
+        
             answer = self.generation_model.generate_content(prompt)
             final_answer = answer.text
-            df_for_risk = pd.DataFrame()
+            self.logger.error(f"DEBUG: LLM raw response:\n{answer.text[:500]}")
 
+            risk_assessment_results = None
+            df_result = pd.DataFrame()
+
+            # Parse response into DataFrame
             try:
                 df = parse_llm_response_to_df(answer.text)
                 if df is not None and not df.empty:
-                    self.logger.info(f"Successfully parsed LLM response into DataFrame with {len(df)} rows")
-                   
-                    self.logger.error(f"DEBUG: Initial DataFrame shape: {df.shape}")
-                    self.logger.error(f"DEBUG: DataFrame columns: {df.columns.tolist()}")
-                    self.logger.error(f"DEBUG: First row data types:\n{df.dtypes}")
+                    self.logger.info(f"Parsed {len(df)} rows from LLM response")
                     
                     df_filtered = self._apply_query_calculations(df, query)
                     
-                    self.logger.error(f"DEBUG: After filtering shape: {df_filtered.shape}")
-                    self.logger.error(f"DEBUG: df_for_risk is empty: {df_filtered.empty}")
-                    
-                    # Add this critical debug before risk assessment
+                    # Risk assessment if requested
                     if include_risk_assessment and not df_filtered.empty:
-                        self.logger.error(f"DEBUG: About to call risk assessment with {len(df_filtered)} rows")
-    
-                        # 🔧 FIX: Prepare data for risk assessment
-                        df_for_risk_clean = df_filtered.copy()
+                        df_for_risk = df_filtered.copy()
+                        df_for_risk['Reading Value'] = pd.to_numeric(df_for_risk['Reading Value'], errors='coerce')
+                        df_for_risk['Limit'] = pd.to_numeric(df_for_risk['Limit'], errors='coerce')
+                        df_for_risk = df_for_risk.dropna(subset=['Reading Value', 'Limit'])
                         
-                        # Convert numeric columns from strings to numbers
-                        df_for_risk_clean['Reading Value'] = pd.to_numeric(df_for_risk_clean['Reading Value'], errors='coerce')
-                        df_for_risk_clean['Limit'] = pd.to_numeric(df_for_risk_clean['Limit'], errors='coerce')
-                        
-                        # Remove any rows where conversion failed
-                        df_for_risk_clean = df_for_risk_clean.dropna(subset=['Reading Value', 'Limit'])
-                        
-                        self.logger.error(f"DEBUG: After numeric conversion - Shape: {df_for_risk_clean.shape}")
-                        self.logger.error(f"DEBUG: Data types after conversion:\n{df_for_risk_clean.dtypes}")
-                        
-                        if not df_for_risk_clean.empty:
+                        if not df_for_risk.empty:
                             try:
-                                # 🔧 FIX: Ensure population_type is proper enum
+                                if isinstance(population_type, str):
+                                    population_type = PopulationType(population_type)
+                                
                                 risk_assessment_results = await self._perform_risk_assessment(
-                                    df_for_risk_clean,  # Use cleaned DataFrame
-                                    population_type     # This should already be PopulationType enum
+                                    df_for_risk,
+                                    population_type
                                 )
                             except Exception as e:
                                 self.logger.error(f"Risk assessment failed: {e}")
-                                import traceback
-                                self.logger.error(f"Full traceback: {traceback.format_exc()}")
+                    
+                    # Use filtered results
                     if not df_filtered.equals(df):
-                        self.logger.info(f"Filtering applied: {len(df)} -> {len(df_filtered)} rows")
-                        final_answer = df_filtered.to_markdown(index=False) if not df_filtered.empty else "No data matches the specified criteria."
-                        df_for_risk = df_filtered
+                        final_answer = df_filtered.to_markdown(index=False) if not df_filtered.empty else "No data matches criteria."
+                        df_result = df_filtered
                     else:
-                        df_for_risk = df
+                        df_result = df
                 else:
                     self.logger.warning("Could not parse LLM response into DataFrame")
-
             except Exception as e:
-                self.logger.error(f"Error applying calculations: {e}")
-
-            risk_assessment_results = None
-            # FIX: Use the 'include_risk_assessment' parameter passed into the method
-            if include_risk_assessment and not df_for_risk.empty:
-                try:
-                    # 🔧 FIX: Convert string to enum if needed
-                    if isinstance(population_type, str):
-                        population_type = PopulationType(population_type)
-                        self.logger.error(f"DEBUG: Converted to enum: {type(population_type)}, value: {population_type}")
-                    
-                    risk_assessment_results = await self._perform_risk_assessment(
-                        df_for_risk_clean,
-                        population_type
-                    )
-                except Exception as e:
-                    self.logger.error(f"Risk assessment failed: {e}")
+                self.logger.error(f"Error parsing/filtering: {e}")
 
             return {
                 "success": True,
                 "answer": final_answer,
+                "data_frame": df_result.to_dict('records') if not df_result.empty else [],
+                "columns": df_result.columns.tolist() if not df_result.empty else [],
                 "risk_assessment": risk_assessment_results.dict() if risk_assessment_results else None,
+                "retrieved_docs_count": len(context_docs),
+                "collection_total": count,
+                "year": year,
+                "debug_info": {
+                    "collection_name": collection_name,
+                    "query": query
+                }
             }
 
         except Exception as e:
-            self.logger.error(f"Error processing local query: {e}")
+            self.logger.error(f"Error processing query: {e}")
             import traceback
             traceback.print_exc()
-            return {"success": False, "error": f"Error generating response: {str(e)}"}
+            return {"success": False, "error": f"Error: {str(e)}"}
 
     async def _perform_risk_assessment(self, df: pd.DataFrame,
                                  population_type: PopulationType) -> RiskAssessmentSummary:
