@@ -9,6 +9,7 @@ services:
     volumes:
       - fastapi_data:/app/assets
       - ./chroma_data:/app/chroma_db:rw
+      - ./chroma_db:/app/chroma_db  # Add this line
       - /Users/a12/mini-rag/src/data:/app/data
     networks:
       - backend
@@ -145,3 +146,4 @@ volumes:
   qdrant_data:
   prometheus_data:
   grafana_data:
+  chroma_data:

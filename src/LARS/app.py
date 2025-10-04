@@ -1132,7 +1132,7 @@ def process_query(api_client, query: str):
         result = api_client.local_answer(
             query=query,
             year=query_year,
-            n_results=300,
+            n_results=1000,
             include_risk=include_risk
         )
         
@@ -1207,6 +1207,7 @@ def display_individual_results(data_frame: list):
                 else:
                     st.error(f"**Result:** {result_status}")
 
+
 def display_download_options(result: Dict, year: str, data_frame: list):
     """Display download buttons for results"""
     col1, col2 = st.columns(2)
@@ -1232,6 +1233,7 @@ def display_download_options(result: Dict, year: str, data_frame: list):
                 mime="text/csv",
                 use_container_width=True
             )
+
 
 # ============================================================================
 # RUN APPLICATION

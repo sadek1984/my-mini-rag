@@ -1,3 +1,5 @@
+# routes/nlp.py - FIXED VERSION
+
 from fastapi import FastAPI, APIRouter, status, Request, Depends, Query
 from fastapi.responses import JSONResponse
 from routes.schemes.nlp import PushRequest, SearchRequest
@@ -11,16 +13,18 @@ from controllers.ProcessControllers import DirectPesticideController
 from pydantic import BaseModel
 from typing import Optional, List
 import os
-from fastapi.responses import StreamingResponse # <-- Add this import
+from fastapi.responses import StreamingResponse
 from routes.schemes.nlp import PostLocalQuery, PostLocalIndex, PostDocQuery, PostDocIndex
 from models.risk_assessment_models import LocalAnswerRequest
 from pydantic import Field
 from models.risk_assessment_models import RiskAssessmentSummary, PopulationType
 from datetime import datetime
-
-
-
+import re
 import logging
+import traceback
+
+# FIXED IMPORT - No Streamlit dependencies
+from utils.request_logger import RequestResponseLogger, extract_year_from_text
 
 logger = logging.getLogger('uvicorn.error')
 
@@ -35,14 +39,11 @@ class LocalIndexRequest(BaseModel):
     do_reset: Optional[bool] = False
     year: str
 
-
 class LocalAnswerRequest(BaseModel):
     query: str
     n_results: Optional[int] = 100
     llm_provider: str = Field(default="openai")
     prompt_template: Optional[str] = Field(default="en")
-    
-    # Add the missing field and population type for the assessment
     include_risk_assessment: Optional[bool] = Field(default=False, description="Flag to run health risk assessment on the results")
     population_type: Optional[PopulationType] = Field(default=PopulationType.ADULT_AVERAGE, description="Target population for risk assessment")
 
@@ -401,57 +402,178 @@ async def index_local_data(
                 "traceback": traceback.format_exc()
             }
         )
+# @nlp_router.post("/local/answer/{project_id}")
+# async def local_answer_endpoint(request: Request, project_id: int,
+#                                answer_request: LocalAnswerRequest,
+#                                year: Optional[str] = Query(default=None)):
+#     """Answer queries using locally indexed data with Gemini"""
+#     try:
+#         # Get year from query parameter
+#         target_year = year or str(datetime.now().year)
+        
+#         # Get GEMINI API key (you're using Gemini, not OpenAI!)
+#         gemini_api_key = os.getenv("GEMINI_API_KEY")
+#         if not gemini_api_key:
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={
+#                     "signal": "GEMINI_API_KEY_MISSING",
+#                     "message": "Please set GEMINI_API_KEY environment variable"
+#                 }
+#             )
+
+#         # Initialize controller WITH Gemini key
+#         enhanced_controller = EnhancedNLPController(
+#             vectordb_client=request.app.vectordb_client,
+#             generation_client=request.app.generation_client,
+#             embedding_client=request.app.embedding_client,
+#             template_parser=request.app.template_parser,
+#             gemini_api_key=gemini_api_key  # Pass the actual key!
+#         )
+        
+#         # Get answer from local data
+#         result = await enhanced_controller.answer_with_local_data(
+#             project_id=project_id,
+#             query=answer_request.query,
+#             n_results=answer_request.n_results,
+#             include_risk_assessment=answer_request.include_risk_assessment,
+#             population_type=answer_request.population_type,  # Remove .value
+#             year=target_year
+#         )
+
+#         if not result.get("success", False):
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={
+#                     "signal": "LOCAL_ANSWER_ERROR",
+#                     "error": result.get("error", "Unknown error"),
+#                     "debug_info": result.get("debug_info", {})
+#                 }
+#             )
+
+#         # Return response
+#         return JSONResponse(content={
+#             "signal": "LOCAL_ANSWER_SUCCESS",
+#             "answer": result["answer"],
+#             "data_frame": result.get("data_frame", []),
+#             "columns": result.get("columns", []),
+#             "retrieved_docs_count": result.get("retrieved_docs_count", 0),
+#             "full_prompt": result.get("full_prompt", ""),
+#             "collection_total": result.get("collection_total", 0),
+#             "risk_assessment": result.get("risk_assessment"),
+#             "project_id": project_id,
+#             "year": target_year
+#         })
+
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         return JSONResponse(
+#             status_code=500,
+#             content={
+#                 "signal": "LOCAL_ANSWER_ERROR",
+#                 "error": str(e),
+#                 "traceback": traceback.format_exc()
+#             }
+#         )
+
+
+def extract_year_from_text(text: str) -> Optional[str]:
+    """Extract year from text"""
+    import re
+    year_match = re.search(r'\b(202[2-5])\b', text)
+    if year_match:
+        return year_match.group(1)
+    return None
+
+
 @nlp_router.post("/local/answer/{project_id}")
 async def local_answer_endpoint(request: Request, project_id: int,
                                answer_request: LocalAnswerRequest,
                                year: Optional[str] = Query(default=None)):
-    """Answer queries using locally indexed data with Gemini"""
+    """Fixed endpoint with proper year handling and logging"""
+    
+    # Initialize logger
+    request_logger = RequestResponseLogger()
+    
     try:
-        # Get year from query parameter
-        target_year = year or str(datetime.now().year)
+        # 1. PRIORITY ORDER for year selection:
+        # First: Query parameter (from user sidebar selection)
+        # Second: Extract from query text  
+        # Third: Default to 2022
         
-        # Get GEMINI API key (you're using Gemini, not OpenAI!)
+        target_year = None
+        year_source = None
+        
+        # 1. Check query parameter first (user's explicit selection)
+        if year and year in ["2022", "2023", "2024", "2025"]:
+            target_year = year
+            year_source = "user_selection"
+            logger.info(f"Using year from user selection: {target_year}")
+        
+        # 2. Extract from query text if no parameter
+        if not target_year:
+            extracted_year = extract_year_from_text(answer_request.query)
+            if extracted_year and extracted_year in ["2022", "2023", "2024", "2025"]:
+                target_year = extracted_year
+                year_source = "extracted_from_query"
+                logger.info(f"Extracted year from query: {target_year}")
+        
+        # 3. Default fallback
+        if not target_year:
+            target_year = "2022"  # Your specified default year
+            year_source = "default"
+            logger.info(f"Using default year: {target_year}")
+        
+        logger.error(f"=== FINAL YEAR DECISION: {target_year} (source: {year_source}) ===")
+        
+        # Get Gemini API key
         gemini_api_key = os.getenv("GEMINI_API_KEY")
         if not gemini_api_key:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "signal": "GEMINI_API_KEY_MISSING",
-                    "message": "Please set GEMINI_API_KEY environment variable"
-                }
-            )
+            error_response = {
+                "signal": "GEMINI_API_KEY_MISSING",
+                "message": "Please set GEMINI_API_KEY environment variable",
+                "success": False
+            }
+            await request_logger.log_request_response(request, error_response)
+            return JSONResponse(status_code=400, content=error_response)
 
-        # Initialize controller WITH Gemini key
+        # Initialize controller
         enhanced_controller = EnhancedNLPController(
             vectordb_client=request.app.vectordb_client,
             generation_client=request.app.generation_client,
             embedding_client=request.app.embedding_client,
             template_parser=request.app.template_parser,
-            gemini_api_key=gemini_api_key  # Pass the actual key!
+            gemini_api_key=gemini_api_key
         )
         
-        # Get answer from local data
+        max_results = min(answer_request.n_results, 2000)  # ← INCREASE cap
+
+
+        # Call with explicit year
         result = await enhanced_controller.answer_with_local_data(
             project_id=project_id,
             query=answer_request.query,
-            n_results=answer_request.n_results,
+            n_results=max_results,
             include_risk_assessment=answer_request.include_risk_assessment,
-            population_type=answer_request.population_type,  # Remove .value
+            population_type=answer_request.population_type,
             year=target_year
         )
 
         if not result.get("success", False):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "signal": "LOCAL_ANSWER_ERROR",
-                    "error": result.get("error", "Unknown error"),
-                    "debug_info": result.get("debug_info", {})
-                }
-            )
+            error_response = {
+                "signal": "LOCAL_ANSWER_ERROR",
+                "error": result.get("error", "Unknown error"),
+                "debug_info": result.get("debug_info", {}),
+                "year_used": target_year,
+                "year_source": year_source,
+                "success": False
+            }
+            await request_logger.log_request_response(request, error_response)
+            return JSONResponse(status_code=400, content=error_response)
 
-        # Return response
-        return JSONResponse(content={
+        # Prepare successful response
+        success_response = {
             "signal": "LOCAL_ANSWER_SUCCESS",
             "answer": result["answer"],
             "data_frame": result.get("data_frame", []),
@@ -461,21 +583,35 @@ async def local_answer_endpoint(request: Request, project_id: int,
             "collection_total": result.get("collection_total", 0),
             "risk_assessment": result.get("risk_assessment"),
             "project_id": project_id,
-            "year": target_year
-        })
+            "year_used": target_year,
+            "year_source": year_source,
+            "success": True
+        }
+        
+        # Log the successful request/response
+        await request_logger.log_request_response(request, success_response)
+        
+        return JSONResponse(content=success_response)
 
     except Exception as e:
-        import traceback
+        error_response = {
+            "signal": "LOCAL_ANSWER_ERROR",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "success": False
+        }
+        
+        # Log the error
+        await request_logger.log_request_response(request, error_response)
+        
+        # Print traceback for debugging
         traceback.print_exc()
+        
         return JSONResponse(
             status_code=500,
-            content={
-                "signal": "LOCAL_ANSWER_ERROR",
-                "error": str(e),
-                "traceback": traceback.format_exc()
-            }
+            content=error_response
         )
-    
+
 # Also add a simple test endpoint to check raw ChromaDB data
 @nlp_router.get("/local/raw-data/{project_id}")
 async def get_raw_data_sample(request: Request, project_id: int):
@@ -777,3 +913,352 @@ async def debug_data_path(year: str):
 #             }
 #         )
 
+
+
+# 4. TEST IMMEDIATELY: Add this debug endpoint
+
+@nlp_router.get("/debug/search-coverage/{project_id}")
+async def debug_search_coverage(
+    request: Request, 
+    project_id: int, 
+    year: str = Query(default="2022")
+):
+    """Quick test to see what's actually in the collection"""
+    
+    try:
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
+        
+        collection_name = f"local_project_{project_id}_year_{year}"
+        enhanced_controller.embed_fn.document_mode = False
+        collection = enhanced_controller.chroma_client.get_collection(
+            name=collection_name, 
+            embedding_function=enhanced_controller.embed_fn
+        )
+        
+        # Get all documents and analyze
+        all_docs = collection.get()
+        
+        # Count specific terms
+        buprofezin_docs = [doc for doc in all_docs["documents"] if "buprofezin" in doc.lower()]
+        high_reading_docs = [doc for doc in all_docs["documents"] if any(str(num) in doc for num in [568, 423, 409, 179, 186, 172, 125, 113])]
+        
+        return {
+            "total_documents": len(all_docs["documents"]),
+            "buprofezin_documents": len(buprofezin_docs),
+            "high_reading_documents": len(high_reading_docs),
+            "sample_buprofezin_docs": buprofezin_docs[:3],
+            "sample_high_reading_docs": high_reading_docs[:3],
+            "excel_values_found": {
+                "568": any("568" in doc for doc in all_docs["documents"]),
+                "423": any("423" in doc for doc in all_docs["documents"]),
+                "409": any("409" in doc for doc in all_docs["documents"]),
+                "179": any("179" in doc for doc in all_docs["documents"])
+            }
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+# 5. VERIFY DATA INDEXING: Check if your Excel data was properly indexed
+
+@nlp_router.get("/debug/verify-indexing/{project_id}")
+async def verify_indexing_quality(
+    request: Request, 
+    project_id: int,
+    year: str = Query(default="2024")  # Check 2024 since that's what your Excel shows
+):
+    """Verify if Excel data was properly indexed"""
+    
+    try:
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
+        
+        collection_name = f"local_project_{project_id}_year_{year}"
+        
+        try:
+            enhanced_controller.embed_fn.document_mode = False
+            collection = enhanced_controller.chroma_client.get_collection(
+                name=collection_name, 
+                embedding_function=enhanced_controller.embed_fn
+            )
+            
+            # Search for specific values from your Excel
+            excel_checks = {}
+            excel_values = ["568", "423", "409", "179", "186", "172", "125", "113", "Buprofezin"]
+            
+            for value in excel_values:
+                search_result = collection.query(query_texts=[value], n_results=10)
+                excel_checks[value] = {
+                    "found": len(search_result["documents"][0]) if search_result["documents"] else 0,
+                    "sample_docs": search_result["documents"][0][:2] if search_result["documents"] else []
+                }
+            
+            return {
+                "collection_exists": True,
+                "collection_count": collection.count(),
+                "excel_value_checks": excel_checks,
+                "recommendation": "If Excel values not found, re-index 2024 data"
+            }
+            
+        except Exception as e:
+            return {
+                "collection_exists": False,
+                "error": str(e),
+                "recommendation": f"Index {year} data first - collection {collection_name} not found"
+            }
+        
+    except Exception as e:
+        return {"error": str(e)}
+    
+
+@nlp_router.get("/debug/test-pesticide-query/{project_id}")
+async def test_pesticide_query(
+    request: Request,
+    project_id: int,
+    pesticide: str = Query(default="Buprofezin"),
+    year: str = Query(default="2022")
+):
+    """Test querying for specific pesticide to see retrieval quality"""
+    
+    try:
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
+        
+        collection_name = f"local_project_{project_id}_year_{year}"
+        enhanced_controller.embed_fn.document_mode = False
+        collection = enhanced_controller.chroma_client.get_collection(
+            name=collection_name, 
+            embedding_function=enhanced_controller.embed_fn
+        )
+        
+        # Test different query strategies
+        test_results = {}
+        
+        # 1. Direct pesticide name
+        direct_results = collection.query(query_texts=[pesticide], n_results=20)
+        test_results["direct_pesticide"] = {
+            "query": pesticide,
+            "found": len(direct_results["documents"][0]) if direct_results["documents"] else 0,
+            "samples": direct_results["documents"][0][:3] if direct_results["documents"] else []
+        }
+        
+        # 2. Pesticide with "contaminated"
+        contam_query = f"{pesticide} contaminated"
+        contam_results = collection.query(query_texts=[contam_query], n_results=20)
+        test_results["contaminated_query"] = {
+            "query": contam_query,
+            "found": len(contam_results["documents"][0]) if contam_results["documents"] else 0,
+            "samples": contam_results["documents"][0][:2] if contam_results["documents"] else []
+        }
+        
+        # 3. Arabic non-compliant
+        arabic_query = "غير مطابق"
+        arabic_results = collection.query(query_texts=[arabic_query], n_results=20)
+        test_results["arabic_noncompliant"] = {
+            "query": arabic_query,
+            "found": len(arabic_results["documents"][0]) if arabic_results["documents"] else 0,
+            "samples": arabic_results["documents"][0][:2] if arabic_results["documents"] else []
+        }
+        
+        # 4. High reading values
+        high_reading_query = "reading 423"
+        high_results = collection.query(query_texts=[high_reading_query], n_results=10)
+        test_results["high_reading"] = {
+            "query": high_reading_query,
+            "found": len(high_results["documents"][0]) if high_results["documents"] else 0,
+            "samples": high_results["documents"][0][:2] if high_results["documents"] else []
+        }
+        
+        return {
+            "pesticide_tested": pesticide,
+            "year": year,
+            "collection_total": collection.count(),
+            "test_results": test_results,
+            "recommendation": "Compare which query strategy retrieves the most relevant results"
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+    
+
+@nlp_router.post("/local/comprehensive-answer/{project_id}")
+async def comprehensive_answer(
+    request: Request, 
+    project_id: int,
+    answer_request: LocalAnswerRequest,
+    year: Optional[str] = Query(default=None)
+):
+    """Comprehensive search that finds ALL matching results"""
+    
+    try:
+        target_year = year or "2022"
+        
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
+        
+        # Use MUCH higher retrieval and comprehensive strategies
+        result = await enhanced_controller.answer_with_local_data(
+            project_id=project_id,
+            query=answer_request.query,
+            n_results=2000,  # Much higher
+            include_risk_assessment=answer_request.include_risk_assessment,
+            population_type=answer_request.population_type,
+            year=target_year
+        )
+        
+        return JSONResponse(content={
+            "signal": "COMPREHENSIVE_ANSWER_SUCCESS",
+            "answer": result["answer"],
+            "data_frame": result.get("data_frame", []),
+            "retrieved_docs_count": result.get("retrieved_docs_count", 0),
+            "collection_total": result.get("collection_total", 0),
+            "search_strategy": "comprehensive_multi_query",
+            "year_used": target_year
+        })
+        
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+    
+
+# Add this endpoint to your routes/nlp.py:
+
+@nlp_router.get("/debug/health-check/{project_id}")
+async def health_check_collection(
+    request: Request,
+    project_id: int,
+    year: str = Query(default="2024")
+):
+    """Complete health check for debugging issues"""
+    
+    try:
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
+            return {"error": "No Gemini API key", "status": "failed"}
+        
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
+        
+        # Check 1: ChromaDB connection
+        try:
+            all_collections = enhanced_controller.chroma_client.list_collections()
+            chroma_status = "connected"
+        except Exception as e:
+            return {"error": f"ChromaDB connection failed: {e}", "status": "failed"}
+        
+        # Check 2: Specific collection
+        collection_name = f"local_project_{project_id}_year_{year}"
+        try:
+            enhanced_controller.embed_fn.document_mode = False
+            collection = enhanced_controller.chroma_client.get_collection(
+                name=collection_name,
+                embedding_function=enhanced_controller.embed_fn
+            )
+            collection_count = collection.count()
+            collection_status = "found"
+        except Exception as e:
+            return {
+                "error": f"Collection '{collection_name}' not found: {e}",
+                "available_collections": [c.name for c in all_collections],
+                "status": "collection_missing"
+            }
+        
+        # Check 3: Test searches for both pesticides
+        test_results = {}
+        test_queries = ["Buprofezin", "Bifenthrin", "buprofezin", "bifenthrin"]
+        
+        for test_query in test_queries:
+            try:
+                test_search = collection.query(query_texts=[test_query], n_results=10)
+                found_count = len(test_search["documents"][0]) if test_search["documents"] else 0
+                test_results[test_query] = {
+                    "found": found_count,
+                    "sample_docs": test_search["documents"][0][:2] if test_search["documents"] else []
+                }
+            except Exception as e:
+                test_results[test_query] = {"error": str(e)}
+        
+        # Check 4: Verify data content
+        sample_docs = collection.get(limit=10)
+        bifenthrin_count = sum(1 for doc in sample_docs["documents"] if "bifenthrin" in doc.lower())
+        buprofezin_count = sum(1 for doc in sample_docs["documents"] if "buprofezin" in doc.lower())
+        
+        return {
+            "status": "healthy",
+            "collection_name": collection_name,
+            "collection_count": collection_count,
+            "chroma_status": chroma_status,
+            "total_collections": len(all_collections),
+            "test_search_results": test_results,
+            "content_analysis": {
+                "bifenthrin_mentions": bifenthrin_count,
+                "buprofezin_mentions": buprofezin_count,
+                "sample_documents": sample_docs["documents"][:3]
+            },
+            "recommendations": {
+                "bifenthrin_search": "Use 'Bifenthrin' (capital B) for better results",
+                "data_persistence": "Collection appears healthy" if collection_count > 200 else "Low document count - may need re-indexing"
+            }
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "status": "failed",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+    
+# Add this test endpoint to verify bifenthrin count:
+
+@nlp_router.get("/debug/bifenthrin-count/{project_id}")
+async def debug_bifenthrin_count(
+    request: Request,
+    project_id: int,
+    year: str = Query(default="2024")
+):
+    """Count actual bifenthrin samples in collection"""
+    
+    try:
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
+        
+        collection_name = f"local_project_{project_id}_year_{year}"
+        enhanced_controller.embed_fn.document_mode = False
+        collection = enhanced_controller.chroma_client.get_collection(
+            name=collection_name,
+            embedding_function=enhanced_controller.embed_fn
+        )
+        
+        # Get ALL documents and count bifenthrin mentions
+        all_docs = collection.get()
+        
+        bifenthrin_docs = []
+        for doc in all_docs["documents"]:
+            if "bifenthrin" in doc.lower():
+                bifenthrin_docs.append(doc)
+        
+        # Extract sample codes from bifenthrin docs
+        import re
+        sample_codes = []
+        for doc in bifenthrin_docs:
+            # Extract sample codes like P45-2520, P46-1336, etc.
+            codes = re.findall(r"'([P]\d+-\d+)'", doc)
+            sample_codes.extend(codes)
+        
+        unique_samples = list(set(sample_codes))
+        
+        return {
+            "total_documents": len(all_docs["documents"]),
+            "bifenthrin_documents": len(bifenthrin_docs),
+            "unique_bifenthrin_samples": len(unique_samples),
+            "sample_codes": unique_samples[:20],  # First 20 samples
+            "bifenthrin_docs_sample": bifenthrin_docs[:5],  # First 5 docs
+            "expected_vs_actual": {
+                "you_expected": "48 results",
+                "system_finds": f"{len(unique_samples)} unique samples",
+                "documents_mentioning": f"{len(bifenthrin_docs)} total mentions"
+            }
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}

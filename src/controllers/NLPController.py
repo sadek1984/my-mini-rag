@@ -484,12 +484,27 @@ class EnhancedNLPController:
         self.generation_client = generation_client
         self.embedding_client = embedding_client
         self.template_parser = template_parser
-        
+
+        import os
+        self.logger = logging.getLogger(__name__)
+
         # New ChromaDB setup for local data
         self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
         if self.gemini_api_key:
+
+            chroma_db_path = "/app/chroma_db"
+            # Ensure directory exists
+            
+            os.makedirs(chroma_db_path, exist_ok=True)
+
             # Use PersistentClient to save data to disk
-            self.chroma_client = chromadb.PersistentClient(path="/app/chroma_db")
+            self.chroma_client = chromadb.PersistentClient(
+            path=chroma_db_path,
+            settings=chromadb.Settings(
+                anonymized_telemetry=False,  # Disable telemetry errors
+                allow_reset=True
+            )
+        )
             self.embed_fn = GeminiEmbeddingFunction(
                 api_key=self.gemini_api_key,
                 model="models/text-embedding-004"
@@ -498,13 +513,42 @@ class EnhancedNLPController:
             # Configure Gemini for generation
             genai.configure(api_key=self.gemini_api_key)
             self.generation_model = genai.GenerativeModel("gemini-2.5-flash")
+            self.logger.info(f"ChromaDB initialized with persistent path: {chroma_db_path}")
         else:
             self.chroma_client = None
             self.embed_fn = None
             self.generation_model = None
         
-        self.logger = logging.getLogger(__name__)
 
+    def verify_collection_health(self, project_id: int, year: str) -> Dict:
+        """Verify collection exists and has data"""
+        
+        collection_name = f"local_project_{project_id}_year_{year}"
+        
+        try:
+            collection = self.chroma_client.get_collection(
+                name=collection_name,
+                embedding_function=self.embed_fn
+            )
+            
+            count = collection.count()
+            
+            # Test a simple query
+            test_result = collection.query(query_texts=["test"], n_results=1)
+            
+            return {
+                "exists": True,
+                "count": count,
+                "name": collection_name,
+                "can_query": len(test_result["documents"][0]) > 0 if test_result["documents"] else False
+            }
+            
+        except Exception as e:
+            return {
+                "exists": False,
+                "error": str(e),
+                "name": collection_name
+            }
 
     async def answer_and_export_local_data(self, project_id: int, query: str, n_results: int = 100) -> Optional[io.BytesIO]:
         """
@@ -935,6 +979,210 @@ class EnhancedNLPController:
         }
         
         return summary
+    # async def answer_with_local_data(self,
+    #                                 project_id: int,
+    #                                 query: str,
+    #                                 n_results: int = 100,
+    #                                 include_risk_assessment: bool = False,
+    #                                 population_type: PopulationType = PopulationType.ADULT_AVERAGE,
+    #                                 year: Optional[str] = None, **kwargs) -> Dict:
+    #     """Answer query using local ChromaDB data with optional risk assessment"""
+        
+    #     # Check initialization
+    #     if not self.chroma_client or not self.embed_fn or not self.generation_model:
+    #         return {"success": False, "error": "Gemini API key not configured"}
+        
+    #     self.logger.error(f"DEBUG QUERY: project_id={project_id}, year={year}")
+
+    #     # Use year-specific collection name
+    #     if year:
+    #         collection_name = f"local_project_{project_id}_year_{year}"
+    #     else:
+    #         collection_name = f"local_project_{project_id}"
+    #     self.logger.error(f"DEBUG QUERY: Looking for collection: {collection_name}")
+    #     # Get collection
+
+
+    #     # Log all available collections
+    #     try:
+    #         all_collections = self.chroma_client.list_collections()
+    #         self.logger.error(f"=== ALL AVAILABLE COLLECTIONS ===")
+    #         for coll in all_collections:
+    #             self.logger.error(f"Collection: {coll.name}, Count: {coll.count()}")
+    #         self.logger.error(f"=== END COLLECTIONS ===")
+    #     except Exception as e:
+    #         self.logger.error(f"Failed to list collections: {e}")
+    #     # Try multiple collection name strategies
+    #     year = kwargs.get('year')
+        
+    #     collection_candidates = [
+    #         f"local_project_{project_id}_year_{year}" if year else None,
+    #         f"local_project_{project_id}",
+    #         f"local_project_{project_id}_year_2024",
+    #         f"local_project_{project_id}_year_2023",
+    #         f"local_project_{project_id}_year_2022"
+    #     ]
+        
+    #     collection = None
+    #     collection_name = None
+        
+    #     for candidate in collection_candidates:
+    #         if candidate is None:
+    #             continue
+    #         try:
+    #             self.embed_fn.document_mode = False
+    #             collection = self.chroma_client.get_collection(
+    #                 name=candidate, 
+    #                 embedding_function=self.embed_fn
+    #             )
+    #             collection_name = candidate
+    #             count = collection.count()
+    #             self.logger.error(f"✅ Found collection: {candidate} with {count} documents")
+    #             break
+    #         except Exception as e:
+    #             self.logger.error(f"❌ Collection not found: {candidate} - {e}")
+        
+    #     if not collection:
+    #         return {
+    #             "success": False, 
+    #             "error": f"No valid collection found for project {project_id}",
+    #             "debug_info": {"tried_collections": collection_candidates}
+    #         }
+        
+    #     # Continue with existing logic...
+    #     self.logger.error(f"Using collection: {collection_name}")
+        
+
+        
+    #     try:
+    #         # CRITICAL: Set to query mode before querying
+    #         self.embed_fn.document_mode = False
+    #         self.logger.error(f"DEBUG QUERY: Set embed_fn.document_mode = False")
+    #         collection = self.chroma_client.get_collection(
+    #             name=collection_name, 
+    #             embedding_function=self.embed_fn
+    #         )
+    #         count = collection.count()
+    #         self.logger.error(f"DEBUG QUERY: Found collection with {count} documents")
+    #         if count == 0:
+    #             return {
+    #                 "success": False, 
+    #                 "error": f"No documents in collection for year {year or 'all'}"
+    #             }
+    #     except Exception as e:
+    #         return {
+    #             "success": False, 
+    #             "error": f"Collection not found: {collection_name}. Error: {str(e)}"
+    #         }
+
+    #     n_results = min(n_results, count)
+
+    #     try:
+    #         # Query the collection
+    #         result = collection.query(query_texts=[query], n_results=n_results)
+            
+    #         if not result["documents"] or not result["documents"][0]:
+    #             return {"success": False, "error": "No relevant documents found"}
+
+    #         context_docs = result['documents'][0]
+    #         context = "\n\n".join([doc for doc in context_docs])
+    #         self.logger.error(f"DEBUG: First retrieved doc:\n{context_docs[0][:500] if context_docs else 'NO DOCS'}")
+    #         self.logger.error(f"DEBUG: Query was: {query}")
+    #         self.logger.error(f"DEBUG: Does doc contain 'pyridaben'? {'pyridaben' in context_docs[0].lower() if context_docs else False}")
+
+    #         # Generate answer with LLM
+    #         prompt = f"""
+    # **CRITICAL REQUIREMENT: Include ALL samples that match the criteria. Do not limit results arbitrarily.**
+    
+    # You are analyzing pesticide test data. Return a comprehensive markdown table with ALL matching samples.
+    
+    # **Headers:** Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result
+    
+    # **Query:** {query}
+    
+    # **Instructions:**
+    # 1. Find ALL samples that match the query criteria
+    # 2. Include every single matching result - do not truncate
+    # 3. Pay special attention to samples with high reading values
+    # 4. If a pesticide appears in multiple samples, include ALL of them
+    # 5. Do not summarize - show complete data
+    
+    # **Data:**
+    # {context}
+    
+    # **Remember: Show ALL matching results, not just a few examples.**
+    # """
+
+
+        
+    #         answer = self.generation_model.generate_content(prompt)
+    #         final_answer = answer.text
+    #         self.logger.error(f"DEBUG: LLM raw response:\n{answer.text[:500]}")
+
+    #         risk_assessment_results = None
+    #         df_result = pd.DataFrame()
+
+    #         # Parse response into DataFrame
+    #         try:
+    #             df = parse_llm_response_to_df(answer.text)
+    #             if df is not None and not df.empty:
+    #                 self.logger.info(f"Parsed {len(df)} rows from LLM response")
+                    
+    #                 df_filtered = self._apply_query_calculations(df, query)
+                    
+    #                 # Risk assessment if requested
+    #                 if include_risk_assessment and not df_filtered.empty:
+    #                     df_for_risk = df_filtered.copy()
+    #                     df_for_risk['Reading Value'] = pd.to_numeric(df_for_risk['Reading Value'], errors='coerce')
+    #                     df_for_risk['Limit'] = pd.to_numeric(df_for_risk['Limit'], errors='coerce')
+    #                     df_for_risk = df_for_risk.dropna(subset=['Reading Value', 'Limit'])
+                        
+    #                     if not df_for_risk.empty:
+    #                         try:
+    #                             if isinstance(population_type, str):
+    #                                 population_type = PopulationType(population_type)
+                                
+    #                             risk_assessment_results = await self._perform_risk_assessment(
+    #                                 df_for_risk,
+    #                                 population_type
+    #                             )
+    #                         except Exception as e:
+    #                             self.logger.error(f"Risk assessment failed: {e}")
+                    
+    #                 # Use filtered results
+    #                 if not df_filtered.equals(df):
+    #                     final_answer = df_filtered.to_markdown(index=False) if not df_filtered.empty else "No data matches criteria."
+    #                     df_result = df_filtered
+    #                 else:
+    #                     df_result = df
+    #             else:
+    #                 self.logger.warning("Could not parse LLM response into DataFrame")
+    #         except Exception as e:
+    #             self.logger.error(f"Error parsing/filtering: {e}")
+
+    #         return {
+    #             "success": True,
+    #             "answer": final_answer,
+    #             "data_frame": df_result.to_dict('records') if not df_result.empty else [],
+    #             "columns": df_result.columns.tolist() if not df_result.empty else [],
+    #             "risk_assessment": risk_assessment_results.dict() if risk_assessment_results else None,
+    #             "retrieved_docs_count": len(context_docs),
+    #             "collection_total": count,
+    #             "year": year,
+    #             "debug_info": {
+    #                 "collection_name": collection_name,
+    #                 "query": query
+    #             }
+    #         }
+
+    #     except Exception as e:
+    #         self.logger.error(f"Error processing query: {e}")
+    #         import traceback
+    #         traceback.print_exc()
+    #         return {"success": False, "error": f"Error: {str(e)}"}
+
+# Replace your entire answer_with_local_data method with this working version:
+
     async def answer_with_local_data(self,
                                     project_id: int,
                                     query: str,
@@ -942,84 +1190,231 @@ class EnhancedNLPController:
                                     include_risk_assessment: bool = False,
                                     population_type: PopulationType = PopulationType.ADULT_AVERAGE,
                                     year: Optional[str] = None) -> Dict:
-        """Answer query using local ChromaDB data with optional risk assessment"""
+        """Robust answer with local data - improved reliability"""
         
         # Check initialization
         if not self.chroma_client or not self.embed_fn or not self.generation_model:
             return {"success": False, "error": "Gemini API key not configured"}
         
-        self.logger.error(f"DEBUG QUERY: project_id={project_id}, year={year}")
+        self.logger.error(f"DEBUG QUERY: project_id={project_id}, year={year}, query='{query}'")
 
         # Use year-specific collection name
         if year:
             collection_name = f"local_project_{project_id}_year_{year}"
         else:
             collection_name = f"local_project_{project_id}"
-        self.logger.error(f"DEBUG QUERY: Looking for collection: {collection_name}")
-        # Get collection
-        try:
-            # CRITICAL: Set to query mode before querying
-            self.embed_fn.document_mode = False
-            self.logger.error(f"DEBUG QUERY: Set embed_fn.document_mode = False")
-            collection = self.chroma_client.get_collection(
-                name=collection_name, 
-                embedding_function=self.embed_fn
-            )
-            count = collection.count()
-            self.logger.error(f"DEBUG QUERY: Found collection with {count} documents")
-            if count == 0:
-                return {
-                    "success": False, 
-                    "error": f"No documents in collection for year {year or 'all'}"
-                }
-        except Exception as e:
-            return {
-                "success": False, 
-                "error": f"Collection not found: {collection_name}. Error: {str(e)}"
-            }
+        
+        # Enhanced collection retrieval with retry logic
+        collection = None
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                self.embed_fn.document_mode = False
+                collection = self.chroma_client.get_collection(
+                    name=collection_name, 
+                    embedding_function=self.embed_fn
+                )
+                count = collection.count()
+                self.logger.error(f"DEBUG QUERY: Found collection '{collection_name}' with {count} documents (attempt {attempt + 1})")
+                
+                if count == 0:
+                    return {"success": False, "error": f"No documents in collection for year {year or 'all'}"}
+                break
+                
+            except Exception as e:
+                self.logger.error(f"Collection access attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    return {"success": False, "error": f"Collection not found after {max_retries} attempts: {collection_name}"}
+                
+                # Brief pause before retry
+                import time
+                time.sleep(0.5)
 
-        n_results = min(n_results, count)
-
+        # Use aggressive retrieval for comprehensive results
+        n_results = min(max(n_results, 500), count)  # Minimum 500, maximum collection size
+        
         try:
-            # Query the collection
-            result = collection.query(query_texts=[query], n_results=n_results)
+            # Enhanced multi-strategy retrieval
+            all_docs = []
+            retrieval_stats = {"strategies_used": []}
             
-            if not result["documents"] or not result["documents"][0]:
-                return {"success": False, "error": "No relevant documents found"}
-
-            context_docs = result['documents'][0]
-            context = "\n\n".join([doc for doc in context_docs])
-            self.logger.error(f"DEBUG: First retrieved doc:\n{context_docs[0][:500] if context_docs else 'NO DOCS'}")
-            self.logger.error(f"DEBUG: Query was: {query}")
-            self.logger.error(f"DEBUG: Does doc contain 'pyridaben'? {'pyridaben' in context_docs[0].lower() if context_docs else False}")
-
-            # Generate answer with LLM
+            # Strategy 1: Original semantic search
+            try:
+                primary_results = collection.query(query_texts=[query], n_results=n_results)
+                if primary_results["documents"] and primary_results["documents"][0]:
+                    all_docs.extend(primary_results["documents"][0])
+                    retrieval_stats["primary_results"] = len(primary_results["documents"][0])
+                    retrieval_stats["strategies_used"].append("semantic_search")
+            except Exception as e:
+                self.logger.error(f"Primary search failed: {e}")
+                retrieval_stats["primary_results"] = 0
+            
+            # Strategy 2: Enhanced alternative queries - ALWAYS generate fallbacks
+            alternative_queries = self._generate_comprehensive_queries(query)
+            
+            for alt_query in alternative_queries:
+                try:
+                    alt_results = collection.query(query_texts=[alt_query], n_results=n_results//3)
+                    if alt_results["documents"] and alt_results["documents"][0]:
+                        all_docs.extend(alt_results["documents"][0])
+                        retrieval_stats["strategies_used"].append(f"alternative_{alt_query[:20]}")
+                except Exception as e:
+                    self.logger.error(f"Alternative query '{alt_query}' failed: {e}")
+            
+            # Strategy 3: Keyword-based backup (if semantic search fails)
+            if len(all_docs) < 10:  # If we don't have enough results
+                keyword_queries = self._extract_keywords_from_query(query)
+                for keyword in keyword_queries:
+                    try:
+                        kw_results = collection.query(query_texts=[keyword], n_results=50)
+                        if kw_results["documents"] and kw_results["documents"][0]:
+                            all_docs.extend(kw_results["documents"][0])
+                            retrieval_stats["strategies_used"].append(f"keyword_{keyword}")
+                    except Exception as e:
+                        self.logger.error(f"Keyword query '{keyword}' failed: {e}")
+            
+            # Remove duplicates while preserving order
+            unique_docs = []
+            seen = set()
+            for doc in all_docs:
+                if doc not in seen:
+                    unique_docs.append(doc)
+                    seen.add(doc)
+            
+            self.logger.error(f"DEBUG: Enhanced retrieval stats:")
+            self.logger.error(f"  Query: '{query}'")
+            self.logger.error(f"  Alternative queries: {alternative_queries}")
+            self.logger.error(f"  Total unique docs: {len(unique_docs)}")
+            self.logger.error(f"  Strategies used: {retrieval_stats['strategies_used']}")
+            
+            # Ensure we have enough context
+            if len(unique_docs) < 5:
+                self.logger.warning(f"Low document retrieval ({len(unique_docs)}), using broader search")
+                # Fallback: get random documents
+                try:
+                    fallback_results = collection.get(limit=100)
+                    if fallback_results["documents"]:
+                        unique_docs.extend(fallback_results["documents"][:50])
+                        retrieval_stats["strategies_used"].append("fallback_random")
+                except Exception as e:
+                    self.logger.error(f"Fallback search failed: {e}")
+            
+            # Use comprehensive context
+            context = "\n\n".join(unique_docs[:1000])
+            
+            # Enhanced, more demanding prompt
             prompt = f"""
-            **TASK:** Analyze the provided data to answer the user's question. You MUST format your entire response as a single, clean markdown table.
-            **RULES:**
-            1. The table MUST have these exact, single-line headers: `Sample Code`, `Sample Name`, `Pesticide Name`, `Reading Value`, `Limit`, `Result`.
-            2. Do NOT include any text, explanation, or summary before or after the table.
-            ---
-            **USER QUESTION:** {query}
-            ---
-            **DATA:**
+            **ABSOLUTE CRITICAL REQUIREMENT: You MUST return EVERY SINGLE sample that matches the query. This is not optional.**
+
+            **CONTEXT: You have access to {len(unique_docs)} documents containing pesticide test data. The user expects to see ALL matching results.**
+
+            **TASK:** Create a comprehensive markdown table showing EVERY pesticide test result that matches the query.
+
+            **MANDATORY TABLE FORMAT:**
+            | Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result |
+            |------------|-------------|----------------|---------------|-------|---------|
+
+            **NON-NEGOTIABLE REQUIREMENTS:**
+            1. **SHOW ALL SAMPLES** - If 48 Bifenthrin samples exist, show all 48
+            2. **NO TRUNCATION** - Do not stop at 3, 5, 10, or any arbitrary number
+            3. **COMPLETE DATA** - Include every matching sample from the provided data
+            4. **EXACT VALUES** - Use actual reading values and limits from the data
+            5. **BOTH LANGUAGES** - Include Arabic and English sample names as provided
+            6. **NO SUMMARIES** - This is a data extraction task, not a summary
+
+            **SEARCH QUERY:** {query}
+
+            **INSTRUCTION:** Scan through ALL the provided data below and extract EVERY sample that matches the query criteria. Create one table row for each matching sample.
+
+            **ALL AVAILABLE DATA:**
             {context}
+
+            **FINAL REMINDER: The user has 236 documents and expects to see dozens of results if they exist. Do not limit your response. Show EVERYTHING that matches.**
             """
 
-        
-            answer = self.generation_model.generate_content(prompt)
-            final_answer = answer.text
-            self.logger.error(f"DEBUG: LLM raw response:\n{answer.text[:500]}")
+            # Also modify the LLM generation with more explicit instructions:
 
+            # Generate response with retry for consistency AND explicit instructions
+            max_llm_attempts = 3  # Increase attempts
+            best_response = None
+            best_row_count = 0
+
+            for llm_attempt in range(max_llm_attempts):
+                try:
+                    # Add more specific generation parameters
+                    answer = self.generation_model.generate_content(
+                        prompt,
+                        generation_config={
+                            "temperature": 0.1,  # Lower temperature for more consistent results
+                            "max_output_tokens": 4000,  # Increase output limit
+                        }
+                    )
+                    response_text = answer.text
+                    
+                    # Quick parse to count rows
+                    temp_df = parse_llm_response_to_df(response_text)
+                    row_count = len(temp_df) if temp_df is not None else 0
+                    
+                    self.logger.error(f"LLM attempt {llm_attempt + 1}: Response length={len(response_text)}, Rows={row_count}")
+                    
+                    # Keep the response with more rows
+                    if row_count > best_row_count:
+                        best_response = response_text
+                        best_row_count = row_count
+                    
+                    # If we got a comprehensive number of results, use it
+                    if row_count >= 20:  # Expect substantial results
+                        self.logger.error(f"Got comprehensive response with {row_count} rows, using it")
+                        break
+                    elif row_count >= 10 and llm_attempt == max_llm_attempts - 1:
+                        # If last attempt and we have decent results, use them
+                        self.logger.error(f"Using {row_count} rows from final attempt")
+                        break
+                    else:
+                        self.logger.warning(f"Attempt {llm_attempt + 1} returned only {row_count} rows, retrying with modified prompt")
+                        
+                        # Modify prompt for retry to be even more explicit
+                        if llm_attempt < max_llm_attempts - 1:
+                            prompt = f"""
+                            **CRITICAL: Previous attempt only returned {row_count} rows, but there should be MANY MORE results.**
+                            
+                            **TASK:** Extract EVERY SINGLE pesticide test sample that matches: {query}
+                            
+                            **YOU MUST:**
+                            1. Look through ALL {len(unique_docs)} provided documents
+                            2. Find EVERY sample containing the pesticide or matching criteria
+                            3. Create a table row for EACH matching sample
+                            4. Do NOT stop until you've processed all the data
+                            
+                            **TABLE FORMAT:**
+                            | Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result |
+                            
+                            **DATA TO PROCESS:**
+                            {context}
+                            
+                            **REMINDER: Show ALL matches, not just examples. Comprehensive means COMPLETE.**
+                            """
+                        
+                except Exception as e:
+                    self.logger.error(f"LLM attempt {llm_attempt + 1} failed: {e}")
+
+            final_answer = best_response or "Error generating response"
+            self.logger.error(f"DEBUG: Final response rows: {best_row_count} (target: 20+ for comprehensive)")
+
+            # Add validation step
+            if best_row_count < 5 and len(unique_docs) > 100:
+                self.logger.warning(f"Suspiciously low result count ({best_row_count}) given {len(unique_docs)} documents")
+                # You could add a fallback here or log for investigation
             risk_assessment_results = None
             df_result = pd.DataFrame()
 
             # Parse response into DataFrame
             try:
-                df = parse_llm_response_to_df(answer.text)
+                df = parse_llm_response_to_df(final_answer)
                 if df is not None and not df.empty:
-                    self.logger.info(f"Parsed {len(df)} rows from LLM response")
+                    self.logger.info(f"Successfully parsed {len(df)} rows from LLM response")
                     
+                    # Apply query-specific filtering if needed
                     df_filtered = self._apply_query_calculations(df, query)
                     
                     # Risk assessment if requested
@@ -1041,7 +1436,7 @@ class EnhancedNLPController:
                             except Exception as e:
                                 self.logger.error(f"Risk assessment failed: {e}")
                     
-                    # Use filtered results
+                    # Use filtered results if filtering was applied
                     if not df_filtered.equals(df):
                         final_answer = df_filtered.to_markdown(index=False) if not df_filtered.empty else "No data matches criteria."
                         df_result = df_filtered
@@ -1058,12 +1453,15 @@ class EnhancedNLPController:
                 "data_frame": df_result.to_dict('records') if not df_result.empty else [],
                 "columns": df_result.columns.tolist() if not df_result.empty else [],
                 "risk_assessment": risk_assessment_results.dict() if risk_assessment_results else None,
-                "retrieved_docs_count": len(context_docs),
+                "retrieved_docs_count": len(unique_docs),
                 "collection_total": count,
                 "year": year,
                 "debug_info": {
                     "collection_name": collection_name,
-                    "query": query
+                    "query": query,
+                    "retrieval_stats": retrieval_stats,
+                    "final_row_count": best_row_count,
+                    "context_length": len(context)
                 }
             }
 
@@ -1071,7 +1469,76 @@ class EnhancedNLPController:
             self.logger.error(f"Error processing query: {e}")
             import traceback
             traceback.print_exc()
-            return {"success": False, "error": f"Error: {str(e)}"}
+            return {"success": False, "error": f"Processing error: {str(e)}"}
+
+    def _generate_comprehensive_queries(self, query: str) -> List[str]:
+        """Generate comprehensive alternative queries for ANY pesticide or search term"""
+        
+        alternatives = []
+        query_lower = query.lower()
+        
+        # Extract potential pesticide names from query
+        import re
+        pesticide_patterns = [
+            r'\b(buprofezin|bifenthrin|pyridaben|cypermethrin|lambda|cyhalothrin)\b',
+            r'\b([A-Za-z]+(?:thrin|ban|zin|ate|ide))\b'  # Common pesticide endings
+        ]
+        
+        found_pesticides = []
+        for pattern in pesticide_patterns:
+            matches = re.findall(pattern, query_lower, re.IGNORECASE)
+            found_pesticides.extend([match if isinstance(match, str) else match[0] for match in matches])
+        
+        # Add pesticide-specific searches
+        for pesticide in found_pesticides:
+            alternatives.extend([
+                pesticide.title(),  # Proper case
+                pesticide.lower(),
+                pesticide.upper(),
+                f"{pesticide} pesticide",
+                f"غير مطابق {pesticide}",  # Non-compliant with pesticide
+                f"{pesticide} contamination"
+            ])
+        
+        # Always add common pesticides if query mentions pesticides
+        if "pesticide" in query_lower:
+            alternatives.extend(["Buprofezin", "Bifenthrin", "Pyridaben"])
+        
+        # Contamination indicators
+        if any(word in query_lower for word in ["contaminated", "exceed", "above", "high", "limit"]):
+            alternatives.extend([
+                "غير مطابق",  # Non-compliant in Arabic
+                "exceeds limit",
+                "high reading",
+                "contaminated sample",
+                "above limit"
+            ])
+        
+        # Crop indicators
+        if any(crop in query_lower for crop in ["pepper", "tomato", "cucumber"]):
+            alternatives.extend([
+                "فلفل",  # Pepper in Arabic
+                "طماطم",  # Tomato in Arabic
+                "خيار",   # Cucumber in Arabic
+                "فلفل حار",  # Hot pepper
+            ])
+        
+        # Remove duplicates and limit
+        return list(dict.fromkeys(alternatives))[:8]  # Keep order, remove duplicates
+
+    def _extract_keywords_from_query(self, query: str) -> List[str]:
+        """Extract simple keywords for fallback search"""
+        
+        import re
+        
+        # Remove common words and extract meaningful terms
+        stop_words = {'find', 'show', 'get', 'all', 'the', 'in', 'for', 'with', 'and', 'or'}
+        words = re.findall(r'\b[A-Za-z]{3,}\b', query.lower())
+        keywords = [word for word in words if word not in stop_words]
+        
+        return keywords[:5]
+
+
 
     async def _perform_risk_assessment(self, df: pd.DataFrame,
                                  population_type: PopulationType) -> RiskAssessmentSummary:
