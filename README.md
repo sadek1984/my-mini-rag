@@ -80,9 +80,12 @@ docker compose exec fastapi ls -la /app/data/2024/Feb/
 
 docker compose down 
 
-docker compose up 
-
 docker compose up --build
 
 
-docker volume rm docker_fastapi_data
+
+streamlit run src/LARS/app.py
+
+
+find tomatoes samples contaminated with bifenthrin in 2023
+
