@@ -89,3 +89,6 @@ streamlit run src/LARS/app.py
 
 find tomatoes samples contaminated with bifenthrin in 2023
 
+Find 'pyridaben' more than 2 times the limit
+include_risk_assessment: true,
+,population_type : adult_average 2022

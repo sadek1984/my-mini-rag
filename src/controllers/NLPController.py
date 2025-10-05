@@ -471,7 +471,28 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
 # ========== ENHANCED NLP CONTROLLER ==========
 class EnhancedNLPController:
     """Enhanced NLP Controller with local data processing"""
+    PESTICIDE_KEYWORDS = [
+        "Buprofezin", "Quinalphos", "Bifenthrin", "Pyridaben", "Procymidon",
+        "Cyhalothrin", "Fipronil", "Bifenazate", "Lampda-Cyhalothrin", 
+        "Deltamethrin", "Lampda- cyhalothrin", "Bifenzate", "Bifnthrin",
+        "Bifanazate", "Buprifezin", "Lambda_cyhalothrin", "Fenpropathrin",
+        "Myclobutanil", "Ptridaben", "Pyriproxyfen", "Atrazine", "Profenofos",
+        "Bifenazat", "Diazinone", "Pendimethlin", "Pyriproxifen", "Triadiminol",
+        "Triadimenol", "Pyridben", "Chlorfenapyr", "PYRIDABIEN", "Paclobutrazole",
+        "Pyripoxifen", "Pendimerhanil", "Pendimethalin", "Paclobutrazol",
+        "Bifenthein", "Quinalphose"
+    ]
     
+    VEGETABLE_KEYWORDS = [
+        "فلفل احمر بارد", "فلفل حار احمر", "بقدونس", "كوسة", "خيار", "طماطم",
+        "فاصوليا", "فلفل بارد اخضر", "فلفل أحمر حار", "فلفل أخضر بارد",
+        "فلفل حار اخضر", "باذنجان", "خس", "فلفل بارد", "فراولة", "ملفوف",
+        "بامia", "تين", "فلفل ملون بارد", "فلفل ملون", "فلفل أخضر حار",
+        "قرع", "رمان", "قرع نجدى", "الوبا", "فلفل بارد ملون", "فروت", "قثة",
+        "فلفل بارد احمر", "برتقال", "ليمون", "فاصوولياج", "با", "قرع امريكى",
+        "نعناع", "جرجير", "شمام", "سبانخ", "فلفل بارداخضر"
+    ]
+
     def __init__(self, 
                  vectordb_client=None,
                  generation_client=None,
@@ -1183,84 +1204,120 @@ class EnhancedNLPController:
 
 # Replace your entire answer_with_local_data method with this working version:
 
-async def answer_with_local_data_simple(self, project_id: int, query: str, 
-                                       n_results: int = 100, year: str = None) -> Dict:
-    """Simple version that works like Postman"""
-    
-    # Basic checks
-    if not self.chroma_client or not self.embed_fn or not self.generation_model:
-        return {"success": False, "error": "Gemini API key not configured"}
+    async def answer_with_local_data_simple(self, project_id: int, query: str,
+                                            include_risk_assessment: bool = False, 
+                                        n_results: int = 100, year: str = None) -> Dict:
+        """Simple version that works like Postman"""
+        
+        # Basic checks
+        if not self.chroma_client or not self.embed_fn or not self.generation_model:
+            return {"success": False, "error": "Gemini API key not configured"}
 
-    # Simple collection name
-    collection_name = f"local_project_{project_id}_year_{year}" if year else f"local_project_{project_id}"
-    
-    try:
-        # Get collection (no retry logic)
-        self.embed_fn.document_mode = False
-        collection = self.chroma_client.get_collection(
-            name=collection_name, 
-            embedding_function=self.embed_fn
-        )
-        count = collection.count()
+        # Simple collection name
+        collection_name = f"local_project_{project_id}_year_{year}" if year else f"local_project_{project_id}"
         
-        if count == 0:
-            return {"success": False, "error": "No documents in collection"}
-
-    except Exception as e:
-        return {"success": False, "error": f"Collection not found: {collection_name}"}
-
-    # Simple retrieval (like Postman)
-    n_results = min(n_results, count)
-    
-    try:
-        # ONLY semantic search - no alternative queries
-        result = collection.query(query_texts=[query], n_results=n_results)
-        
-        if not result["documents"] or not result["documents"][0]:
-            return {"success": False, "error": "No relevant documents found"}
-
-        context_docs = result['documents'][0]
-        context = "\n\n".join(context_docs)  # Use retrieved docs as-is
-        
-        # Simple, direct prompt (like Postman)
-        prompt = f"""
-        **TASK:** Create a markdown table of ALL pesticide test results that match the query.
-        
-        **HEADERS:** Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result
-        
-        **QUERY:** {query}
-        
-        **DATA:**
-        {context}
-        
-        **INSTRUCTION:** Show ALL matching samples in table format.
-        """
-
-        # SINGLE LLM call (no retries)
-        answer = self.generation_model.generate_content(prompt)
-        final_answer = answer.text
-        
-        # Simple parsing
-        df_result = pd.DataFrame()
         try:
-            df = parse_llm_response_to_df(answer.text)
-            if df is not None and not df.empty:
-                df_result = df
-        except Exception:
-            pass  # Ignore parsing errors
+            # Get collection (no retry logic)
+            self.embed_fn.document_mode = False
+            collection = self.chroma_client.get_collection(
+                name=collection_name, 
+                embedding_function=self.embed_fn
+            )
+            count = collection.count()
+            
+            if count == 0:
+                return {"success": False, "error": "No documents in collection"}
 
-        return {
-            "success": True,
-            "answer": final_answer,
-            "data_frame": df_result.to_dict('records') if not df_result.empty else [],
-            "columns": df_result.columns.tolist() if not df_result.empty else [],
-            "retrieved_docs_count": len(context_docs),
-            "collection_total": count,
-            "year": year
-        }
+        except Exception as e:
+            return {"success": False, "error": f"Collection not found: {collection_name}"}
 
-    except Exception as e:
-        return {"success": False, "error": f"Error: {str(e)}"}
+        # Simple retrieval (like Postman)
+        n_results = min(n_results, count)
+        
+        try:
+            # ONLY semantic search - no alternative queries
+            result = collection.query(query_texts=[query], n_results=n_results)
+            
+            if not result["documents"] or not result["documents"][0]:
+                return {"success": False, "error": "No relevant documents found"}
+
+            context_docs = result['documents'][0]
+            context = "\n\n".join(context_docs)  # Use retrieved docs as-is
+            
+            # Simple, direct prompt (like Postman)
+            prompt = f"""
+            **TASK:** Create a markdown table of ALL pesticide test results that match the query.
+            
+            **HEADERS:** Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result
+            
+            **QUERY:** {query}
+            
+            **DATA:**
+            {context}
+            
+            **INSTRUCTION:** Show ALL matching samples in table format.
+            """
+
+            # SINGLE LLM call (no retries)
+            answer = self.generation_model.generate_content(prompt)
+            final_answer = answer.text
+            
+            risk_assessment_results = None
+            df_result = pd.DataFrame()
+
+            # Parse response into DataFrame
+            try:
+                df = parse_llm_response_to_df(answer.text)
+                if df is not None and not df.empty:
+                    self.logger.info(f"Parsed {len(df)} rows from LLM response")
+                    
+                    df_filtered = self._apply_query_calculations(df, query)
+                    
+                    # Risk assessment if requested
+                    if include_risk_assessment and not df_filtered.empty:
+                        df_for_risk = df_filtered.copy()
+                        df_for_risk['Reading Value'] = pd.to_numeric(df_for_risk['Reading Value'], errors='coerce')
+                        df_for_risk['Limit'] = pd.to_numeric(df_for_risk['Limit'], errors='coerce')
+                        df_for_risk = df_for_risk.dropna(subset=['Reading Value', 'Limit'])
+                        
+                        if not df_for_risk.empty:
+                            try:
+                                if isinstance(population_type, str):
+                                    population_type = PopulationType(population_type)
+                                
+                                risk_assessment_results = await self._perform_risk_assessment(
+                                    df_for_risk,
+                                    population_type
+                                )
+                            except Exception as e:
+                                self.logger.error(f"Risk assessment failed: {e}")
+                    
+                    # Use filtered results
+                    if not df_filtered.equals(df):
+                        final_answer = df_filtered.to_markdown(index=False) if not df_filtered.empty else "No data matches criteria."
+                        df_result = df_filtered
+                    else:
+                        df_result = df
+                else:
+                    self.logger.warning("Could not parse LLM response into DataFrame")
+            except Exception as e:
+                self.logger.error(f"Error parsing/filtering: {e}")
+
+            return {
+                "success": True,
+                "answer": final_answer,
+                "data_frame": df_result.to_dict('records') if not df_result.empty else [],
+                "columns": df_result.columns.tolist() if not df_result.empty else [],
+                "risk_assessment": risk_assessment_results.dict() if risk_assessment_results else None,
+                "retrieved_docs_count": len(context_docs),
+                "collection_total": count,
+                "year": year,
+            
+            }
+
+
+        except Exception as e:
+            return {"success": False, "error": f"Error: {str(e)}"}
 
 
 
@@ -1316,3 +1373,48 @@ async def answer_with_local_data_simple(self, project_id: int, query: str,
         except Exception as e:
             self.logger.error(f"DEBUG: Error in simplified filtering: {e}")
             return df
+        
+
+    def extract_keywords_from_query(self, query: str) -> Dict[str, List[str]]:
+        """Extract pesticide and vegetable keywords from query - SIMPLE approach"""
+        query_lower = query.lower()
+        
+        found_pesticides = []
+        found_vegetables = []
+        
+        # Check pesticides (case-insensitive)
+        for pesticide in self.PESTICIDE_KEYWORDS:
+            if pesticide.lower() in query_lower:
+                found_pesticides.append(pesticide)
+        
+        # Check vegetables (exact match for Arabic)
+        for vegetable in self.VEGETABLE_KEYWORDS:
+            if vegetable in query:  # Keep original case for Arabic
+                found_vegetables.append(vegetable)
+        
+        return {
+            "pesticides": found_pesticides,
+            "vegetables": found_vegetables
+        }
+    
+    def enhance_query_with_keywords(self, original_query: str) -> str:
+        """Enhance query by adding detected keywords"""
+        keywords = self.extract_keywords_from_query(original_query)
+        
+        enhanced_parts = [original_query]
+        
+        # Add found keywords to boost relevance
+        if keywords["pesticides"]:
+            enhanced_parts.append(" ".join(keywords["pesticides"]))
+        
+        if keywords["vegetables"]:
+            enhanced_parts.append(" ".join(keywords["vegetables"]))
+        
+        enhanced_query = " ".join(enhanced_parts)
+        
+        self.logger.info(f"Original query: {original_query}")
+        self.logger.info(f"Enhanced query: {enhanced_query}")
+        self.logger.info(f"Found pesticides: {keywords['pesticides']}")
+        self.logger.info(f"Found vegetables: {keywords['vegetables']}")
+        
+        return enhanced_query
