@@ -303,72 +303,35 @@ def validate_and_clean_pesticide_data(raw_data: str) -> str:
     return '\n'.join(cleaned_lines)
 
 @nlp_router.post("/local/index/{project_id}")
-async def index_local_data(
-    request: Request, 
-    project_id: int, 
-    index_request: LocalIndexRequest
-):
-    """Index local Excel files for a specific year"""
+async def index_local_data_simple(request: Request, project_id: int, 
+                                 index_request: LocalIndexRequest):
+    """Simple indexing that works"""
     try:
-        # Validate year
+        # Basic validation
         if index_request.year not in ["2022", "2023", "2024", "2025"]:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "signal": "INVALID_YEAR",
-                    "message": f"Year must be one of: 2022, 2023, 2024, 2025. Got: {index_request.year}"
-                }
-            )
+            return JSONResponse(status_code=400, content={
+                "signal": "INVALID_YEAR",
+                "message": f"Invalid year: {index_request.year}"
+            })
         
-        # Check OpenAI API key
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not openai_api_key:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "signal": "OPENAI_API_KEY_MISSING",
-                    "message": "Please set OPENAI_API_KEY environment variable"
-                }
-            )
+        # Basic controller
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
         
-        # Initialize controller
-        enhanced_controller = EnhancedNLPController(
-            vectordb_client=request.app.vectordb_client,
-            generation_client=request.app.generation_client,
-            embedding_client=request.app.embedding_client,
-            template_parser=request.app.template_parser,
-            gemini_api_key=None
-        )
-        
-        # *** FIX: Construct the FULL path including the year ***
+        # Simple path construction
         year_folder_path = f"{index_request.data_folder_path}/{index_request.year}"
         
-        print(f"=== INDEXING DEBUG ===")
-        print(f"Year: {index_request.year}")
-        print(f"Base path: {index_request.data_folder_path}")
-        print(f"Year folder path: {year_folder_path}")
-        print("=" * 30)
-        
-        # Process Excel files - pass the YEAR-SPECIFIC path
+        # Process files
         documents, metadata = enhanced_controller.process_local_excel_files(
-            data_folder_path=year_folder_path,  # <-- This should be /app/data/2022
+            data_folder_path=year_folder_path,
             months=index_request.months
         )
         
         if not documents:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "signal": "NO_LOCAL_DATA_FOUND",
-                    "message": f"No Excel files found in {year_folder_path}",
-                    "year": index_request.year,
-                    "searched_path": year_folder_path
-                }
-            )
-        
-        print(f"Found {len(documents)} documents to index")
-        if documents:
-            print(f"Sample: {documents[0][:200]}...")
+            return JSONResponse(status_code=400, content={
+                "signal": "NO_LOCAL_DATA_FOUND",
+                "message": f"No Excel files found in {year_folder_path}"
+            })
         
         # Create collection
         collection = enhanced_controller.create_local_collection(
@@ -379,29 +342,19 @@ async def index_local_data(
             year=index_request.year
         )
         
-        return JSONResponse(
-            content={
-                "signal": "LOCAL_INDEX_SUCCESS",
-                "indexed_documents": len(documents),
-                "project_id": project_id,
-                "year": index_request.year,
-                "collection_name": f"local_project_{project_id}_year_{index_request.year}",
-                "data_folder": year_folder_path,
-                "indexed_at": datetime.now().isoformat()
-            }
-        )
+        return JSONResponse(content={
+            "signal": "LOCAL_INDEX_SUCCESS",
+            "indexed_documents": len(documents),
+            "project_id": project_id,
+            "year": index_request.year,
+            "collection_name": f"local_project_{project_id}_year_{index_request.year}"
+        })
             
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return JSONResponse(
-            status_code=500,
-            content={
-                "signal": "LOCAL_INDEX_ERROR",
-                "error": str(e),
-                "traceback": traceback.format_exc()
-            }
-        )
+        return JSONResponse(status_code=500, content={
+            "signal": "LOCAL_INDEX_ERROR",
+            "error": str(e)
+        })
 # @nlp_router.post("/local/answer/{project_id}")
 # async def local_answer_endpoint(request: Request, project_id: int,
 #                                answer_request: LocalAnswerRequest,
@@ -476,141 +429,145 @@ async def index_local_data(
 #                 "traceback": traceback.format_exc()
 #             }
 #         )
-
-
-def extract_year_from_text(text: str) -> Optional[str]:
-    """Extract year from text"""
-    import re
-    year_match = re.search(r'\b(202[2-5])\b', text)
-    if year_match:
-        return year_match.group(1)
-    return None
+import pandas as pd
+try:
+    from utils.response_parser import parse_llm_response_to_df
+except ImportError:
+    # Create a simple fallback function
+    def parse_llm_response_to_df(text):
+        """Simple fallback parser"""
+        import pandas as pd
+        import re
+        
+        lines = text.split('\n')
+        table_lines = [line for line in lines if '|' in line and not line.strip().startswith('|--')]
+        
+        if len(table_lines) < 2:
+            return None
+            
+        headers = [col.strip() for col in table_lines[0].split('|')[1:-1]]
+        rows = []
+        
+        for line in table_lines[1:]:
+            cols = [col.strip() for col in line.split('|')[1:-1]]
+            if len(cols) == len(headers):
+                rows.append(cols)
+        
+        if rows:
+            return pd.DataFrame(rows, columns=headers)
+        return None
 
 
 @nlp_router.post("/local/answer/{project_id}")
 async def local_answer_endpoint(request: Request, project_id: int,
                                answer_request: LocalAnswerRequest,
                                year: Optional[str] = Query(default=None)):
-    """Fixed endpoint with proper year handling and logging"""
-    
-    # Initialize logger
-    request_logger = RequestResponseLogger()
+    """Minimal working version"""
     
     try:
-        # 1. PRIORITY ORDER for year selection:
-        # First: Query parameter (from user sidebar selection)
-        # Second: Extract from query text  
-        # Third: Default to 2022
+        # Simple year handling
+        target_year = year or "2022"
         
-        target_year = None
-        year_source = None
-        
-        # 1. Check query parameter first (user's explicit selection)
-        if year and year in ["2022", "2023", "2024", "2025"]:
-            target_year = year
-            year_source = "user_selection"
-            logger.info(f"Using year from user selection: {target_year}")
-        
-        # 2. Extract from query text if no parameter
-        if not target_year:
-            extracted_year = extract_year_from_text(answer_request.query)
-            if extracted_year and extracted_year in ["2022", "2023", "2024", "2025"]:
-                target_year = extracted_year
-                year_source = "extracted_from_query"
-                logger.info(f"Extracted year from query: {target_year}")
-        
-        # 3. Default fallback
-        if not target_year:
-            target_year = "2022"  # Your specified default year
-            year_source = "default"
-            logger.info(f"Using default year: {target_year}")
-        
-        logger.error(f"=== FINAL YEAR DECISION: {target_year} (source: {year_source}) ===")
-        
-        # Get Gemini API key
+        # API key check
         gemini_api_key = os.getenv("GEMINI_API_KEY")
         if not gemini_api_key:
-            error_response = {
+            return JSONResponse(status_code=400, content={
                 "signal": "GEMINI_API_KEY_MISSING",
-                "message": "Please set GEMINI_API_KEY environment variable",
-                "success": False
-            }
-            await request_logger.log_request_response(request, error_response)
-            return JSONResponse(status_code=400, content=error_response)
+                "message": "Please set GEMINI_API_KEY environment variable"
+            })
 
         # Initialize controller
-        enhanced_controller = EnhancedNLPController(
-            vectordb_client=request.app.vectordb_client,
-            generation_client=request.app.generation_client,
-            embedding_client=request.app.embedding_client,
-            template_parser=request.app.template_parser,
-            gemini_api_key=gemini_api_key
-        )
+        enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
         
-        max_results = min(answer_request.n_results, 2000)  # ← INCREASE cap
+        # Simple collection access
+        collection_name = f"local_project_{project_id}_year_{target_year}"
+        
+        try:
+            enhanced_controller.embed_fn.document_mode = False
+            collection = enhanced_controller.chroma_client.get_collection(
+                name=collection_name, 
+                embedding_function=enhanced_controller.embed_fn
+            )
+            count = collection.count()
+            
+            if count == 0:
+                return JSONResponse(status_code=400, content={
+                    "signal": "NO_DOCUMENTS",
+                    "error": f"No documents in collection for year {target_year}"
+                })
+                
+        except Exception as e:
+            return JSONResponse(status_code=400, content={
+                "signal": "COLLECTION_NOT_FOUND", 
+                "error": f"Collection not found: {collection_name}"
+            })
 
+        # Simple query (like Postman)
+        n_results = min(answer_request.n_results, count, 100)  # Cap at 100 for speed
+        
+        result = collection.query(query_texts=[answer_request.query], n_results=n_results)
+        
+        if not result["documents"] or not result["documents"][0]:
+            return JSONResponse(content={
+                "signal": "NO_RESULTS",
+                "answer": "No matching documents found",
+                "data_frame": [],
+                "retrieved_docs_count": 0
+            })
 
-        # Call with explicit year
-        result = await enhanced_controller.answer_with_local_data(
-            project_id=project_id,
-            query=answer_request.query,
-            n_results=max_results,
-            include_risk_assessment=answer_request.include_risk_assessment,
-            population_type=answer_request.population_type,
-            year=target_year
-        )
+        # Simple context creation
+        context_docs = result['documents'][0]
+        context = "\n\n".join(context_docs)
+        
+        # Simple prompt (like Postman)
+        prompt = f"""
+        Create a markdown table of pesticide test results that match this query: {answer_request.query}
+        
+        Use these headers: Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result
+        
+        Data:
+        {context}
+        
+        Show all matching samples in table format.
+        """
 
-        if not result.get("success", False):
-            error_response = {
-                "signal": "LOCAL_ANSWER_ERROR",
-                "error": result.get("error", "Unknown error"),
-                "debug_info": result.get("debug_info", {}),
-                "year_used": target_year,
-                "year_source": year_source,
-                "success": False
-            }
-            await request_logger.log_request_response(request, error_response)
-            return JSONResponse(status_code=400, content=error_response)
+        # Single LLM call
+        answer = enhanced_controller.generation_model.generate_content(prompt)
+        final_answer = answer.text
+        
+        # Simple parsing
+        df_result = pd.DataFrame()
+        try:
+            from utils.response_parser import parse_llm_response_to_df  # Make sure this import works
+            df = parse_llm_response_to_df(answer.text)
+            if df is not None and not df.empty:
+                df_result = df
+        except Exception as e:
+            # If parsing fails, just return text
+            pass
 
-        # Prepare successful response
-        success_response = {
+        return JSONResponse(content={
             "signal": "LOCAL_ANSWER_SUCCESS",
-            "answer": result["answer"],
-            "data_frame": result.get("data_frame", []),
-            "columns": result.get("columns", []),
-            "retrieved_docs_count": result.get("retrieved_docs_count", 0),
-            "full_prompt": result.get("full_prompt", ""),
-            "collection_total": result.get("collection_total", 0),
-            "risk_assessment": result.get("risk_assessment"),
-            "project_id": project_id,
+            "answer": final_answer,
+            "data_frame": df_result.to_dict('records') if not df_result.empty else [],
+            "columns": df_result.columns.tolist() if not df_result.empty else [],
+            "retrieved_docs_count": len(context_docs),
+            "collection_total": count,
             "year_used": target_year,
-            "year_source": year_source,
-            "success": True
-        }
-        
-        # Log the successful request/response
-        await request_logger.log_request_response(request, success_response)
-        
-        return JSONResponse(content=success_response)
+            "project_id": project_id
+        })
 
     except Exception as e:
-        error_response = {
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"ERROR: {error_details}")  # Log the full error
+        
+        return JSONResponse(status_code=500, content={
             "signal": "LOCAL_ANSWER_ERROR",
             "error": str(e),
-            "traceback": traceback.format_exc(),
-            "success": False
-        }
-        
-        # Log the error
-        await request_logger.log_request_response(request, error_response)
-        
-        # Print traceback for debugging
-        traceback.print_exc()
-        
-        return JSONResponse(
-            status_code=500,
-            content=error_response
-        )
+            "details": error_details
+        })
+
 
 # Also add a simple test endpoint to check raw ChromaDB data
 @nlp_router.get("/local/raw-data/{project_id}")
