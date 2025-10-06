@@ -41,7 +41,7 @@ class LocalIndexRequest(BaseModel):
 
 class LocalAnswerRequest(BaseModel):
     query: str
-    n_results: Optional[int] = 100
+    n_results: Optional[int] = 200
     llm_provider: str = Field(default="openai")
     prompt_template: Optional[str] = Field(default="en")
     include_risk_assessment: Optional[bool] = Field(default=False, description="Flag to run health risk assessment on the results")
@@ -503,7 +503,7 @@ async def local_answer_endpoint(request: Request, project_id: int,
             })
 
         # Simple query (like Postman)
-        n_results = min(answer_request.n_results, count, 100)  # Cap at 100 for speed
+        n_results = min(answer_request.n_results, count, 200)  # Cap at 100 for speed
         
         result = collection.query(query_texts=[answer_request.query], n_results=n_results)
         

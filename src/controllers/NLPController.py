@@ -1206,7 +1206,7 @@ class EnhancedNLPController:
 
     async def answer_with_local_data_simple(self, project_id: int, query: str,
                                             include_risk_assessment: bool = False, 
-                                        n_results: int = 100, year: str = None) -> Dict:
+                                        n_results: int = 200, year: str = None) -> Dict:
         """Simple version that works like Postman"""
         
         # Basic checks
