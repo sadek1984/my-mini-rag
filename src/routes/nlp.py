@@ -457,18 +457,15 @@ except ImportError:
             return pd.DataFrame(rows, columns=headers)
         return None
 
-
 @nlp_router.post("/local/answer/{project_id}")
 async def local_answer_endpoint(request: Request, project_id: int,
                                answer_request: LocalAnswerRequest,
                                year: Optional[str] = Query(default=None)):
-    """Minimal working version"""
+    """Enhanced version with keyword and synonym expansion"""
     
     try:
-        # Simple year handling
         target_year = year or "2022"
         
-        # API key check
         gemini_api_key = os.getenv("GEMINI_API_KEY")
         if not gemini_api_key:
             return JSONResponse(status_code=400, content={
@@ -479,88 +476,34 @@ async def local_answer_endpoint(request: Request, project_id: int,
         # Initialize controller
         enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
         
-        # Simple collection access
-        collection_name = f"local_project_{project_id}_year_{target_year}"
+        # ENHANCE QUERY with keywords and synonyms
+        enhanced_query = enhanced_controller.enhance_query_with_keywords(
+            answer_request.query
+        )
         
-        try:
-            enhanced_controller.embed_fn.document_mode = False
-            collection = enhanced_controller.chroma_client.get_collection(
-                name=collection_name, 
-                embedding_function=enhanced_controller.embed_fn
-            )
-            count = collection.count()
-            
-            if count == 0:
-                return JSONResponse(status_code=400, content={
-                    "signal": "NO_DOCUMENTS",
-                    "error": f"No documents in collection for year {target_year}"
-                })
-                
-        except Exception as e:
+        # Use the answer_with_local_data_simple method
+        response = await enhanced_controller.answer_with_local_data_simple(
+            project_id=project_id,
+            query=enhanced_query,  # Use enhanced query
+            n_results=answer_request.n_results,
+            year=target_year
+        )
+        
+        if not response.get("success"):
             return JSONResponse(status_code=400, content={
-                "signal": "COLLECTION_NOT_FOUND", 
-                "error": f"Collection not found: {collection_name}"
+                "signal": "QUERY_FAILED",
+                "error": response.get("error")
             })
-
-        # Simple query (like Postman)
-        n_results = min(answer_request.n_results, count, 200)  # Cap at 100 for speed
-        
-        result = collection.query(query_texts=[answer_request.query], n_results=n_results)
-        
-        if not result["documents"] or not result["documents"][0]:
-            return JSONResponse(content={
-                "signal": "NO_RESULTS",
-                "answer": "No matching documents found",
-                "data_frame": [],
-                "retrieved_docs_count": 0
-            })
-
-        # Simple context creation
-        context_docs = result['documents'][0]
-        context = "\n\n".join(context_docs)
-        
-        # Simple prompt (like Postman)
-        prompt = f"""
-        Create a markdown table of pesticide test results that match this query: {answer_request.query}
-        
-        Use these headers: Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result
-        
-        Data:
-        {context}
-        
-        Show all matching samples in table format.
-        """
-
-        # Single LLM call
-        answer = enhanced_controller.generation_model.generate_content(prompt)
-        final_answer = answer.text
-        
-        # Simple parsing
-        df_result = pd.DataFrame()
-        try:
-            from utils.response_parser import parse_llm_response_to_df  # Make sure this import works
-            df = parse_llm_response_to_df(answer.text)
-            if df is not None and not df.empty:
-                df_result = df
-        except Exception as e:
-            # If parsing fails, just return text
-            pass
 
         return JSONResponse(content={
             "signal": "LOCAL_ANSWER_SUCCESS",
-            "answer": final_answer,
-            "data_frame": df_result.to_dict('records') if not df_result.empty else [],
-            "columns": df_result.columns.tolist() if not df_result.empty else [],
-            "retrieved_docs_count": len(context_docs),
-            "collection_total": count,
-            "year_used": target_year,
-            "project_id": project_id
+            **response  # Include all response data
         })
 
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        print(f"ERROR: {error_details}")  # Log the full error
+        print(f"ERROR: {error_details}")
         
         return JSONResponse(status_code=500, content={
             "signal": "LOCAL_ANSWER_ERROR",

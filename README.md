@@ -83,12 +83,19 @@ docker compose down
 docker compose up --build
 
 
-
 streamlit run src/LARS/app.py
 
 
-find tomatoes samples contaminated with bifenthrin in 2023
 
-Find 'pyridaben' more than 2 times the limit
-include_risk_assessment: true,
-,population_type : adult_average 2022
+find bifenazate in 2022
+
+Find bifenazate exceeding limits in 2022
+
+Find bifenazate more than limits in 2022
+
+http://localhost:8000/api/v1/nlp/local/debug-filter/1?year=2022
+
+Find 'Buprofezin' more than 2 times the limit in tomato sample 2022
+find non compliant samples with bifenthrin in cucumber samples 2023
+Find 'fipronil' in eggplant samples 2022
+

@@ -471,6 +471,38 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
 # ========== ENHANCED NLP CONTROLLER ==========
 class EnhancedNLPController:
     """Enhanced NLP Controller with local data processing"""
+    VEGETABLE_SYNONYMS = {
+    # English → Arabic mappings
+    "tomato": ["طماطم", "tomato", "tomatoes"],
+    "cucumber": ["خيار", "cucumber", "cucumbers"],
+    "pepper": ["فلفل", "pepper", "peppers", "فلفل بارد", "فلفل حار"],
+    "hot pepper": ["فلفل حار", "فلفل حار احمر", "فلفل حار اخضر", "فلفل أخضر حار", "فلفل أحمر حار"],
+    "sweet pepper": ["فلفل بارد", "فلفل بارد اخضر", "فلفل احمر بارد", "فلفل ملون"],
+    "eggplant": ["باذنجان", "eggplant", "aubergine"],
+    "zucchini": ["كوسة", "zucchini", "courgette"],
+    "okra": ["باميا", "okra", "bamia"],
+    "parsley": ["بقدونس", "parsley"],
+    "lettuce": ["خس", "lettuce"],
+    "mint": ["نعناع", "mint"],
+    "arugula": ["جرجير", "arugula", "rocket"],
+    "spinach": ["سبانخ", "spinach"],
+    "cabbage": ["ملفوف", "cabbage"],
+    "strawberry": ["فراولة", "strawberry", "strawberries"],
+    "pomegranate": ["رمان", "pomegranate"],
+    "melon": ["شمام", "melon", "cantaloupe"],
+    "pumpkin": ["قرع", "pumpkin", "squash", "قرع امريكى", "قرع نجدى"],
+    "fig": ["تين", "fig", "figs"],
+    "orange": ["برتقال", "orange", "oranges"],
+    "lemon": ["ليمون", "lemon", "lemons"],
+    "beans": ["فاصوليا", "beans", "فاصوولياج"],
+    
+    # Arabic → variations mappings
+    "طماطم": ["طماطم", "tomato", "tomatoes"],
+    "خيار": ["خيار", "cucumber", "cucumbers"],
+    "فلفل": ["فلفل", "pepper", "فلفل بارد", "فلفل حار", "فلفل ملون"],
+    "باذنجان": ["باذنجان", "eggplant", "aubergine"],
+}
+    # Class-level constants - MUST be indented at class level
     PESTICIDE_KEYWORDS = [
         "Buprofezin", "Quinalphos", "Bifenthrin", "Pyridaben", "Procymidon",
         "Cyhalothrin", "Fipronil", "Bifenazate", "Lampda-Cyhalothrin", 
@@ -487,12 +519,11 @@ class EnhancedNLPController:
         "فلفل احمر بارد", "فلفل حار احمر", "بقدونس", "كوسة", "خيار", "طماطم",
         "فاصوليا", "فلفل بارد اخضر", "فلفل أحمر حار", "فلفل أخضر بارد",
         "فلفل حار اخضر", "باذنجان", "خس", "فلفل بارد", "فراولة", "ملفوف",
-        "بامia", "تين", "فلفل ملون بارد", "فلفل ملون", "فلفل أخضر حار",
+        "باميا", "تين", "فلفل ملون بارد", "فلفل ملون", "فلفل أخضر حار",
         "قرع", "رمان", "قرع نجدى", "الوبا", "فلفل بارد ملون", "فروت", "قثة",
         "فلفل بارد احمر", "برتقال", "ليمون", "فاصوولياج", "با", "قرع امريكى",
         "نعناع", "جرجير", "شمام", "سبانخ", "فلفل بارداخضر"
     ]
-
     def __init__(self, 
                  vectordb_client=None,
                  generation_client=None,
@@ -1206,7 +1237,8 @@ class EnhancedNLPController:
 
     async def answer_with_local_data_simple(self, project_id: int, query: str,
                                             include_risk_assessment: bool = False, 
-                                        n_results: int = 200, year: str = None) -> Dict:
+                                        n_results: int = 200, year: str = None, 
+                                        population_type: PopulationType = PopulationType.ADULT_AVERAGE) -> Dict:
         """Simple version that works like Postman"""
         
         # Basic checks
@@ -1245,19 +1277,48 @@ class EnhancedNLPController:
             context = "\n\n".join(context_docs)  # Use retrieved docs as-is
             
             # Simple, direct prompt (like Postman)
-            prompt = f"""
-            **TASK:** Create a markdown table of ALL pesticide test results that match the query.
+            # prompt = f"""
+            # **TASK:** Create a markdown table of ALL pesticide test results that match the query.
             
-            **HEADERS:** Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result
+            # **HEADERS:** Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result
             
-            **QUERY:** {query}
+            # **QUERY:** {query}
             
-            **DATA:**
-            {context}
+            # **DATA:**
+            # {context}
             
-            **INSTRUCTION:** Show ALL matching samples in table format.
-            """
+            # **INSTRUCTION:** Show ALL matching samples in table format.
+            # """
 
+
+            prompt = f"""
+        **TASK:** Analyze the provided data to answer the user's question. You MUST format your entire response as a single, clean markdown table.
+
+        **RULES:**
+        1.  The table MUST have these exact, single-line headers: `Sample Code`, `Sample Name`, `Pesticide Name`, `Reading Value`, `Limit`, `Result`.
+        2.  Do NOT include any text, explanation, or summary before or after the table.
+        3.  Do NOT use multi-line headers.
+        4.  Each piece of data must be in its own cell.
+
+        **EXAMPLE INPUT FORMAT:**
+        Find 'fipronil' in eggplant samples 
+        Find 'Buprofezin' more than 2 times the limit in pepper samples 
+        Find CONTAMINATED pepper samples 
+        Find ALL samples with 'pyridaben'
+        Find ALL samples exceeding 5 times the limit
+        
+        **EXAMPLE OUTPUT FORMAT:**
+        | Sample Code | Sample Name | Pesticide Name | Reading Value | Limit | Result |
+        |---|---|---|---|---|---|
+        | P45-1234 | Tomato | PesticideA | 10 | 50 | Compliant |
+        | P45-5678 | Pepper | PesticideB | 75 | 20 | Non-Compliant |
+
+        ---
+        **USER QUESTION:** {query}
+        ---
+        **DATA:**
+        {context}
+        """
             # SINGLE LLM call (no retries)
             answer = self.generation_model.generate_content(prompt)
             final_answer = answer.text
@@ -1375,46 +1436,79 @@ class EnhancedNLPController:
             return df
         
 
-    def extract_keywords_from_query(self, query: str) -> Dict[str, List[str]]:
-        """Extract pesticide and vegetable keywords from query - SIMPLE approach"""
+    def expand_vegetable_query(self, query: str) -> List[str]:
+        """Expand query with vegetable synonyms for better retrieval"""
         query_lower = query.lower()
+        expanded_terms = []
         
-        found_pesticides = []
-        found_vegetables = []
+        # Check each synonym mapping
+        for key, synonyms in self.VEGETABLE_SYNONYMS.items():
+            if key.lower() in query_lower or key in query:
+                # Add all synonyms
+                expanded_terms.extend(synonyms)
+                self.logger.info(f"Found vegetable '{key}', adding synonyms: {synonyms}")
         
-        # Check pesticides (case-insensitive)
-        for pesticide in self.PESTICIDE_KEYWORDS:
-            if pesticide.lower() in query_lower:
-                found_pesticides.append(pesticide)
-        
-        # Check vegetables (exact match for Arabic)
-        for vegetable in self.VEGETABLE_KEYWORDS:
-            if vegetable in query:  # Keep original case for Arabic
-                found_vegetables.append(vegetable)
-        
-        return {
-            "pesticides": found_pesticides,
-            "vegetables": found_vegetables
-        }
-    
+        return list(set(expanded_terms))  # Remove duplicates
+
     def enhance_query_with_keywords(self, original_query: str) -> str:
-        """Enhance query by adding detected keywords"""
+        """Enhanced version with vegetable synonym expansion"""
         keywords = self.extract_keywords_from_query(original_query)
         
         enhanced_parts = [original_query]
         
-        # Add found keywords to boost relevance
+        # Add found pesticides
         if keywords["pesticides"]:
             enhanced_parts.append(" ".join(keywords["pesticides"]))
         
+        # Add found vegetables
         if keywords["vegetables"]:
             enhanced_parts.append(" ".join(keywords["vegetables"]))
+        
+        # ADD: Vegetable synonym expansion
+        vegetable_synonyms = self.expand_vegetable_query(original_query)
+        if vegetable_synonyms:
+            enhanced_parts.append(" ".join(vegetable_synonyms))
+            self.logger.info(f"Added vegetable synonyms: {vegetable_synonyms}")
         
         enhanced_query = " ".join(enhanced_parts)
         
         self.logger.info(f"Original query: {original_query}")
         self.logger.info(f"Enhanced query: {enhanced_query}")
-        self.logger.info(f"Found pesticides: {keywords['pesticides']}")
-        self.logger.info(f"Found vegetables: {keywords['vegetables']}")
         
         return enhanced_query
+    
+    def extract_keywords_from_query(self, query: str) -> Dict[str, List[str]]:
+        """Enhanced with partial vegetable matching"""
+        query_lower = query.lower()
+        
+        found_pesticides = []
+        found_vegetables = []
+        
+        # Pesticides (exact match)
+        for pesticide in self.PESTICIDE_KEYWORDS:
+            if pesticide.lower() in query_lower:
+                found_pesticides.append(pesticide)
+        
+        # Vegetables (exact match)
+        for vegetable in self.VEGETABLE_KEYWORDS:
+            if vegetable in query:
+                found_vegetables.append(vegetable)
+        
+        # ADD: Partial matching for common vegetables
+        # Helps with queries like "red pepper" → matches "فلفل احمر بارد"
+        if "pepper" in query_lower or "فلفل" in query:
+            # Add all pepper variations
+            pepper_variants = [v for v in self.VEGETABLE_KEYWORDS if "فلفل" in v]
+            found_vegetables.extend(pepper_variants)
+        
+        if "tomato" in query_lower:
+            tomato_variants = [v for v in self.VEGETABLE_KEYWORDS if "طماطم" in v]
+            found_vegetables.extend(tomato_variants)
+        
+        # Remove duplicates
+        found_vegetables = list(set(found_vegetables))
+        
+        return {
+            "pesticides": found_pesticides,
+            "vegetables": found_vegetables
+        }
