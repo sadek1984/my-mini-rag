@@ -1,156 +1,128 @@
-import logging
-import uuid
-from typing import Dict, List, Any, Optional
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Form, Request, status
-from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
-import re
+# routes/iso_routes.py
 
-# --- Project Imports ---
-from dependencies import get_db
-from models.ChunkModel import ChunkModel
-from models.ProjectModel import ProjectModel
-from models.db_schemes.minirag.schemes.asset import Asset as DBAsset
-from models.enums.ResponseEnums import ResponseSignal
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from controllers.NLPController import EnhancedNLPController
 from processors.iso_document_processor import parse_document_metadata
-from stores.VectorDB.VectorDBInterface import VectorDBInterface
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from routes.schemes.nlp import SearchRequest
-from controllers.NLPController import NLPController
-import os
 from datetime import datetime
+import os
+import logging
+import re
+from typing import List
 
-# Setup logging
 logger = logging.getLogger(__name__)
 
+# ✅ SINGLE ROUTER DEFINITION WITH PREFIX
 router = APIRouter(
     prefix="/api/v1/iso",
     tags=["ISO 17025 Management"]
 )
 
-@router.post("/upload_document/{project_id}")
+def fix_metadata_for_chromadb(metadata_dict):
+    """تحويل metadata ليتوافق مع ChromaDB"""
+    fixed_metadata = {}
+    for key, value in metadata_dict.items():
+        if isinstance(value, list):
+            fixed_metadata[key] = ", ".join(map(str, value))
+        elif isinstance(value, (dict, tuple)):
+            fixed_metadata[key] = str(value)
+        elif value is None:
+            fixed_metadata[key] = ""
+        elif isinstance(value, (str, int, float, bool)):
+            fixed_metadata[key] = value
+        else:
+            fixed_metadata[key] = str(value)
+    return fixed_metadata
+
+
+@router.post("/upload/{project_id}")  # ✅ Removed duplicate /iso
 async def upload_iso_document(
     project_id: str,
     file: UploadFile = File(...),
     document_type: str = Form(default="Unknown")
 ):
-    """Upload with fixed metadata handling"""
+    """Upload ISO 17025 documents (PDF, DOCX, XLSX)"""
     file_path = None
+    
     try:
-        logger.info(f"Starting upload for project {project_id}, file: {file.filename}")
+        logger.info(f"📄 Uploading ISO document: {file.filename} for project {project_id}")
         
-        # 1. حفظ ومعالجة الملف
+        # Save file temporarily
         file_path = f"/tmp/{file.filename}"
         content = await file.read()
         with open(file_path, "wb") as buffer:
             buffer.write(content)
         
-        from processors.iso_document_processor import parse_document_metadata
+        # Parse document
         parsed_data = parse_document_metadata(file_path, document_type)
         doc_text = parsed_data["text"]
         doc_metadata = parsed_data["metadata"]
         
-        # 2. إصلاح metadata للتوافق مع ChromaDB
-        def fix_metadata_for_chromadb(metadata_dict):
-            """تحويل metadata ليتوافق مع ChromaDB"""
-            fixed_metadata = {}
-            for key, value in metadata_dict.items():
-                if isinstance(value, list):
-                    # تحويل القوائم إلى strings مفصولة بفواصل
-                    fixed_metadata[key] = ", ".join(map(str, value))
-                elif isinstance(value, (dict, tuple)):
-                    # تحويل القواميس والـ tuples إلى strings
-                    fixed_metadata[key] = str(value)
-                elif value is None:
-                    # تحويل None إلى string فارغ
-                    fixed_metadata[key] = ""
-                elif isinstance(value, (str, int, float, bool)):
-                    # القيم المدعومة مباشرة
-                    fixed_metadata[key] = value
-                else:
-                    # أي نوع آخر، حوله إلى string
-                    fixed_metadata[key] = str(value)
-            return fixed_metadata
+        # Initialize NLP controller
+        nlp_controller = EnhancedNLPController(
+            gemini_api_key=os.getenv("GEMINI_API_KEY")
+        )
         
-        # 3. فهرسة مع metadata مُصحح
-        try:
-            from controllers.NLPController import EnhancedNLPController
-            
-            nlp_controller = EnhancedNLPController(
-                gemini_api_key=os.getenv("GEMINI_API_KEY")
-            )
-            
-            if nlp_controller.chroma_client:
-                # تقسيم النص
-                from langchain.text_splitter import RecursiveCharacterTextSplitter
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=1000, 
-                    chunk_overlap=150
-                )
-                chunks = text_splitter.split_text(doc_text)
-                
-                # إنشاء المجموعة
-                collection_name = f"local_project_{project_id}"
-                collection = nlp_controller.chroma_client.get_or_create_collection(
-                    name=collection_name,
-                    embedding_function=nlp_controller.embed_fn
-                )
-                
-                # إعداد metadata مُصحح
-                base_metadata = fix_metadata_for_chromadb(doc_metadata)
-                base_metadata.update({
-                    "source_file": file.filename,
-                    "document_type": document_type,
-                    "project_id": str(project_id),
-                    "upload_timestamp": datetime.now().isoformat()
-                })
-                
-                # إنشاء chunks مع metadata
-                chunk_ids = [f"iso_{file.filename}_{i}" for i in range(len(chunks))]
-                chunk_metadata = []
-                
-                for i in range(len(chunks)):
-                    chunk_meta = base_metadata.copy()
-                    chunk_meta["chunk_index"] = i
-                    chunk_metadata.append(chunk_meta)
-                
-                # فهرسة
-                collection.add(
-                    documents=chunks,
-                    ids=chunk_ids,
-                    metadatas=chunk_metadata
-                )
-                
-                logger.info(f"Successfully indexed {len(chunks)} chunks")
-                
-                return {
-                    "message": f"Document '{file.filename}' uploaded and indexed successfully",
-                    "project_id": project_id,
-                    "document_type": document_type,
-                    "chunks_indexed": len(chunks),
-                    "file_size": len(content),
-                    "iso_clauses": doc_metadata.get("related_clauses", []),
-                    "metadata_keys": list(base_metadata.keys()),
-                    "status": "success"
-                }
-            else:
-                return {
-                    "message": f"Document uploaded (ChromaDB not available)",
-                    "project_id": project_id,
-                    "file_size": len(content)
-                }
-                
-        except Exception as index_error:
-            logger.error(f"Indexing failed: {index_error}")
-            return {
-                "message": f"Document uploaded (indexing failed)",
-                "project_id": project_id,
-                "file_size": len(content),
-                "error": f"Indexing error: {str(index_error)}"
-            }
+        if not nlp_controller.chroma_client:
+            raise HTTPException(status_code=500, detail="ChromaDB not available")
         
+        # Split text into chunks
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, 
+            chunk_overlap=150
+        )
+        chunks = text_splitter.split_text(doc_text)
+        
+        # Create SEPARATE collection for ISO docs
+        collection_name = f"iso_project_{project_id}"
+        
+        nlp_controller.embed_fn.document_mode = True
+        collection = nlp_controller.chroma_client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=nlp_controller.embed_fn,
+            metadata={"type": "iso", "project_id": project_id}
+        )
+        
+        # Prepare metadata
+        base_metadata = fix_metadata_for_chromadb(doc_metadata)
+        base_metadata.update({
+            "source_file": file.filename,
+            "document_type": document_type,
+            "project_id": str(project_id),
+            "upload_timestamp": datetime.now().isoformat(),
+            "collection_type": "iso"
+        })
+        
+        # Create chunks with metadata
+        chunk_ids = [f"iso_{file.filename}_{i}" for i in range(len(chunks))]
+        chunk_metadata = [
+            {**base_metadata, "chunk_index": i} 
+            for i in range(len(chunks))
+        ]
+        
+        # Add to collection
+        collection.add(
+            documents=chunks,
+            ids=chunk_ids,
+            metadatas=chunk_metadata
+        )
+        
+        logger.info(f"✅ Indexed {len(chunks)} chunks from {file.filename}")
+        
+        return {
+            "message": f"ISO document '{file.filename}' uploaded successfully",
+            "project_id": project_id,
+            "document_type": document_type,
+            "document_id": doc_metadata.get("document_id", "Unknown"),
+            "chunks_indexed": len(chunks),
+            "iso_clauses": doc_metadata.get("related_clauses", []),
+            "main_sections": doc_metadata.get("main_sections", []),
+            "referenced_documents": doc_metadata.get("referenced_documents", []),
+            "status": "success"
+        }
+                
     except Exception as e:
-        logger.error(f"Upload failed: {e}")
+        logger.error(f"❌ Upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
         
     finally:
@@ -158,130 +130,101 @@ async def upload_iso_document(
             os.remove(file_path)
 
 
-
-@router.post("/answer/{project_id}")
-async def answer_iso_question(
+@router.post("/query/{project_id}")  # ✅ Removed duplicate /iso
+async def query_iso_documents(
     project_id: str,
     query_data: dict
 ):
-    """Query ISO documents for specific project"""
+    """Query ISO documents for a specific project"""
+    
     try:
         query_text = query_data.get("text", "")
-        logger.info(f"Query for project {project_id}: {query_text}")
-        
-        from controllers.NLPController import EnhancedNLPController
+        logger.info(f"🔍 ISO query for project {project_id}: {query_text}")
         
         nlp_controller = EnhancedNLPController(
             gemini_api_key=os.getenv("GEMINI_API_KEY")
         )
         
         if not nlp_controller.chroma_client:
-            return {"error": "ChromaDB not available"}
+            raise HTTPException(status_code=500, detail="ChromaDB not available")
         
-        # البحث في المجموعة الصحيحة
-        collection_name = f"local_project_{project_id}"
+        # Query ISO collection
+        collection_name = f"iso_project_{project_id}"
         
         try:
+            nlp_controller.embed_fn.document_mode = False
             collection = nlp_controller.chroma_client.get_collection(
                 name=collection_name,
                 embedding_function=nlp_controller.embed_fn
             )
         except:
-            return {
-                "project_id": project_id,
-                "query": query_text,
-                "answer": f"لم يتم العثور على مستندات للمشروع {project_id}. يرجى رفع مستندات أولاً.",
-                "status": "no_collection"
-            }
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No ISO documents found for project {project_id}"
+            )
         
-        # البحث
+        # Search
         results = collection.query(
             query_texts=[query_text],
-            n_results=15
+            n_results=5
         )
         
         if not results["documents"] or not results["documents"][0]:
             return {
                 "project_id": project_id,
                 "query": query_text,
-                "answer": "لم يتم العثور على معلومات ذات صلة في المستندات المرفوعة",
+                "answer": "لم يتم العثور على معلومات ذات صلة في مستندات ISO المرفوعة",
                 "status": "no_results"
             }
         
-        # تكوين السياق والإجابة
+        # Build context
         context = "\n---\n".join(results["documents"][0])
         
-        prompt = f"""
-        Based on the following ISO 17025 documents, answer the question directly and concisely.
-
-        Context: {context}
-
-        Question: {query_text}
-
-        IMPORTANT INSTRUCTIONS:
-        - Answer in the same language as the question (English question → English answer, Arabic question → Arabic answer)
-        - Be concise and direct
-        - Use clear formatting without asterisks or special characters
-        - Focus only on what the question asks for
-
-        Answer:
-        """
-
-        # تصفية وإعادة ترتيب النتائج
-        enhanced_results = hybrid_search(collection, query_text, n_results=15)
-        
-        if not enhanced_results:
-            return {
-                "project_id": project_id,
-                "query": query_text,
-                "answer": "لم يتم العثور على معلومات ذات صلة",
-                "status": "no_results"
+        # Get sources from metadata
+        sources = []
+        for meta in results["metadatas"][0]:
+            source_info = {
+                "file": meta.get("source_file", "Unknown"),
+                "type": meta.get("document_type", "Unknown"),
+                "doc_id": meta.get("document_id", "Unknown"),
+                "clauses": meta.get("related_clauses", "").split(", ") if meta.get("related_clauses") else []
             }
-        # إعادة ترتيب حسب الأولوية
-        reranked_results = rerank_chunks_by_relevance(enhanced_results, query_text)
-        # أخذ أفضل النتائج للسياق
-        top_chunks = reranked_results[:5]
-        context = "\n---\n".join([chunk["document"] for chunk in top_chunks])
-        # تحسينات الإجابة
-        language = detect_query_language(query_text)
-        prompt = create_language_specific_prompt(query_text, context, language)
+            sources.append(source_info)
+        
+        # Generate answer
+        prompt = f"""
+        بناءً على مستندات ISO 17025 التالية، أجب على السؤال:
+
+        السياق: {context}
+        
+        السؤال: {query_text}
+        
+        أجب بتنسيق واضح ومفصل مع ذكر:
+        1. الإجابة المباشرة
+        2. البنود المرجعية من ISO 17025 إن وجدت
+        3. المستندات المرتبطة
+        """
+        
         answer = nlp_controller.generation_model.generate_content(prompt)
-        cleaned_answer = clean_answer_text(answer.text)
-        # فلترة المصادر المساهمة فعلياً
-        contributing_sources = []
-        for chunk in top_chunks:
-            if verify_content_contribution(chunk["document"], cleaned_answer):
-                source_file = chunk["metadata"].get("source_file", "Unknown")
-                if source_file not in contributing_sources:
-                    contributing_sources.append(source_file)
         
         return {
             "project_id": project_id,
             "query": query_text,
-            "answer": cleaned_answer,
-            "language_detected": language,
-            "success": True,
-            "sources": contributing_sources,  # فقط المصادر المساهمة
-            "all_searched_sources": list(set([chunk["metadata"].get("source_file") for chunk in top_chunks])),  # للتشخيص
-            "document_priorities": [
-                {
-                    "source": chunk["metadata"].get("source_file"),
-                    "type": chunk["metadata"].get("document_type"),
-                    "priority_score": chunk.get("priority_score", 0)
-                } for chunk in top_chunks[:3]
-            ],
+            "answer": answer.text,
+            "sources": sources,
+            "total_chunks": len(results["documents"][0]),
             "status": "success"
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Query failed: {e}")
-        return {"error": str(e)}
-    
-##### Methods for language selectivity ######
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 def detect_query_language(query: str) -> str:
     """كشف لغة الاستعلام"""
-    # البحث عن أحرف عربية
     arabic_pattern = re.compile(r'[\u0600-\u06FF]')
     if arabic_pattern.search(query):
         return "arabic"

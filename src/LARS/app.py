@@ -1434,10 +1434,37 @@ class APIClient:
         }
         params = {"year": year}
         return self._make_request("POST", endpoint, data=data, params=params)
+    
 
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
+
+# Add this debug function to your Streamlit app:
+
+def debug_available_endpoints(api_client):
+    """Debug: Show all available endpoints"""
+    try:
+        # Try to get OpenAPI docs
+        url = f"{api_client.base_url}/docs"
+        st.write(f"API Documentation: {url}")
+        
+        # Try to call a simple endpoint to verify connection
+        health_url = f"{api_client.base_url}/api/v1/dashboards/health"
+        response = requests.get(health_url, timeout=5)
+        
+        if response.status_code == 200:
+            st.success("✅ API is reachable")
+        
+        # Show what we're trying to call
+        st.write("**Attempting to call:**")
+        st.code(f"POST {api_client.base_url}/api/v1/iso/upload/iso/{{project_id}}")
+        
+    except Exception as e:
+        st.error(f"Debug failed: {e}")
+
+
+
 
 def extract_year_from_text(text: str) -> Optional[str]:
     """Extract year from user query"""
@@ -1551,8 +1578,11 @@ def get_api_client():
 
 def render_sidebar(api_client):
     """Render sidebar with navigation and settings"""
-    
+    # Add a debug button to your sidebar:
+    if st.button("🐛 Debug Endpoints"):
+        debug_available_endpoints(api_client)
     with st.sidebar:
+        
         st.markdown("## 🔗 API Configuration")
         
         current_url = st.text_input("API Base URL", value=API_BASE_URL, key="api_url")
@@ -1755,11 +1785,73 @@ def show_chat_page(api_client):
     display_chat_messages()
     handle_chat_input(api_client)
 
+
 def render_chat_sidebar(api_client):
     """Render chat-specific sidebar controls"""
     
     with st.sidebar:
         st.markdown("---")
+        
+        # ==================== PROJECT CONFIGURATION ====================
+        st.markdown("## 🏢 Project Configuration")
+        
+        # Initialize project ID in session state if not exists
+        if 'project_id' not in st.session_state:
+            st.session_state.project_id = "TrhBVe_m5gg2002_E5VVqS"  # Default project ID
+        
+        # Project ID input
+        project_id = st.text_input(
+            "Project ID",
+            value=st.session_state.project_id,
+            help="Enter your project identifier (e.g., TrhBVe_m5gg2002_E5VVqS)",
+            key="project_id_input"
+        )
+        
+        # Update session state if changed
+        if project_id != st.session_state.project_id:
+            st.session_state.project_id = project_id
+        
+        # Show current project info
+        st.info(f"📁 Active Project: `{st.session_state.project_id}`")
+        
+        st.markdown("---")
+        
+        # ==================== ISO DOCUMENT UPLOAD ====================
+        st.markdown("## 📄 ISO Document Upload")
+        
+        uploaded_file = st.file_uploader(
+            "Upload ISO Document",
+            type=['pdf', 'docx', 'xlsx'],
+            help="Upload Quality Manual, Procedures, Work Instructions, or Forms"
+        )
+        
+        doc_type = st.selectbox(
+            "Document Type",
+            [
+                "Quality Manual",
+                "Procedure", 
+                "Work Instruction",
+                "Form/Record",
+                "Unknown"
+            ]
+        )
+        
+        if uploaded_file is not None:
+            # Show what will be uploaded
+            st.caption(f"Will upload to project: {st.session_state.project_id}")
+            
+            if st.button("📤 Upload ISO Document", use_container_width=True, type="primary"):
+                # Pass the project ID from session state
+                upload_iso_document_ui(
+                    api_client, 
+                    uploaded_file, 
+                    doc_type, 
+                    st.session_state.project_id  # ✅ Use actual project ID
+                )
+        
+        st.markdown("---")
+        
+        # ==================== DATA CONTEXT ====================
         st.markdown("## 📅 Data Context")
         
         st.info(f"**Active Year:** {st.session_state.selected_year}")
@@ -1774,6 +1866,8 @@ def render_chat_sidebar(api_client):
             st.session_state.selected_year = selected_year
         
         st.markdown("---")
+        
+        # ==================== DATA INDEXING ====================
         st.markdown("## 🗄️ Data Indexing")
         
         year_to_index = st.selectbox("Select Year to Index", AVAILABLE_YEARS)
@@ -1794,6 +1888,8 @@ def render_chat_sidebar(api_client):
                 st.markdown(f"- {year}")
 
         st.markdown("---")
+        
+        # ==================== SETTINGS ====================
         st.markdown("## ⚙️ Settings")
         
         risk_mode = st.radio(
@@ -1804,6 +1900,82 @@ def render_chat_sidebar(api_client):
         )
         
         st.session_state.risk_mode = risk_mode
+
+
+
+# ==================== NEW FUNCTION: Upload ISO Document ====================
+
+def upload_iso_document_ui(api_client, uploaded_file, doc_type: str, project_id: str):
+    """Handle ISO document upload from Streamlit UI"""
+    
+    with st.spinner(f"📤 Uploading {uploaded_file.name}..."):
+        try:
+            # Prepare the file for upload
+            files = {
+                'file': (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)
+            }
+            
+            data = {
+                'document_type': doc_type
+            }
+            
+            # Use the provided project_id
+            url = f"{api_client.base_url}/api/v1/iso/upload/{project_id}"
+
+            st.info(f"🔗 Uploading to: {url}")  # Debug info
+            
+            response = requests.post(
+                url,
+                files=files,
+                data=data,
+                timeout=120
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            # Display success
+            st.success(f"✅ Successfully uploaded: {uploaded_file.name}")
+            
+            # Show details in expander
+            with st.expander("📋 Upload Details"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write(f"**Project ID:** {project_id}")
+                    st.write(f"**Document ID:** {result.get('document_id', 'N/A')}")
+                    st.write(f"**Document Type:** {result.get('document_type', 'N/A')}")
+                    st.write(f"**Chunks Indexed:** {result.get('chunks_indexed', 0)}")
+                
+                with col2:
+                    iso_clauses = result.get('iso_clauses', [])
+                    if iso_clauses:
+                        st.write("**ISO Clauses Found:**")
+                        for clause in iso_clauses[:5]:
+                            st.write(f"- {clause}")
+                
+                ref_docs = result.get('referenced_documents', [])
+                if ref_docs:
+                    st.write(f"**Referenced Documents:** {', '.join(ref_docs)}")
+                
+                sections = result.get('main_sections', [])
+                if sections:
+                    st.write("**Main Sections:**")
+                    for section in sections[:3]:
+                        st.write(f"- {section}")
+            
+            st.session_state.chat_messages.append({
+                "role": "assistant",
+                "content": f"✅ ISO document '{uploaded_file.name}' has been uploaded and indexed for project {project_id}. You can now ask questions about it!"
+            })
+            
+        except requests.exceptions.HTTPError as e:
+            st.error(f"❌ Upload failed: {e}")
+            if hasattr(e.response, 'text'):
+                with st.expander("Error Details"):
+                    st.text(e.response.text)
+        except Exception as e:
+            st.error(f"❌ Unexpected error: {str(e)}")
 
 def index_year_data(api_client, year: str, do_reset: bool = False):
     """Index data for a specific year"""
@@ -1846,56 +2018,106 @@ def handle_chat_input(api_client):
         with st.chat_message("assistant"):
             process_query(api_client, prompt)
 
+
 def process_query(api_client, query: str):
+    """Process user query - now checks for ISO queries too"""
     
-    with st.spinner("🔍 Analyzing data..."):
-        query_year = extract_year_from_text(query)
+    with st.spinner("🔍 Analyzing query..."):
         
-        if not query_year:
-            query_year = st.session_state.selected_year
-            st.info(f"⚙️ Using default year: {query_year}")
+        # Detect if this is an ISO-related query
+        iso_keywords = ['iso', '17025', 'procedure', 'calibration', 'quality manual', 
+                       'work instruction', 'form', 'accreditation', 'معايرة', 'إجراء',
+                       'دليل الجودة', 'متطلب', 'اعتماد']
+        
+        is_iso_query = any(keyword in query.lower() for keyword in iso_keywords)
+        
+        if is_iso_query:
+            st.info("🔍 Detected ISO 17025 query - searching ISO documents...")
+            process_iso_query(api_client, query)
         else:
-            st.success(f"✅ Using year from query: {query_year}")
+            # Original pesticide query logic
+            query_year = extract_year_from_text(query)
+            
+            if not query_year:
+                query_year = st.session_state.selected_year
+                st.info(f"⚙️ Using default year: {query_year}")
+            else:
+                st.success(f"✅ Using year from query: {query_year}")
+            
+            if query_year not in st.session_state.indexed_years:
+                response = f"⚠️ Data for {query_year} is not indexed yet. Please index it first."
+                st.warning(response)
+                st.session_state.chat_messages.append({
+                    "role": "assistant",
+                    "content": response
+                })
+                return
+            
+            risk_mode = st.session_state.get('risk_mode', '🤖 Auto-detect')
+            
+            if risk_mode == "✅ Always On":
+                include_risk = True
+            elif risk_mode == "❌ Always Off":
+                include_risk = False
+            else:  # Auto-detect
+                risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume']
+                include_risk = any(kw in query.lower() for kw in risk_keywords)
+            
+            if include_risk:
+                st.success("🎯 Risk assessment enabled")
+            
+            result = api_client.local_answer(query=query, year=query_year, include_risk=include_risk)
+            display_query_results(result, query_year, include_risk)
+
+
+def process_iso_query(api_client, query: str):
+    """Process ISO document query"""
+    
+    project_id = st.session_state.project_id  # ✅ Use actual project ID, not year
+    
+    try:
+        url = f"{api_client.base_url}/api/v1/iso/query/{project_id}"
+
         
-        if query_year not in st.session_state.indexed_years:
-            response = f"⚠️ Data for {query_year} is not indexed yet. Please index it first."
-            st.warning(response)
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": response
-            })
-            return
-        
-        include_risk = any(word in query.lower() 
-                          for word in ["risk", "safety", "health"])
-        
-        result = api_client.local_answer(
-            query=query,
-            year=query_year,
-            n_results=1000,
-            include_risk=include_risk
+        response = requests.post(
+            url,
+            json={"text": query},
+            timeout=120
         )
         
-        if not result:
-            st.error("❌ Failed to get results from API")
-            return
-        """Process user query and display results"""
-        risk_mode = st.session_state.get('risk_mode', '🤖 Auto-detect')
+        response.raise_for_status()
+        result = response.json()
         
-        if risk_mode == "✅ Always On":
-            include_risk = True
-        elif risk_mode == "❌ Always Off":
-            include_risk = False
-        else:  # Auto-detect
-            risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume']
-            include_risk = any(kw in query.lower() for kw in risk_keywords)
+        # Display answer
+        st.markdown(result.get('answer', 'No answer found'))
         
-        if include_risk:
-            st.success("🎯 Risk assessment enabled")
+        # Display sources
+        sources = result.get('sources', [])
+        if sources:
+            st.markdown("---")
+            st.markdown("### 📚 Sources")
+            
+            for idx, source in enumerate(sources, 1):
+                with st.expander(f"📄 Source {idx}: {source.get('file', 'Unknown')}"):
+                    st.write(f"**Type:** {source.get('type', 'Unknown')}")
+                    st.write(f"**Document ID:** {source.get('doc_id', 'Unknown')}")
+                    
+                    clauses = source.get('clauses', [])
+                    if clauses:
+                        st.write(f"**Related ISO Clauses:** {', '.join(clauses)}")
         
-        result = api_client.local_answer(query=query, year=query_year, include_risk=include_risk)
-    
-        display_query_results(result, query_year, include_risk)
+        st.session_state.chat_messages.append({
+            "role": "assistant",
+            "content": result.get('answer', 'No answer found')
+        })
+        
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            st.error(f"📄 No ISO documents found for project {project_id}. Please upload ISO documents first!")
+        else:
+            st.error(f"❌ Query failed: {e}")
+    except Exception as e:
+        st.error(f"❌ Unexpected error: {str(e)}")
 
 def display_query_results(result: Dict, year: str, include_risk: bool):
     """Display query results in a structured format"""
@@ -2071,6 +2293,7 @@ def display_download_options(result: Dict, year: str, data_frame: list):
                 mime="text/csv",
                 use_container_width=True
             )
+            
 
 # ============================================================================
 # RUN APPLICATION

@@ -21,8 +21,22 @@ from routes.time_series import timeseries_router, load_and_train_models
 from routes.dashboards import dashboard_router
 import logging
 from pathlib import Path
+from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI()
+
+app = FastAPI(
+    title="Pesticide & ISO RAG System",
+    description="Unified system for pesticide analysis and ISO 17025 compliance"
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Setup Prometheus metrics
 setup_metrics(app)
