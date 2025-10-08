@@ -1363,7 +1363,18 @@ class APIClient:
         self.headers = API_HEADERS.copy()
         self.session = requests.Session()
         self.session.headers.update(self.headers)
-    
+
+        # ✅ Configure session to bypass proxy for localhost
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
+        
+        # Bypass proxy for localhost/127.0.0.1
+        self.session.trust_env = False  # Don't use system proxy settings
+        self.session.proxies = {
+            'http': None,
+            'https': None
+        }
+
     def _make_request(self, method: str, endpoint: str, 
                      data: Any = None, params: Dict = None) -> Optional[Dict]:
         """Make HTTP request with error handling"""
@@ -2018,23 +2029,61 @@ def handle_chat_input(api_client):
         with st.chat_message("assistant"):
             process_query(api_client, prompt)
 
-
 def process_query(api_client, query: str):
     """Process user query - now checks for ISO queries too"""
     
     with st.spinner("🔍 Analyzing query..."):
         
-        # Detect if this is an ISO-related query
-        iso_keywords = ['iso', '17025', 'procedure', 'calibration', 'quality manual', 
-                       'work instruction', 'form', 'accreditation', 'معايرة', 'إجراء',
-                       'دليل الجودة', 'متطلب', 'اعتماد']
+        # Enhanced ISO keyword detection
+        iso_keywords = [
+            # ISO standards
+            'iso', '17025', 'clause', 'requirement', 'accreditation',
+            # Lab equipment and procedures
+            'gc', 'gc-ms', 'gcms', 'hplc', 'column', 'instrument', 'equipment',
+            'calibration', 'maintenance', 'validation', 'verification',
+            # Documents
+            'procedure', 'manual', 'quality manual', 'work instruction', 
+            'form', 'record', 'document', 'policy',
+            # Lab terms
+            'method', 'protocol', 'sop', 'standard operating',
+            'laboratory', 'lab', 'sample handling', 'traceability',
+            # Arabic terms
+            'معايرة', 'إجراء', 'دليل الجودة', 'متطلب', 'اعتماد',
+            'مختبر', 'جهاز', 'معدات'
+        ]
         
-        is_iso_query = any(keyword in query.lower() for keyword in iso_keywords)
+        # Pesticide-specific keywords (more specific)
+        pesticide_keywords = [
+            'pesticide', 'bifenthrin', 'pyridaben', 'mبيد',
+            'tomato', 'pepper', 'cucumber', 'طماطم', 'فلفل', 'خيار',
+            'exceeding', 'limit', 'violation', 'غير مطابق', 'مطابق',
+            'sample code', 'reading', 'ppm', 'ppb'
+        ]
+        
+        query_lower = query.lower()
+        
+        # Count keyword matches
+        iso_score = sum(1 for kw in iso_keywords if kw in query_lower)
+        pesticide_score = sum(1 for kw in pesticide_keywords if kw in query_lower)
+        
+        # Check for year in query (strong indicator of pesticide query)
+        has_year = any(year in query for year in AVAILABLE_YEARS)
+        
+        # Decision logic
+        if iso_score > pesticide_score:
+            is_iso_query = True
+        elif pesticide_score > iso_score:
+            is_iso_query = False
+        elif has_year:
+            is_iso_query = False  # Year mentioned = pesticide query
+        else:
+            is_iso_query = True  # Default to ISO if ambiguous
         
         if is_iso_query:
             st.info("🔍 Detected ISO 17025 query - searching ISO documents...")
             process_iso_query(api_client, query)
         else:
+            st.info("🔍 Detected pesticide query - searching pesticide data...")
             # Original pesticide query logic
             query_year = extract_year_from_text(query)
             
