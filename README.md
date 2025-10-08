@@ -96,6 +96,8 @@ Find bifenazate more than limits in 2022
 http://localhost:8000/api/v1/nlp/local/debug-filter/1?year=2022
 
 Find 'Buprofezin' more than 2 times the limit in tomato sample 2022
+include_risk_assessment : true
+
 find non compliant samples with bifenthrin in cucumber samples 2023
 Find 'fipronil' in eggplant samples 2022
 

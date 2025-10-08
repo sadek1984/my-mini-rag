@@ -1793,6 +1793,18 @@ def render_chat_sidebar(api_client):
             for year in sorted(st.session_state.indexed_years):
                 st.markdown(f"- {year}")
 
+        st.markdown("---")
+        st.markdown("## ⚙️ Settings")
+        
+        risk_mode = st.radio(
+            "Risk Assessment Mode",
+            options=["🤖 Auto-detect", "✅ Always On", "❌ Always Off"],
+            index=0,
+            help="Auto-detect: Enables when you ask about safety/risk\nAlways On: Include for every query\nAlways Off: Never include"
+        )
+        
+        st.session_state.risk_mode = risk_mode
+
 def index_year_data(api_client, year: str, do_reset: bool = False):
     """Index data for a specific year"""
     action = "Resetting and re-indexing" if do_reset else "Indexing"
@@ -1835,7 +1847,6 @@ def handle_chat_input(api_client):
             process_query(api_client, prompt)
 
 def process_query(api_client, query: str):
-    """Process user query and display results"""
     
     with st.spinner("🔍 Analyzing data..."):
         query_year = extract_year_from_text(query)
@@ -1868,45 +1879,152 @@ def process_query(api_client, query: str):
         if not result:
             st.error("❌ Failed to get results from API")
             return
+        """Process user query and display results"""
+        risk_mode = st.session_state.get('risk_mode', '🤖 Auto-detect')
         
+        if risk_mode == "✅ Always On":
+            include_risk = True
+        elif risk_mode == "❌ Always Off":
+            include_risk = False
+        else:  # Auto-detect
+            risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume']
+            include_risk = any(kw in query.lower() for kw in risk_keywords)
+        
+        if include_risk:
+            st.success("🎯 Risk assessment enabled")
+        
+        result = api_client.local_answer(query=query, year=query_year, include_risk=include_risk)
+    
         display_query_results(result, query_year, include_risk)
 
 def display_query_results(result: Dict, year: str, include_risk: bool):
     """Display query results in a structured format"""
     
+    # Display main answer
     answer = result.get('answer', 'No results found')
     st.markdown(answer)
     
+    # Display metrics
     col1, col2 = st.columns(2)
     with col1:
         st.metric("📄 Retrieved Documents", result.get('retrieved_docs_count', 0))
     with col2:
         st.metric("📚 Collection Total", result.get('collection_total', 0))
     
+    # Display data table
     data_frame = result.get('data_frame', [])
     if data_frame:
         st.markdown("---")
         st.markdown("### 📊 Interactive Data Table")
         df = pd.DataFrame(data_frame)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, use_container_width=True, height=300)
         
         st.markdown("### 📋 Individual Results")
         display_individual_results(data_frame)
     
-    if include_risk and result.get('risk_assessment'):
+    # Display detailed risk assessment
+    risk_assessment = result.get('risk_assessment')
+    if risk_assessment:
         st.markdown("---")
-        risk_text = format_risk_assessment(result['risk_assessment'])
-        st.markdown(risk_text)
+        st.markdown("## 🎯 Risk Assessment Summary")
+        
+        # Summary metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Samples", risk_assessment.get('total_samples_assessed', 0))
+        with col2:
+            st.metric("Population Type", risk_assessment.get('population_type', 'N/A'))
+        with col3:
+            dist = risk_assessment.get('overall_risk_distribution', {})
+            acceptable = dist.get('acceptable', 0)
+            st.metric("✅ Safe Samples", acceptable)
+        
+        # Individual sample assessments
+        assessment_results = risk_assessment.get('assessment_results', [])
+        if assessment_results:
+            for idx, assessment in enumerate(assessment_results, 1):
+                sample_code = assessment.get('sample_code', 'N/A')
+                pesticide_name = assessment.get('pesticide_name', 'N/A')
+                risk_level = assessment.get('risk_level', 'unknown')
+                risk_percentage = assessment.get('risk_percentage', 0)
+                
+                # Determine status
+                if risk_level == 'acceptable':
+                    status_icon = "✅"
+                    status_text = "Safe"
+                else:
+                    status_icon = "⚠️"
+                    status_text = "Warning"
+                
+                # Main expander for each sample
+                with st.expander(f"{status_icon} Sample {idx}: {sample_code} - {pesticide_name} - {status_text}"):
+                    
+                    # Two columns
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("#### 📊 Sample Information")
+                        st.write(f"**Sample Code:** {assessment.get('sample_code', 'N/A')}")
+                        st.write(f"**Pesticide:** {assessment.get('pesticide_name', 'N/A')}")
+                        st.write(f"**Food Item:** {assessment.get('food_item', 'unknown')}")
+                        st.write(f"**Concentration (ppb):** {assessment.get('concentration_ppb', 0):.2f}")
+                        st.write(f"**Concentration (mg/kg):** {assessment.get('concentration_mg_kg', 0):.3f}")
+                    
+                    with col2:
+                        st.markdown("#### 🔬 Risk Metrics")
+                        st.write(f"**EDI Value:** {assessment.get('edi_value', 0):.6f} mg/kg/day")
+                        st.write(f"**ADI Value:** {assessment.get('adi_value', 0):.2f} mg/kg/day")
+                        st.write(f"**ADI Source:** {assessment.get('adi_source', 'N/A')}")
+                        st.write(f"**Food Intake Source:** {assessment.get('food_intake_source', 'N/A')}")
+                        
+                        # Risk percentage with color
+                        risk_pct = assessment.get('risk_percentage', 0)
+                        if risk_pct < 50:
+                            st.success(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
+                        elif risk_pct < 100:
+                            st.warning(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
+                        else:
+                            st.error(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
+                    
+                    # Status and recommendation
+                    st.markdown("#### 📋 Assessment")
+                    risk_status = assessment.get('risk_status', 'N/A')
+                    recommendation = assessment.get('recommendation', 'N/A')
+                    
+                    if risk_level == 'acceptable':
+                        st.success(f"**Status:** {risk_status}")
+                    else:
+                        st.error(f"**Status:** {risk_status}")
+                    
+                    st.info(f"**Recommendation:** {recommendation}")
+                    
+                    # FIXED: Show calculation details WITHOUT nested expander
+                    calc_details = assessment.get('calculation_details', {})
+                    if calc_details:
+                        st.markdown("---")
+                        st.markdown("#### 🧮 Calculation Details")
+                        
+                        st.markdown("**Formula:**")
+                        st.code(calc_details.get('formula', 'N/A'), language="text")
+                        
+                        st.markdown("**Substitution:**")
+                        st.code(calc_details.get('substitution', 'N/A'), language="text")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"**Population Weight:** {calc_details.get('population_weight', 'N/A')}")
+                        with col2:
+                            st.write(f"**Daily Intake:** {calc_details.get('daily_intake', 'N/A')}")
     
     st.markdown("---")
     display_download_options(result, year, data_frame)
     
+    # Store in session
     st.session_state.chat_messages.append({
         "role": "assistant",
         "content": f"✅ Analysis completed for {year}",
         "data": result
     })
-
 def display_individual_results(data_frame: list):
     """Display individual result cards"""
     for idx, record in enumerate(data_frame, 1):

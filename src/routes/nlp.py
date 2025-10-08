@@ -355,118 +355,71 @@ async def index_local_data_simple(request: Request, project_id: int,
             "signal": "LOCAL_INDEX_ERROR",
             "error": str(e)
         })
+
 # @nlp_router.post("/local/answer/{project_id}")
 # async def local_answer_endpoint(request: Request, project_id: int,
 #                                answer_request: LocalAnswerRequest,
 #                                year: Optional[str] = Query(default=None)):
-#     """Answer queries using locally indexed data with Gemini"""
+#     """Enhanced version with keyword and synonym expansion"""
+    
 #     try:
-#         # Get year from query parameter
-#         target_year = year or str(datetime.now().year)
+#         target_year = year or "2022"
         
-#         # Get GEMINI API key (you're using Gemini, not OpenAI!)
 #         gemini_api_key = os.getenv("GEMINI_API_KEY")
 #         if not gemini_api_key:
-#             return JSONResponse(
-#                 status_code=400,
-#                 content={
-#                     "signal": "GEMINI_API_KEY_MISSING",
-#                     "message": "Please set GEMINI_API_KEY environment variable"
-#                 }
-#             )
+#             return JSONResponse(status_code=400, content={
+#                 "signal": "GEMINI_API_KEY_MISSING",
+#                 "message": "Please set GEMINI_API_KEY environment variable"
+#             })
 
-#         # Initialize controller WITH Gemini key
-#         enhanced_controller = EnhancedNLPController(
-#             vectordb_client=request.app.vectordb_client,
-#             generation_client=request.app.generation_client,
-#             embedding_client=request.app.embedding_client,
-#             template_parser=request.app.template_parser,
-#             gemini_api_key=gemini_api_key  # Pass the actual key!
+#         # Initialize controller
+#         enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
+        
+#         # ENHANCE QUERY with keywords and synonyms
+#         enhanced_query = enhanced_controller.enhance_query_with_keywords(
+#             answer_request.query
 #         )
         
-#         # Get answer from local data
-#         result = await enhanced_controller.answer_with_local_data(
+#         # Use the answer_with_local_data_simple method
+#         response = await enhanced_controller.answer_with_local_data_simple(
 #             project_id=project_id,
-#             query=answer_request.query,
+#             query=enhanced_query,  # Use enhanced query
 #             n_results=answer_request.n_results,
-#             include_risk_assessment=answer_request.include_risk_assessment,
-#             population_type=answer_request.population_type,  # Remove .value
 #             year=target_year
 #         )
+        
+#         if not response.get("success"):
+#             return JSONResponse(status_code=400, content={
+#                 "signal": "QUERY_FAILED",
+#                 "error": response.get("error")
+#             })
 
-#         if not result.get("success", False):
-#             return JSONResponse(
-#                 status_code=400,
-#                 content={
-#                     "signal": "LOCAL_ANSWER_ERROR",
-#                     "error": result.get("error", "Unknown error"),
-#                     "debug_info": result.get("debug_info", {})
-#                 }
-#             )
-
-#         # Return response
 #         return JSONResponse(content={
 #             "signal": "LOCAL_ANSWER_SUCCESS",
-#             "answer": result["answer"],
-#             "data_frame": result.get("data_frame", []),
-#             "columns": result.get("columns", []),
-#             "retrieved_docs_count": result.get("retrieved_docs_count", 0),
-#             "full_prompt": result.get("full_prompt", ""),
-#             "collection_total": result.get("collection_total", 0),
-#             "risk_assessment": result.get("risk_assessment"),
-#             "project_id": project_id,
-#             "year": target_year
+#             **response  # Include all response data
 #         })
 
 #     except Exception as e:
 #         import traceback
-#         traceback.print_exc()
-#         return JSONResponse(
-#             status_code=500,
-#             content={
-#                 "signal": "LOCAL_ANSWER_ERROR",
-#                 "error": str(e),
-#                 "traceback": traceback.format_exc()
-#             }
-#         )
-import pandas as pd
-try:
-    from utils.response_parser import parse_llm_response_to_df
-except ImportError:
-    # Create a simple fallback function
-    def parse_llm_response_to_df(text):
-        """Simple fallback parser"""
-        import pandas as pd
-        import re
+#         error_details = traceback.format_exc()
+#         print(f"ERROR: {error_details}")
         
-        lines = text.split('\n')
-        table_lines = [line for line in lines if '|' in line and not line.strip().startswith('|--')]
-        
-        if len(table_lines) < 2:
-            return None
-            
-        headers = [col.strip() for col in table_lines[0].split('|')[1:-1]]
-        rows = []
-        
-        for line in table_lines[1:]:
-            cols = [col.strip() for col in line.split('|')[1:-1]]
-            if len(cols) == len(headers):
-                rows.append(cols)
-        
-        if rows:
-            return pd.DataFrame(rows, columns=headers)
-        return None
+#         return JSONResponse(status_code=500, content={
+#             "signal": "LOCAL_ANSWER_ERROR",
+#             "error": str(e),
+#             "details": error_details
+#         })
+
 
 @nlp_router.post("/local/answer/{project_id}")
 async def local_answer_endpoint(request: Request, project_id: int,
                                answer_request: LocalAnswerRequest,
                                year: Optional[str] = Query(default=None)):
-    """Enhanced version with keyword and synonym expansion"""
-    
+    """Answer queries using locally indexed data with optional health risk assessment"""
     try:
         target_year = year or "2022"
-        
         gemini_api_key = os.getenv("GEMINI_API_KEY")
+        
         if not gemini_api_key:
             return JSONResponse(status_code=400, content={
                 "signal": "GEMINI_API_KEY_MISSING",
@@ -476,42 +429,44 @@ async def local_answer_endpoint(request: Request, project_id: int,
         # Initialize controller
         enhanced_controller = EnhancedNLPController(gemini_api_key=gemini_api_key)
         
-        # ENHANCE QUERY with keywords and synonyms
-        enhanced_query = enhanced_controller.enhance_query_with_keywords(
-            answer_request.query
-        )
-        
-        # Use the answer_with_local_data_simple method
-        response = await enhanced_controller.answer_with_local_data_simple(
+        # Get answer from local data (NO query enhancement)
+        result = await enhanced_controller.answer_with_local_data_simple(
             project_id=project_id,
-            query=enhanced_query,  # Use enhanced query
+            query=answer_request.query,  # Use original query
             n_results=answer_request.n_results,
-            year=target_year
+            year=target_year,
+            include_risk_assessment=answer_request.include_risk_assessment,
+            population_type=answer_request.population_type  # Pass enum directly
         )
-        
-        if not response.get("success"):
+
+        if not result.get("success", False):
             return JSONResponse(status_code=400, content={
-                "signal": "QUERY_FAILED",
-                "error": response.get("error")
+                "signal": "LOCAL_ANSWER_ERROR",
+                "error": result.get("error", "Unknown error")
             })
 
+        # Return response matching Postman structure
         return JSONResponse(content={
             "signal": "LOCAL_ANSWER_SUCCESS",
-            **response  # Include all response data
+            "answer": result.get("answer", ""),
+            "data_frame": result.get("data_frame", []),  # ADD THIS
+            "columns": result.get("columns", []),        # ADD THIS
+            "full_prompt": "",
+            "retrieved_docs_count": result.get("retrieved_docs_count", 0),
+            "collection_total": result.get("collection_total", 0),
+            "project_id": project_id,
+            "debug_info": {},
+            "risk_assessment": result.get("risk_assessment")
         })
 
     except Exception as e:
         import traceback
-        error_details = traceback.format_exc()
-        print(f"ERROR: {error_details}")
-        
+        traceback.print_exc()
         return JSONResponse(status_code=500, content={
             "signal": "LOCAL_ANSWER_ERROR",
             "error": str(e),
-            "details": error_details
+            "traceback": traceback.format_exc()
         })
-
-
 # Also add a simple test endpoint to check raw ChromaDB data
 @nlp_router.get("/local/raw-data/{project_id}")
 async def get_raw_data_sample(request: Request, project_id: int):
