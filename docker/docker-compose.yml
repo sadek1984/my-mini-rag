@@ -11,6 +11,7 @@ services:
       - ./chroma_data:/app/chroma_db:rw
       - ./chroma_db:/app/chroma_db  # Add this line
       - /Users/a12/mini-rag/src/data:/app/data
+      - ./single_dataset_system:/app/single_dataset_system  # 👈 Add this line for models
     networks:
       - backend
     restart: always

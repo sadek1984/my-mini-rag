@@ -22,6 +22,8 @@ from routes.dashboards import dashboard_router
 import logging
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
+from services.pesticide_prediction_service import PesticidePredictionService
+import os
 
 
 app = FastAPI(
@@ -106,6 +108,55 @@ async def startup_span():
             print(f"{route.methods} {route.path}")
     print("=== End Routes ===\n")
 
+    """Train models on startup - just like time series forecasting"""
+    
+    logger.info("🚀 Application Startup - Training Models")
+    logger.info("=" * 80)
+    
+    # 1. Train Time Series Forecasting Models (existing)
+    logger.info("\n📈 Training Time Series Forecasting Models...")
+    load_and_train_models()
+    
+    # 2. Train Pesticide Classification Models (NEW - same pattern)
+    logger.info("\n🤖 Training Pesticide Classification Models...")
+    
+    # Check if models already exist
+    model_path = Path("single_dataset_system/trained_models")
+    
+    if model_path.exists() and list(model_path.glob("*.pkl")):
+        logger.info("✅ Prediction models already exist - skipping training")
+        logger.info(f"   Models found at: {model_path}")
+    else:
+        logger.info("🔧 No existing models found - training new models...")
+        
+        # Define dataset path (same as your time series data)
+        dataset_path = os.getenv("PREDICTION_DATASET_PATH", "/app/data/dataset.xlsx")
+        
+        # Train and save models
+        success = PesticidePredictionService.train_and_save_models(
+            dataset_path=dataset_path,
+            output_dir="single_dataset_system"
+        )
+        
+        if success:
+            logger.info("✅ Prediction models trained and ready!")
+        else:
+            logger.warning("⚠️  Prediction model training failed - will use fallback mode")
+    
+    logger.info("\n" + "=" * 80)
+    logger.info("✅ All Models Ready - API Started Successfully!")
+    logger.info("=" * 80)
+
+@app.get("/")
+def root():
+    return {
+        "message": "Pesticide Analysis API",
+        "endpoints": {
+            "prediction": "/api/v1/prediction/predict",
+            "forecasting": "/api/v1/timeseries/predict",
+            "docs": "/docs"
+        }
+    }
 
 async def shutdown_span():
     app.db_engine.dispose()

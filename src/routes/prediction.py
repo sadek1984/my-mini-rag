@@ -4,23 +4,23 @@ from fastapi.responses import JSONResponse
 import logging
 from typing import Dict, Any
 
-from models.pesticide_prediction_models import (
-    PesticideSampleInput, 
-    BatchPredictionInput,
-    PredictionResult,
-    BatchPredictionResult,
-    ModelStatus,
-    PredictionIndexRequest
-)
 from services.pesticide_prediction_service import PesticidePredictionService
 from models.ProjectModel import ProjectModel
 from models.db_schemes import DataChunk
 from models.ChunkModel import ChunkModel
 from controllers import NLPController
 
+from models.pesticide_prediction_models import (
+    PesticideSampleInput, 
+    BatchPredictionInput,
+    PredictionResult,
+    BatchPredictionResult,
+    ModelStatus
+)
+from services.pesticide_prediction_service import PesticidePredictionService
+
 logger = logging.getLogger(__name__)
 
-# Create router
 prediction_router = APIRouter(
     prefix="/api/v1/prediction",
     tags=["Pesticide Prediction"]
@@ -30,16 +30,20 @@ prediction_router = APIRouter(
 prediction_service = None
 
 def get_prediction_service():
-    """Dependency to get prediction service"""
+    """Dependency to get prediction service - UPDATED"""
     global prediction_service
     if prediction_service is None:
         try:
             prediction_service = PesticidePredictionService()
+            
+            # Service always initializes, but may use fallback mode
+            logger.info("Prediction service initialized")
+            
+            # Log a warning if models aren't loaded
             if not prediction_service.model_loaded:
-                raise HTTPException(
-                    status_code=503, 
-                    detail="Prediction model not available. Please ensure the model is trained and saved."
-                )
+                logger.warning("⚠️  Prediction service running in FALLBACK mode")
+                logger.warning("   To use ML models, run: python train_models.py")
+            
         except Exception as e:
             logger.error(f"Failed to initialize prediction service: {e}")
             raise HTTPException(
@@ -47,6 +51,7 @@ def get_prediction_service():
                 detail=f"Prediction service initialization failed: {str(e)}"
             )
     return prediction_service
+
 
 @prediction_router.get("/status", response_model=ModelStatus)
 async def get_model_status(service: PesticidePredictionService = Depends(get_prediction_service)):

@@ -20,7 +20,7 @@ class PesticideClassificationModel:
     Adapted from the working multi-file system for consolidated dataset processing
     """
     
-    def __init__(self, dataset_path: str):
+    def __init__(self, dataset_path: str = None):
         # Encoders and scalers
         self.scaler = StandardScaler()
         self.group_label_encoder = LabelEncoder()
@@ -214,9 +214,10 @@ class PesticideClassificationModel:
         except Exception as e:
             print(f"Error loading dataset: {e}")
             return pd.DataFrame()
-    
+    # Update the prepare_features method in src/models/PesticideClassificationModel.py
+
     def prepare_features(self, df):
-        """Prepare comprehensive feature set (adapted from your working code)"""
+        """Prepare comprehensive feature set with outlier detection and imputation"""
         print("Preparing features from consolidated dataset...")
         
         # Map dataset columns to expected names
@@ -245,6 +246,53 @@ class PesticideClassificationModel:
         
         print(f"Data cleaning: {initial_count} -> {len(df_processed)} records ({len(df_processed)/initial_count*100:.1f}% retained)")
         
+        # ========== NEW: OUTLIER DETECTION AND IMPUTATION ==========
+        print("\n🔍 Detecting and handling outliers...")
+        
+        for col in ['reading', 'limits']:
+            if col in df_processed.columns:
+                # Calculate IQR
+                Q1 = df_processed[col].quantile(0.25)
+                Q3 = df_processed[col].quantile(0.75)
+                IQR = Q3 - Q1
+                
+                # Define outlier bounds
+                lower_bound = Q1 - 1.5 * IQR
+                upper_bound = Q3 + 1.5 * IQR
+                
+                # Detect outliers
+                outliers_mask = (df_processed[col] < lower_bound) | (df_processed[col] > upper_bound)
+                outliers_count = outliers_mask.sum()
+                
+                if outliers_count > 0:
+                    print(f"  📊 {col}: Found {outliers_count} outliers ({outliers_count/len(df_processed)*100:.2f}%)")
+                    print(f"     Lower bound: {lower_bound:.2f}, Upper bound: {upper_bound:.2f}")
+                    
+                    # Calculate median for imputation
+                    median_value = df_processed[col].median()
+                    
+                    # Impute outliers with median
+                    df_processed.loc[outliers_mask, col] = median_value
+                    print(f"     ✅ Outliers imputed with median: {median_value:.2f}")
+                else:
+                    print(f"  ✅ {col}: No outliers detected")
+        
+        # Alternative: Z-score method (commented out, you can switch if needed)
+        """
+        from scipy import stats
+        for col in ['reading', 'limits']:
+            if col in df_processed.columns:
+                z_scores = np.abs(stats.zscore(df_processed[col]))
+                outliers_mask = z_scores > 3
+                outliers_count = outliers_mask.sum()
+                
+                if outliers_count > 0:
+                    median_value = df_processed[col].median()
+                    df_processed.loc[outliers_mask, col] = median_value
+                    print(f"  Z-score method: {col} - {outliers_count} outliers imputed")
+        """
+        # ========== END OUTLIER DETECTION ==========
+        
         # Apply transformations (from your working code)
         df_processed['pesticide'] = df_processed['pesticide'].astype(str).fillna('unknown')
         df_processed['vegetable_arabic'] = df_processed['vegetable_arabic'].astype(str).fillna('unknown')
@@ -255,7 +303,6 @@ class PesticideClassificationModel:
         
         # Handle compliance status
         if 'result' in df_processed.columns:
-            # Clean result column (handle spaces)
             result_clean = df_processed['result'].astype(str).str.strip()
             df_processed['is_compliant'] = (result_clean == 'مطابق').astype(int)
         else:
@@ -292,7 +339,7 @@ class PesticideClassificationModel:
         
         df_processed['season'] = df_processed['month'].apply(self.get_season)
         
-        print(f"Feature preparation complete: {len(df_processed)} samples")
+        print(f"✅ Feature preparation complete: {len(df_processed)} samples")
         return df_processed
     
     def build_models(self, X_train, y_train_dict):
@@ -671,7 +718,7 @@ class PesticideClassificationModel:
 class SingleDatasetClassificationSystem:
     """Main system class for single dataset processing"""
     
-    def __init__(self, dataset_path: str):
+    def __init__(self, dataset_path: str = None):
         self.dataset_path = Path(dataset_path)
         self.classifier = PesticideClassificationModel(dataset_path)
         self.training_results = None
@@ -691,9 +738,7 @@ class SingleDatasetClassificationSystem:
         
         # Train models with train/val/test splits
         print(f"\nTraining models on dataset with {len(df)} records...")
-        if not verbose_training:
-            verbose_training = input("Show detailed training progress? (y/n): ").lower() == 'y'
-        
+        print(f"Verbose training: {verbose_training}")
         self.training_results = self.classifier.train_all_models(
             df, verbose_training=verbose_training
         )

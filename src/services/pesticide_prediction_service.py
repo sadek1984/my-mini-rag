@@ -1,332 +1,25 @@
-# # src/services/pesticide_prediction_service.py
-# import logging
-# import joblib
-# import numpy as np
-# import pandas as pd
-# from pathlib import Path
-# from typing import Dict, Any, Optional
-# from datetime import datetime
+# src/services/pesticide_prediction_service.py
 
-# from helper.config import get_settings
-
-# class PesticidePredictionService:
-#     """
-#     Production-ready service for pesticide classification predictions
-#     Wraps the SingleDatasetPesticideClassifier for API use
-#     """
-    
-#     def __init__(self, model_path: str = None):
-#         self.logger = logging.getLogger(__name__)
-#         self.settings = get_settings()
-#         self.classifier = None
-#         self.model_loaded = False
-#         self.model_path = model_path or "single_dataset_system/trained_models"
-        
-#         # Load the trained model
-#         self._load_model()
-    
-#     def _load_model(self):
-#         """Load the trained classifier and preprocessing components"""
-#         try:
-#             model_dir = Path(self.model_path)
-            
-#             if not model_dir.exists():
-#                 self.logger.error(f"Model directory not found: {model_dir}")
-#                 return False
-            
-#             # Import the classifier class
-#             from models.PesticideClassificationModel import PesticideClassificationModel
-            
-#             # Initialize classifier
-#             self.classifier = PesticideClassificationModel()
-            
-#             # Load saved components
-#             try:
-#                 self.classifier.scaler = joblib.load(model_dir / "scaler.pkl")
-#                 self.classifier.group_label_encoder = joblib.load(model_dir / "group_label_encoder.pkl")
-#                 self.classifier.onehot_encoders = joblib.load(model_dir / "onehot_encoders.pkl")
-                
-#                 # Load models
-#                 self.classifier.compliance_model = joblib.load(model_dir / "compliance_model.pkl")
-#                 self.classifier.concentration_predictor = joblib.load(model_dir / "concentration_predictor.pkl")
-                
-#                 # Load feature imputer if exists
-#                 imputer_path = model_dir / "feature_imputer.pkl"
-#                 if imputer_path.exists():
-#                     self.classifier.feature_imputer = joblib.load(imputer_path)
-                
-#                 # Load TensorFlow models
-#                 try:
-#                     import tensorflow as tf
-#                     group_model_path = model_dir / "group_classifier.keras"
-#                     if group_model_path.exists():
-#                         self.classifier.group_classifier = tf.keras.models.load_model(group_model_path)
-#                     else:
-#                         # Fallback to pickle
-#                         self.classifier.group_classifier = joblib.load(model_dir / "group_classifier.pkl")
-                    
-#                     risk_model_path = model_dir / "risk_classifier.keras"
-#                     if risk_model_path.exists():
-#                         self.classifier.risk_classifier = tf.keras.models.load_model(risk_model_path)
-                        
-#                 except Exception as tf_e:
-#                     self.logger.warning(f"TensorFlow model loading failed: {tf_e}")
-                
-#                 self.model_loaded = True
-#                 self.logger.info("Pesticide prediction models loaded successfully")
-#                 return True
-                
-#             except Exception as e:
-#                 self.logger.error(f"Error loading model components: {e}")
-#                 return False
-                
-#         except Exception as e:
-#             self.logger.error(f"Failed to load prediction model: {e}")
-#             return False
-    
-#     def predict_sample_compliance(self, 
-#                                 vegetable: str,
-#                                 pesticide_group: str,
-#                                 reading: float,
-#                                 limits: float,
-#                                 sample_code: str = None) -> Dict[str, Any]:
-#         """
-#         Predict compliance and risk for a single sample
-        
-#         Args:
-#             vegetable: Vegetable type (e.g., 'tomato', 'pepper')
-#             pesticide_group: Pesticide group (e.g., 'pyrethroid', 'organophosphorus')
-#             reading: Device reading value
-#             limits: Acceptable limits
-#             sample_code: Optional sample identifier
-            
-#         Returns:
-#             Dictionary with prediction results and metadata
-#         """
-        
-#         if not self.model_loaded:
-#             return {
-#                 'success': False,
-#                 'error': 'Prediction model not loaded',
-#                 'timestamp': datetime.now().isoformat()
-#             }
-        
-#         try:
-#             # Validate inputs
-#             validation_result = self._validate_inputs(vegetable, pesticide_group, reading, limits)
-#             if not validation_result['valid']:
-#                 return {
-#                     'success': False,
-#                     'error': validation_result['error'],
-#                     'timestamp': datetime.now().isoformat()
-#                 }
-            
-#             # Get predictions from classifier
-#             prediction_result = self.classifier.predict_comprehensive_analysis(
-#                 vegetable=vegetable,
-#                 pesticide_group=pesticide_group,
-#                 reading=reading,
-#                 limits=limits
-#             )
-            
-#             if 'error' in prediction_result:
-#                 return {
-#                     'success': False,
-#                     'error': prediction_result['error'],
-#                     'timestamp': datetime.now().isoformat()
-#                 }
-            
-#             # Calculate additional metrics
-#             exceedance_ratio = reading / limits if limits > 0 else float('inf')
-            
-#             # Generate comprehensive response
-#             response = {
-#                 'success': True,
-#                 'sample_info': {
-#                     'sample_code': sample_code or f"PRED_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-#                     'vegetable': vegetable,
-#                     'pesticide_group': pesticide_group,
-#                     'reading': reading,
-#                     'limits': limits,
-#                     'exceedance_ratio': round(exceedance_ratio, 3)
-#                 },
-#                 'predictions': prediction_result,
-#                 'risk_assessment': self._assess_risk_level(exceedance_ratio, pesticide_group),
-#                 'recommendations': self._generate_recommendations(prediction_result, vegetable, pesticide_group, exceedance_ratio),
-#                 'timestamp': datetime.now().isoformat(),
-#                 'model_version': '1.0'
-#             }
-            
-#             return response
-            
-#         except Exception as e:
-#             self.logger.error(f"Prediction failed: {e}")
-#             return {
-#                 'success': False,
-#                 'error': f'Prediction error: {str(e)}',
-#                 'timestamp': datetime.now().isoformat()
-#             }
-    
-#     def predict_batch_samples(self, samples: list) -> Dict[str, Any]:
-#         """
-#         Predict multiple samples at once
-        
-#         Args:
-#             samples: List of sample dictionaries with required fields
-            
-#         Returns:
-#             Dictionary with batch prediction results
-#         """
-        
-#         if not self.model_loaded:
-#             return {
-#                 'success': False,
-#                 'error': 'Prediction model not loaded'
-#             }
-        
-#         results = []
-#         failed_predictions = []
-        
-#         for i, sample in enumerate(samples):
-#             try:
-#                 result = self.predict_sample_compliance(
-#                     vegetable=sample.get('vegetable'),
-#                     pesticide_group=sample.get('pesticide_group'),
-#                     reading=sample.get('reading'),
-#                     limits=sample.get('limits'),
-#                     sample_code=sample.get('sample_code', f'BATCH_{i+1}')
-#                 )
-                
-#                 if result['success']:
-#                     results.append(result)
-#                 else:
-#                     failed_predictions.append({'index': i, 'error': result['error']})
-                    
-#             except Exception as e:
-#                 failed_predictions.append({'index': i, 'error': str(e)})
-        
-#         return {
-#             'success': True,
-#             'total_samples': len(samples),
-#             'successful_predictions': len(results),
-#             'failed_predictions': len(failed_predictions),
-#             'results': results,
-#             'failures': failed_predictions,
-#             'timestamp': datetime.now().isoformat()
-#         }
-    
-#     def _validate_inputs(self, vegetable: str, pesticide_group: str, reading: float, limits: float) -> Dict[str, Any]:
-#         """Validate input parameters"""
-        
-#         if not vegetable or not isinstance(vegetable, str):
-#             return {'valid': False, 'error': 'Invalid vegetable parameter'}
-        
-#         if not pesticide_group or not isinstance(pesticide_group, str):
-#             return {'valid': False, 'error': 'Invalid pesticide_group parameter'}
-        
-#         try:
-#             reading = float(reading)
-#             limits = float(limits)
-#         except (ValueError, TypeError):
-#             return {'valid': False, 'error': 'Reading and limits must be numeric'}
-        
-#         if reading < 0 or limits <= 0:
-#             return {'valid': False, 'error': 'Reading must be non-negative and limits must be positive'}
-        
-#         return {'valid': True}
-    
-#     def _assess_risk_level(self, exceedance_ratio: float, pesticide_group: str) -> Dict[str, Any]:
-#         """Assess risk level based on exceedance ratio and pesticide group"""
-        
-#         if exceedance_ratio <= 1.0:
-#             risk_level = 'Low'
-#             risk_description = 'Within acceptable limits'
-#         elif exceedance_ratio <= 2.0:
-#             risk_level = 'Medium'
-#             risk_description = 'Slightly above limits'
-#         elif exceedance_ratio <= 5.0:
-#             risk_level = 'High'
-#             risk_description = 'Significantly above limits'
-#         else:
-#             risk_level = 'Critical'
-#             risk_description = 'Critically above limits'
-        
-#         return {
-#             'risk_level': risk_level,
-#             'risk_description': risk_description,
-#             'exceedance_factor': round(exceedance_ratio, 2),
-#             'pesticide_group_risk': self.classifier.group_risk_profiles.get(pesticide_group, {})
-#         }
-    
-#     def _generate_recommendations(self, prediction_result: Dict, vegetable: str, 
-#                                 pesticide_group: str, exceedance_ratio: float) -> list:
-#         """Generate actionable recommendations"""
-        
-#         recommendations = []
-        
-#         # Compliance-based recommendations
-#         if 'compliance' in prediction_result:
-#             compliance_prob = prediction_result['compliance'].get('probability_compliant', 0)
-#             if compliance_prob < 0.5:
-#                 recommendations.append("Sample likely non-compliant - requires immediate attention")
-#                 recommendations.append("Consider retesting to confirm results")
-        
-#         # Risk-based recommendations
-#         if exceedance_ratio > 5.0:
-#             recommendations.append("Critical contamination level - investigate source immediately")
-#             recommendations.append("Implement enhanced cleaning protocols")
-#         elif exceedance_ratio > 2.0:
-#             recommendations.append("Elevated pesticide levels detected - monitor closely")
-        
-#         # Vegetable-specific recommendations
-#         if 'pepper' in vegetable.lower():
-#             recommendations.append("Peppers show high contamination rates - enhance washing protocols")
-#         elif 'leafy' in self.classifier.categorize_vegetable(vegetable):
-#             recommendations.append("Leafy greens require special attention - difficult to decontaminate")
-        
-#         # Pesticide group recommendations
-#         if pesticide_group in self.classifier.group_risk_profiles:
-#             group_risks = self.classifier.group_risk_profiles[pesticide_group]
-#             for risk_type, level in group_risks.items():
-#                 if level == 'high':
-#                     recommendations.append(f"Monitor for {risk_type} effects due to {pesticide_group} exposure")
-        
-#         return recommendations if recommendations else ["Sample appears normal - continue regular monitoring"]
-    
-#     def get_model_status(self) -> Dict[str, Any]:
-#         """Get current model status and metadata"""
-        
-#         return {
-#             'model_loaded': self.model_loaded,
-#             'model_path': str(self.model_path),
-#             'components_loaded': {
-#                 'scaler': hasattr(self.classifier, 'scaler') and self.classifier.scaler is not None,
-#                 'encoders': hasattr(self.classifier, 'onehot_encoders') and bool(self.classifier.onehot_encoders),
-#                 'compliance_model': hasattr(self.classifier, 'compliance_model') and self.classifier.compliance_model is not None,
-#                 'group_classifier': hasattr(self.classifier, 'group_classifier') and self.classifier.group_classifier is not None,
-#             } if self.classifier else {},
-#             'timestamp': datetime.now().isoformat()
-#         }
-
-
-
-# services/pesticide_prediction_service.py
 import logging
-from datetime import datetime
-from typing import Dict, Any, List
+import joblib
+import numpy as np
+import pandas as pd
 from pathlib import Path
+from typing import Dict, Any, Optional, List
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 class PesticidePredictionService:
     """
-    Pesticide prediction service 
+    Production-ready service for pesticide classification predictions using trained ML models
     """
     
     def __init__(self, model_path: str = None):
         self.logger = logging.getLogger(__name__)
-        self.model_loaded = True  # Set to True for API testing
-        self.model_path = model_path or "trained_models"
+        self.classifier = None
+        self.model_loaded = False
+        self.model_path = model_path or "single_dataset_system/trained_models"
         self.model_version = "1.0.0"
         
         # Pesticide group health risk profiles
@@ -338,21 +31,137 @@ class PesticidePredictionService:
             'phenylpyrazole': {'neurotoxicity': 'high', 'bioaccumulation': 'high', 'persistence': 'high'}
         }
         
-        self.logger.info("PesticidePredictionService initialized successfully")
+        # Try to load models (don't fail if not available)
+        self._load_models()
+        
+        # Log the service mode
+        if self.model_loaded:
+            self.logger.info("✅ PesticidePredictionService initialized with ML models")
+        else:
+            self.logger.warning("⚠️  PesticidePredictionService initialized with rule-based fallback")
+            self.logger.warning(f"   Models not found at: {self.model_path}")
+            self.logger.warning(f"   Run 'python train_models.py' to train models")
+    
+    def _load_models(self):
+        """Load trained ML models from saved files"""
+        try:
+            model_dir = Path(self.model_path)
+            
+            if not model_dir.exists():
+                self.logger.warning(f"📂 Model directory not found: {model_dir}")
+                self.logger.warning("   Using rule-based prediction mode")
+                return False
+            
+            # Check for required files
+            required_files = [
+                "scaler.pkl",
+                "group_label_encoder.pkl", 
+                "onehot_encoders.pkl",
+                "compliance_model.pkl"
+            ]
+            
+            missing_files = [f for f in required_files if not (model_dir / f).exists()]
+            
+            if missing_files:
+                self.logger.warning(f"⚠️  Missing model files: {missing_files}")
+                self.logger.warning("   Using rule-based prediction mode")
+                return False
+            
+            self.logger.info(f"🔄 Loading trained models from: {model_dir}")
+            
+            # Import the classifier class
+            try:
+                from models.PesticideClassificationModel import PesticideClassificationModel
+            except ImportError as e:
+                self.logger.error(f"Failed to import PesticideClassificationModel: {e}")
+                return False
+            
+            # Initialize classifier with a dummy path
+            self.classifier = PesticideClassificationModel(dataset_path="dummy")
+            
+            # Load preprocessing components
+            import joblib
+            
+            self.classifier.scaler = joblib.load(model_dir / "scaler.pkl")
+            self.classifier.group_label_encoder = joblib.load(model_dir / "group_label_encoder.pkl")
+            self.classifier.onehot_encoders = joblib.load(model_dir / "onehot_encoders.pkl")
+            
+            self.logger.info("  ✅ Scaler and encoders loaded")
+            
+            # Load feature imputer if exists
+            imputer_path = model_dir / "feature_imputer.pkl"
+            if imputer_path.exists():
+                self.classifier.feature_imputer = joblib.load(imputer_path)
+                self.logger.info("  ✅ Feature imputer loaded")
+            
+            # Load sklearn models
+            self.classifier.compliance_model = joblib.load(model_dir / "compliance_model.pkl")
+            self.logger.info("  ✅ Compliance model loaded (RandomForest)")
+            
+            self.classifier.concentration_predictor = joblib.load(model_dir / "concentration_predictor.pkl")
+            self.logger.info("  ✅ Concentration predictor loaded (GradientBoosting)")
+            
+            # Load TensorFlow/Keras models
+            try:
+                import tensorflow as tf
+                
+                # Try loading group classifier
+                group_model_path = model_dir / "group_classifier.keras"
+                if group_model_path.exists():
+                    self.classifier.group_classifier = tf.keras.models.load_model(str(group_model_path))
+                    self.logger.info("  ✅ Group classifier loaded (Keras Neural Network)")
+                else:
+                    # Fallback to pickle
+                    pkl_path = model_dir / "group_classifier.pkl"
+                    if pkl_path.exists():
+                        self.classifier.group_classifier = joblib.load(pkl_path)
+                        self.logger.info("  ✅ Group classifier loaded (RandomForest fallback)")
+                
+                # Try loading risk classifier
+                risk_model_path = model_dir / "risk_classifier.keras"
+                if risk_model_path.exists():
+                    self.classifier.risk_classifier = tf.keras.models.load_model(str(risk_model_path))
+                    self.logger.info("  ✅ Risk classifier loaded (Keras Neural Network)")
+                    
+            except Exception as tf_error:
+                self.logger.warning(f"  ⚠️  TensorFlow models not loaded: {tf_error}")
+            
+            self.model_loaded = True
+            self.logger.info("✅ All models loaded successfully!")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to load models: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            self.model_loaded = False
+            return False
     
     def get_model_status(self) -> Dict[str, Any]:
         """Get current model status"""
-        return {
-            "model_loaded": self.model_loaded,
-            "model_path": str(self.model_path),
-            "components_loaded": {
-                'scaler': True,
-                'encoders': True,
-                'compliance_model': True,
-                'group_classifier': True,
-            },
-            "timestamp": datetime.now().isoformat()
-        }
+        if self.classifier and self.model_loaded:
+            return {
+                "model_loaded": True,
+                "model_path": str(self.model_path),
+                "components_loaded": {
+                    'scaler': hasattr(self.classifier, 'scaler') and self.classifier.scaler is not None,
+                    'encoders': hasattr(self.classifier, 'onehot_encoders') and bool(self.classifier.onehot_encoders),
+                    'compliance_model': hasattr(self.classifier, 'compliance_model') and self.classifier.compliance_model is not None,
+                    'group_classifier': hasattr(self.classifier, 'group_classifier') and self.classifier.group_classifier is not None,
+                    'concentration_predictor': hasattr(self.classifier, 'concentration_predictor') and self.classifier.concentration_predictor is not None,
+                    'risk_classifier': hasattr(self.classifier, 'risk_classifier') and self.classifier.risk_classifier is not None,
+                },
+                "timestamp": datetime.now().isoformat(),
+                "prediction_mode": "ML Models"
+            }
+        else:
+            return {
+                "model_loaded": False,
+                "model_path": str(self.model_path),
+                "components_loaded": {},
+                "timestamp": datetime.now().isoformat(),
+                "prediction_mode": "Rule-based (Fallback)"
+            }
     
     def predict_sample_compliance(
         self, 
@@ -363,7 +172,7 @@ class PesticidePredictionService:
         sample_code: str = None
     ) -> Dict[str, Any]:
         """
-        Predict compliance for a single sample
+        Predict compliance using trained ML models or fallback to rule-based
         """
         try:
             # Validate inputs
@@ -377,55 +186,218 @@ class PesticidePredictionService:
             
             # Calculate basic metrics
             exceedance_ratio = reading / limits if limits > 0 else float('inf')
-            is_compliant = reading <= limits
             
-            # Mock prediction logic (replace with actual model)
-            compliance_probability = max(0.0, min(1.0, 1.0 - (exceedance_ratio - 1.0)))
+            # Try ML prediction first
+            if self.model_loaded and self.classifier:
+                self.logger.info(f"🤖 Using ML models for prediction")
+                ml_prediction = self._ml_based_prediction(
+                    vegetable, pesticide_group, reading, limits, exceedance_ratio
+                )
+                
+                if 'error' not in ml_prediction:
+                    # Add additional metadata
+                    ml_prediction['sample_info']['sample_code'] = sample_code or f"AUTO_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    ml_prediction['model_version'] = self.model_version
+                    ml_prediction['prediction_mode'] = "ML Models"
+                    ml_prediction['timestamp'] = datetime.now().isoformat()
+                    ml_prediction['success'] = True
+                    
+                    # Add recommendations
+                    ml_prediction['recommendations'] = self._generate_recommendations(
+                        ml_prediction, vegetable, pesticide_group, exceedance_ratio
+                    )
+                    
+                    return ml_prediction
+                else:
+                    self.logger.warning(f"ML prediction failed: {ml_prediction['error']}, falling back to rule-based")
             
-            # Risk assessment logic
-            risk_assessment = self._assess_risk_level(exceedance_ratio, pesticide_group)
-            
-            # Generate recommendations
-            recommendations = self._generate_recommendations(is_compliant, exceedance_ratio, vegetable, pesticide_group)
-            
-            # Build result
-            result = {
-                "success": True,
-                "sample_info": {
-                    "sample_code": sample_code or f"AUTO_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                    "vegetable": vegetable,
-                    "pesticide_group": pesticide_group,
-                    "reading": reading,
-                    "limits": limits,
-                    "exceedance_ratio": round(exceedance_ratio, 3)
-                },
-                "predictions": {
-                    "compliance": {
-                        "prediction": "Compliant" if is_compliant else "Non-Compliant",
-                        "probability_compliant": round(compliance_probability, 3),
-                        "confidence": 0.85  # Mock confidence
-                    }
-                },
-                "risk_assessment": risk_assessment,
-                "recommendations": recommendations,
-                "timestamp": datetime.now().isoformat(),
-                "model_version": self.model_version
-            }
-            
-            return result
+            # Fallback to rule-based prediction
+            self.logger.info(f"📊 Using rule-based prediction (fallback)")
+            return self._rule_based_prediction(
+                vegetable, pesticide_group, reading, limits, exceedance_ratio, sample_code
+            )
             
         except Exception as e:
             self.logger.error(f"Prediction failed: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return {
                 "success": False,
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
             }
     
+    def _ml_based_prediction(
+        self, 
+        vegetable: str, 
+        pesticide_group: str, 
+        reading: float, 
+        limits: float,
+        exceedance_ratio: float
+    ) -> Dict[str, Any]:
+        """Make prediction using trained ML models"""
+        try:
+            # Use the classifier's prediction method
+            prediction_result = self.classifier.predict_comprehensive_analysis(
+                vegetable=vegetable,
+                pesticide_group=pesticide_group,
+                reading=reading,
+                limits=limits
+            )
+            
+            if 'error' in prediction_result:
+                return prediction_result
+            
+            # Format the response
+            formatted_result = {
+                'sample_info': {
+                    'vegetable': vegetable,
+                    'pesticide_group': pesticide_group,
+                    'reading': reading,
+                    'limits': limits,
+                    'exceedance_ratio': round(exceedance_ratio, 3)
+                },
+                'predictions': prediction_result,
+                'risk_assessment': {
+                    'risk_level': prediction_result.get('risk_score', {}).get('predicted_level', 'Unknown'),
+                    'risk_description': self._get_risk_description(exceedance_ratio),
+                    'exceedance_factor': round(exceedance_ratio, 2),
+                    'pesticide_group_risk': self.group_risk_profiles.get(pesticide_group, {})
+                }
+            }
+            
+            return formatted_result
+            
+        except Exception as e:
+            self.logger.error(f"ML prediction error: {e}")
+            return {'error': str(e)}
+    
+    def _rule_based_prediction(
+        self,
+        vegetable: str,
+        pesticide_group: str,
+        reading: float,
+        limits: float,
+        exceedance_ratio: float,
+        sample_code: str = None
+    ) -> Dict[str, Any]:
+        """Fallback rule-based prediction"""
+        
+        is_compliant = reading <= limits
+        compliance_probability = max(0.0, min(1.0, 1.0 - (exceedance_ratio - 1.0)))
+        
+        result = {
+            "success": True,
+            "sample_info": {
+                "sample_code": sample_code or f"AUTO_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "vegetable": vegetable,
+                "pesticide_group": pesticide_group,
+                "reading": reading,
+                "limits": limits,
+                "exceedance_ratio": round(exceedance_ratio, 3)
+            },
+            "predictions": {
+                "compliance": {
+                    "prediction": "Compliant" if is_compliant else "Non-Compliant",
+                    "probability_compliant": round(compliance_probability, 3),
+                    "confidence": 0.70  # Lower confidence for rule-based
+                }
+            },
+            "risk_assessment": {
+                'risk_level': self._calculate_risk_level(exceedance_ratio),
+                'risk_description': self._get_risk_description(exceedance_ratio),
+                'exceedance_factor': round(exceedance_ratio, 2),
+                'pesticide_group_risk': self.group_risk_profiles.get(pesticide_group, {})
+            },
+            "recommendations": self._generate_recommendations_simple(
+                is_compliant, exceedance_ratio, vegetable, pesticide_group
+            ),
+            "timestamp": datetime.now().isoformat(),
+            "model_version": self.model_version,
+            "prediction_mode": "Rule-based (Fallback)"
+        }
+        
+        return result
+    
+    def _calculate_risk_level(self, exceedance_ratio: float) -> str:
+        """Calculate risk level from exceedance ratio"""
+        if exceedance_ratio <= 1.0:
+            return 'Low'
+        elif exceedance_ratio <= 2.0:
+            return 'Medium'
+        elif exceedance_ratio <= 5.0:
+            return 'High'
+        else:
+            return 'Critical'
+    
+    def _get_risk_description(self, exceedance_ratio: float) -> str:
+        """Get risk description"""
+        risk_level = self._calculate_risk_level(exceedance_ratio)
+        descriptions = {
+            'Low': 'Within acceptable limits',
+            'Medium': 'Slightly above limits',
+            'High': 'Significantly above limits',
+            'Critical': 'Critically above limits'
+        }
+        return descriptions.get(risk_level, 'Unknown risk level')
+    
+    def _generate_recommendations(
+        self, 
+        ml_prediction: Dict, 
+        vegetable: str, 
+        pesticide_group: str,
+        exceedance_ratio: float
+    ) -> List[str]:
+        """Generate recommendations based on ML predictions"""
+        
+        if hasattr(self.classifier, 'generate_recommendations'):
+            return self.classifier.generate_recommendations(
+                ml_prediction, vegetable, pesticide_group
+            )
+        else:
+            return self._generate_recommendations_simple(
+                ml_prediction['predictions'].get('compliance', {}).get('prediction') == 'Compliant',
+                exceedance_ratio,
+                vegetable,
+                pesticide_group
+            )
+    
+    def _generate_recommendations_simple(
+        self, 
+        is_compliant: bool, 
+        exceedance_ratio: float, 
+        vegetable: str, 
+        pesticide_group: str
+    ) -> List[str]:
+        """Generate simple rule-based recommendations"""
+        
+        recommendations = []
+        
+        if not is_compliant:
+            recommendations.append("Sample does not meet compliance standards")
+            recommendations.append("Consider retesting or investigating source")
+        
+        if exceedance_ratio > 5.0:
+            recommendations.append("Critical contamination level - investigate source immediately")
+            recommendations.append("Implement enhanced cleaning protocols")
+        elif exceedance_ratio > 2.0:
+            recommendations.append("Elevated pesticide levels detected - monitor closely")
+        
+        if 'pepper' in vegetable.lower():
+            recommendations.append("Peppers show high contamination rates - enhance washing protocols")
+        elif any(term in vegetable.lower() for term in ['lettuce', 'spinach', 'leafy']):
+            recommendations.append("Leafy greens require special attention - difficult to decontaminate")
+        
+        if pesticide_group in self.group_risk_profiles:
+            group_risks = self.group_risk_profiles[pesticide_group]
+            for risk_type, level in group_risks.items():
+                if level == 'high':
+                    recommendations.append(f"Monitor for {risk_type} effects due to {pesticide_group} exposure")
+        
+        return recommendations if recommendations else ["Sample appears normal - continue regular monitoring"]
+    
     def predict_batch_samples(self, samples: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Predict compliance for multiple samples
-        """
+        """Predict compliance for multiple samples"""
         try:
             results = []
             successful = 0
@@ -487,57 +459,74 @@ class PesticidePredictionService:
         
         return {'valid': True}
     
-    def _assess_risk_level(self, exceedance_ratio: float, pesticide_group: str) -> Dict[str, Any]:
-        """Assess risk level based on exceedance ratio and pesticide group"""
-        
-        if exceedance_ratio <= 1.0:
-            risk_level = 'Low'
-            risk_description = 'Within acceptable limits'
-        elif exceedance_ratio <= 2.0:
-            risk_level = 'Medium'
-            risk_description = 'Slightly above limits'
-        elif exceedance_ratio <= 5.0:
-            risk_level = 'High'
-            risk_description = 'Significantly above limits'
-        else:
-            risk_level = 'Critical'
-            risk_description = 'Critically above limits'
-        
-        return {
-            'risk_level': risk_level,
-            'risk_description': risk_description,
-            'exceedance_factor': round(exceedance_ratio, 2),
-            'pesticide_group_risk': self.group_risk_profiles.get(pesticide_group, {})
-        }
-    
-    def _generate_recommendations(self, is_compliant: bool, exceedance_ratio: float, vegetable: str, pesticide_group: str) -> List[str]:
-        """Generate actionable recommendations"""
-        
-        recommendations = []
-        
-        # Compliance-based recommendations
-        if not is_compliant:
-            recommendations.append("Sample does not meet compliance standards")
-            recommendations.append("Consider retesting or investigating source")
-        
-        # Risk-based recommendations
-        if exceedance_ratio > 5.0:
-            recommendations.append("Critical contamination level - investigate source immediately")
-            recommendations.append("Implement enhanced cleaning protocols")
-        elif exceedance_ratio > 2.0:
-            recommendations.append("Elevated pesticide levels detected - monitor closely")
-        
-        # Vegetable-specific recommendations
-        if 'pepper' in vegetable.lower():
-            recommendations.append("Peppers show high contamination rates - enhance washing protocols")
-        elif any(term in vegetable.lower() for term in ['lettuce', 'spinach', 'leafy']):
-            recommendations.append("Leafy greens require special attention - difficult to decontaminate")
-        
-        # Pesticide group recommendations
-        if pesticide_group in self.group_risk_profiles:
-            group_risks = self.group_risk_profiles[pesticide_group]
-            for risk_type, level in group_risks.items():
-                if level == 'high':
-                    recommendations.append(f"Monitor for {risk_type} effects due to {pesticide_group} exposure")
-        
-        return recommendations if recommendations else ["Sample appears normal - continue regular monitoring"]
+    @staticmethod
+    def train_and_save_models(dataset_path: str, output_dir: str = "single_dataset_system"):
+        """
+        Static method to train models (can be called at startup)
+        Similar to load_and_train_models() in time_series
+        """
+        try:
+            logger.info("=" * 80)
+            logger.info("🚀 STARTING PESTICIDE CLASSIFICATION MODEL TRAINING")
+            logger.info("=" * 80)
+            
+            dataset_path = Path(dataset_path)
+            
+            if not dataset_path.exists():
+                logger.error(f"❌ Dataset not found: {dataset_path}")
+                # Try common locations
+                possible_paths = [
+                    "/app/data/dataset.xlsx",
+                    "/app/src/data/dataset.xlsx",
+                    "src/data/dataset.xlsx",
+                    "data/dataset.xlsx"
+                ]
+                
+                for path in possible_paths:
+                    if Path(path).exists():
+                        logger.info(f"✅ Found dataset at: {path}")
+                        dataset_path = Path(path)
+                        break
+                else:
+                    logger.error("❌ Could not find dataset in any common location")
+                    return False
+            
+            logger.info(f"📁 Using dataset: {dataset_path}")
+            
+            # Import here to avoid circular imports
+            from models.PesticideClassificationModel import SingleDatasetClassificationSystem
+            
+            # Initialize training system
+            logger.info("🔧 Initializing training system...")
+            system = SingleDatasetClassificationSystem(str(dataset_path))
+            
+            # Run training
+            logger.info("🚀 Starting model training...")
+            result = system.run_complete_training(verbose_training=False)
+            
+            if result:
+                training_results, patterns = result
+                
+                # Save models
+                logger.info("💾 Saving trained models...")
+                system.save_system(output_dir=output_dir)
+                
+                logger.info("=" * 80)
+                logger.info("✅ SUCCESS! Models trained and saved!")
+                logger.info("=" * 80)
+                logger.info(f"📊 Training Summary:")
+                logger.info(f"   • Total samples: {len(training_results['processed_data']):,}")
+                logger.info(f"   • Validation accuracy: {training_results['validation_results'].get('compliance_accuracy', 0):.2%}")
+                logger.info(f"   • Test accuracy: {training_results['test_results'].get('compliance_accuracy', 0):.2%}")
+                logger.info(f"📂 Models saved to: {output_dir}/trained_models/")
+                
+                return True
+            else:
+                logger.error("❌ Training failed!")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ ERROR during training: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
