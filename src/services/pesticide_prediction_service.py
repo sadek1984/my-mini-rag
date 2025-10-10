@@ -42,57 +42,67 @@ class PesticidePredictionService:
             self.logger.warning(f"   Models not found at: {self.model_path}")
             self.logger.warning(f"   Run 'python train_models.py' to train models")
     
+
+
     def _load_models(self):
-        """Load trained ML models from saved files"""
+        """Load trained ML models with backward compatibility"""
         try:
             model_dir = Path(self.model_path)
             
             if not model_dir.exists():
-                self.logger.warning(f"📂 Model directory not found: {model_dir}")
-                self.logger.warning("   Using rule-based prediction mode")
-                return False
-            
-            # Check for required files
-            required_files = [
-                "scaler.pkl",
-                "group_label_encoder.pkl", 
-                "onehot_encoders.pkl",
-                "compliance_model.pkl"
-            ]
-            
-            missing_files = [f for f in required_files if not (model_dir / f).exists()]
-            
-            if missing_files:
-                self.logger.warning(f"⚠️  Missing model files: {missing_files}")
-                self.logger.warning("   Using rule-based prediction mode")
+                self.logger.warning(f"Model directory not found: {model_dir}")
                 return False
             
             self.logger.info(f"🔄 Loading trained models from: {model_dir}")
             
-            # Import the classifier class
-            try:
-                from models.PesticideClassificationModel import PesticideClassificationModel
-            except ImportError as e:
-                self.logger.error(f"Failed to import PesticideClassificationModel: {e}")
-                return False
+            from models.PesticideClassificationModel import PesticideClassificationModel
             
-            # Initialize classifier with a dummy path
+            # Initialize classifier
             self.classifier = PesticideClassificationModel(dataset_path="dummy")
             
-            # Load preprocessing components
             import joblib
             
+            # Load preprocessing components
             self.classifier.scaler = joblib.load(model_dir / "scaler.pkl")
+            
+            # Load scaler_no_reading (NEW - with backward compatibility)
+            scaler_no_reading_path = model_dir / "scaler_no_reading.pkl"
+            if scaler_no_reading_path.exists():
+                self.classifier.scaler_no_reading = joblib.load(scaler_no_reading_path)
+                self.logger.info("  ✅ Scaler (no reading) loaded")
+            else:
+                # Fallback: use same scaler (old models)
+                self.classifier.scaler_no_reading = self.classifier.scaler
+                self.logger.warning("  ⚠️  Using fallback scaler (models need retraining for optimal performance)")
+            
             self.classifier.group_label_encoder = joblib.load(model_dir / "group_label_encoder.pkl")
             self.classifier.onehot_encoders = joblib.load(model_dir / "onehot_encoders.pkl")
             
-            self.logger.info("  ✅ Scaler and encoders loaded")
+            # Load statistical baseline (NEW - with backward compatibility)
+            baseline_path = model_dir / "statistical_baseline.pkl"
+            if baseline_path.exists():
+                self.classifier.statistical_baseline = joblib.load(baseline_path)
+                self.logger.info(f"  ✅ Statistical baseline loaded ({len(self.classifier.statistical_baseline)} combinations)")
+            else:
+                self.classifier.statistical_baseline = {}
+                self.logger.warning("  ⚠️  No statistical baseline found (using ML-only validation)")
             
-            # Load feature imputer if exists
+            self.logger.info("  ✅ Scalers and encoders loaded")
+            
+            # Load feature imputers (with backward compatibility)
             imputer_path = model_dir / "feature_imputer.pkl"
             if imputer_path.exists():
                 self.classifier.feature_imputer = joblib.load(imputer_path)
                 self.logger.info("  ✅ Feature imputer loaded")
+            
+            imputer_no_reading_path = model_dir / "feature_imputer_no_reading.pkl"
+            if imputer_no_reading_path.exists():
+                self.classifier.feature_imputer_no_reading = joblib.load(imputer_no_reading_path)
+                self.logger.info("  ✅ Feature imputer (no reading) loaded")
+            else:
+                # Fallback to main imputer
+                if hasattr(self.classifier, 'feature_imputer'):
+                    self.classifier.feature_imputer_no_reading = self.classifier.feature_imputer
             
             # Load sklearn models
             self.classifier.compliance_model = joblib.load(model_dir / "compliance_model.pkl")
@@ -101,33 +111,47 @@ class PesticidePredictionService:
             self.classifier.concentration_predictor = joblib.load(model_dir / "concentration_predictor.pkl")
             self.logger.info("  ✅ Concentration predictor loaded (GradientBoosting)")
             
-            # Load TensorFlow/Keras models
+            # Check if this is old model (with data leakage) or new model
+            if not scaler_no_reading_path.exists():
+                self.logger.warning("  ⚠️  OLD MODEL DETECTED - has data leakage in concentration predictor")
+                self.logger.warning("  ⚠️  Retrain models for hybrid validation approach")
+            else:
+                self.logger.info("  ✅ NEW MODEL - TRUE predictor without data leakage")
+            
+            # Load TensorFlow models
             try:
                 import tensorflow as tf
                 
-                # Try loading group classifier
                 group_model_path = model_dir / "group_classifier.keras"
                 if group_model_path.exists():
                     self.classifier.group_classifier = tf.keras.models.load_model(str(group_model_path))
-                    self.logger.info("  ✅ Group classifier loaded (Keras Neural Network)")
+                    self.logger.info("  ✅ Group classifier loaded (Keras NN)")
                 else:
-                    # Fallback to pickle
                     pkl_path = model_dir / "group_classifier.pkl"
                     if pkl_path.exists():
                         self.classifier.group_classifier = joblib.load(pkl_path)
-                        self.logger.info("  ✅ Group classifier loaded (RandomForest fallback)")
+                        self.logger.info("  ✅ Group classifier loaded (RandomForest)")
                 
-                # Try loading risk classifier
                 risk_model_path = model_dir / "risk_classifier.keras"
                 if risk_model_path.exists():
                     self.classifier.risk_classifier = tf.keras.models.load_model(str(risk_model_path))
-                    self.logger.info("  ✅ Risk classifier loaded (Keras Neural Network)")
+                    self.logger.info("  ✅ Risk classifier loaded (Keras NN)")
                     
             except Exception as tf_error:
                 self.logger.warning(f"  ⚠️  TensorFlow models not loaded: {tf_error}")
             
             self.model_loaded = True
-            self.logger.info("✅ All models loaded successfully!")
+            
+            # Final status
+            if scaler_no_reading_path.exists() and baseline_path.exists():
+                self.logger.info("✅ All models loaded successfully!")
+                self.logger.info("🎯 Model 3: TRUE prediction (no reading in features)")
+                self.logger.info("📊 Validation: Hybrid (Statistical 3-sigma + ML)")
+            else:
+                self.logger.info("✅ Models loaded (LEGACY MODE)")
+                self.logger.info("⚠️  Using old concentration model with data leakage")
+                self.logger.info("💡 Recommendation: Retrain models for optimal performance")
+            
             return True
             
         except Exception as e:
@@ -136,7 +160,7 @@ class PesticidePredictionService:
             self.logger.error(traceback.format_exc())
             self.model_loaded = False
             return False
-    
+        
     def get_model_status(self) -> Dict[str, Any]:
         """Get current model status"""
         if self.classifier and self.model_loaded:

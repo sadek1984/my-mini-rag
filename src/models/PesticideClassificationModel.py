@@ -34,6 +34,9 @@ class PesticideClassificationModel:
         # Feature encoders (will be populated during training)
         self.onehot_encoders = {}
         self.feature_imputer = None
+
+        self.statistical_baseline = {}
+        self.control_limits = {}
         
         # Arabic to English vegetable mapping (from your working code)
         self.vegetable_mapping = {
@@ -342,37 +345,44 @@ class PesticideClassificationModel:
         print(f"✅ Feature preparation complete: {len(df_processed)} samples")
         return df_processed
     
-    def build_models(self, X_train, y_train_dict):
-        """Build all models (from your working code)"""
+    # src/models/PesticideClassificationModel.py
+
+    def build_models_separate_features(self, X_train_all, X_train_no_reading, y_train_dict):
+        """
+        Build all models with separate feature sets
+        Models 1, 2, 4: Use ALL features (including reading)
+        Model 3: Use REDUCED features (NO reading) - TRUE PREDICTOR
+        """
         models = {}
         
-        # 1. Compliance model
-        print("Building compliance model...")
+        # ============================================================
+        # MODEL 1: Compliance (uses ALL features)
+        # ============================================================
+        print("Building compliance model (with reading)...")
         compliance_model = RandomForestClassifier(
             n_estimators=100, max_depth=10, random_state=42, class_weight='balanced'
         )
-        compliance_model.fit(X_train, y_train_dict['compliance'])
+        compliance_model.fit(X_train_all, y_train_dict['compliance'])
         models['compliance'] = compliance_model
+        print("  ✅ Compliance model trained")
         
-        # 2. Group classifier
-        print("Building group classifier...")
+        # ============================================================
+        # MODEL 2: Group Classifier (uses ALL features)
+        # ============================================================
+        print("Building group classifier (with reading)...")
         unique_groups = np.unique(y_train_dict['pesticide_group'])
         n_classes = len(unique_groups)
-
-        print(f"Found {n_classes} unique pesticide groups: {unique_groups}")
-
-        # CRITICAL FIX: Always remap labels to ensure continuous 0-indexing
-        print("Remapping labels to ensure 0-indexing...")
+        
+        # Remap labels
         sorted_labels = sorted(unique_groups)
-        label_mapping = {old_label: new_label for new_label, old_label in enumerate(sorted_labels)}
+        label_mapping = {old: new for new, old in enumerate(sorted_labels)}
         y_train_remapped = np.array([label_mapping[label] for label in y_train_dict['pesticide_group']])
-        print(f"Original labels: {unique_groups}")
-        print(f"Remapped labels: {np.unique(y_train_remapped)}")
-
+        
         try:
-            # Neural network approach with remapped labels
+            from tensorflow import keras
+            
             group_model = keras.Sequential([
-                keras.layers.Dense(64, activation='relu', input_shape=(X_train.shape[1],)),
+                keras.layers.Dense(64, activation='relu', input_shape=(X_train_all.shape[1],)),
                 keras.layers.Dropout(0.3),
                 keras.layers.Dense(32, activation='relu'),
                 keras.layers.Dropout(0.3),
@@ -386,50 +396,70 @@ class PesticideClassificationModel:
                 metrics=['accuracy']
             )
             
-            # Use remapped labels for training
-            group_model.fit(X_train, y_train_remapped, 
+            group_model.fit(X_train_all, y_train_remapped, 
                         epochs=50, verbose=0, batch_size=16, validation_split=0.2)
             models['pesticide_group'] = group_model
-            print("Neural network group classifier trained successfully!")
+            print("  ✅ Group classifier trained (Keras NN)")
             
         except Exception as e:
-            print(f"Neural network failed: {e}, falling back to RandomForest")
+            print(f"  ⚠️ Keras failed: {e}, using RandomForest")
             group_model = RandomForestClassifier(n_estimators=50, random_state=42)
-            group_model.fit(X_train, y_train_dict['pesticide_group'])  # RandomForest can handle non-continuous labels
+            group_model.fit(X_train_all, y_train_dict['pesticide_group'])
             models['pesticide_group'] = group_model
-        # 3. Concentration predictor
-        print("Building concentration predictor...")
+            print("  ✅ Group classifier trained (RandomForest)")
+        
+        # ============================================================
+        # MODEL 3: Concentration Predictor (NO reading!) - REDESIGNED
+        # ============================================================
+        print("Building TRUE concentration predictor (WITHOUT reading)...")
+        print(f"  Feature count: {X_train_no_reading.shape[1]} (vs {X_train_all.shape[1]} with reading)")
+        
         concentration_model = GradientBoostingRegressor(
-            n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42
+            n_estimators=100, 
+            max_depth=6, 
+            learning_rate=0.1, 
+            random_state=42
         )
-        concentration_model.fit(X_train, y_train_dict['concentration'])
+        concentration_model.fit(X_train_no_reading, y_train_dict['concentration'])
         models['concentration'] = concentration_model
+        print("  ✅ Concentration predictor trained (TRUE PREDICTOR - no data leakage!)")
         
-        # 4. Risk classifier
-        print("Building risk classifier...")
-        risk_model = keras.Sequential([
-            keras.layers.Dense(32, activation='relu', input_shape=(X_train.shape[1],)),
-            keras.layers.Dropout(0.2),
-            keras.layers.Dense(16, activation='relu'),
-            keras.layers.Dropout(0.2),
-            keras.layers.Dense(8, activation='relu'),
-            keras.layers.Dense(4, activation='softmax')
-        ])
+        # ============================================================
+        # MODEL 4: Risk Classifier (uses ALL features)
+        # ============================================================
+        print("Building risk classifier (with reading)...")
         
-        risk_model.compile(
-            optimizer='adam',
-            loss='sparse_categorical_crossentropy',
-            metrics=['accuracy']
-        )
-        
-        risk_model.fit(X_train, y_train_dict['risk_level'], 
-                      epochs=50, verbose=0, batch_size=16, validation_split=0.2)
-        models['risk_level'] = risk_model
+        try:
+            from tensorflow import keras
+            
+            risk_model = keras.Sequential([
+                keras.layers.Dense(32, activation='relu', input_shape=(X_train_all.shape[1],)),
+                keras.layers.Dropout(0.2),
+                keras.layers.Dense(16, activation='relu'),
+                keras.layers.Dropout(0.2),
+                keras.layers.Dense(8, activation='relu'),
+                keras.layers.Dense(4, activation='softmax')
+            ])
+            
+            risk_model.compile(
+                optimizer='adam',
+                loss='sparse_categorical_crossentropy',
+                metrics=['accuracy']
+            )
+            
+            risk_model.fit(X_train_all, y_train_dict['risk_level'], 
+                        epochs=50, verbose=0, batch_size=16, validation_split=0.2)
+            models['risk_level'] = risk_model
+            print("  ✅ Risk classifier trained (Keras NN)")
+            
+        except Exception as e:
+            print(f"  ⚠️ Keras failed: {e}")
+            models['risk_level'] = None
         
         return models
-    
+
     def train_all_models(self, df, verbose_training=False, test_size=0.2, val_size=0.2):
-        """Complete training pipeline with train/val/test splits"""
+        """Complete training pipeline with separate feature sets for Model 3"""
         print("Training comprehensive pesticide classification models...")
         
         # Prepare features
@@ -440,12 +470,19 @@ class PesticideClassificationModel:
             return None
         
         print(f"Training on {len(df_processed)} samples...")
-        print(f"Pesticide groups: {df_processed['pesticide_group'].value_counts().to_dict()}")
         
         try:
-            # Prepare categorical and numerical features (from your working code)
+            # ============================================================
+            # STEP 1: Calculate Statistical Baseline (NEW!)
+            # ============================================================
+            statistical_baseline = self.calculate_statistical_baseline(df_processed)
+            
+            # ============================================================
+            # STEP 2: Prepare Features - TWO VERSIONS
+            # ============================================================
             categorical_features = ['vegetable_english', 'pesticide_group', 'vegetable_category']
             
+            # Encode categorical features
             encoded_features = []
             self.onehot_encoders = {}
             
@@ -456,115 +493,160 @@ class PesticideClassificationModel:
                     encoded_features.append(encoded)
                     self.onehot_encoders[feature] = encoder
             
-            categorical_encoded = np.hstack(encoded_features) if encoded_features else np.empty((len(df_processed), 0))
+            categorical_encoded = np.hstack(encoded_features)
             
-            # Numerical features
-            numerical_features = []
-            numerical_cols = ['reading', 'limits', 'log_reading', 'exceedance_ratio', 'month', 'season']
+            # VERSION A: ALL numerical features (for Models 1, 2, 4)
+            numerical_features_all = []
+            numerical_cols_all = ['reading', 'limits', 'log_reading', 'exceedance_ratio', 'month', 'season']
             
-            for col in numerical_cols:
+            for col in numerical_cols_all:
                 if col in df_processed.columns:
-                    numerical_features.append(df_processed[col].values.reshape(-1, 1))
+                    numerical_features_all.append(df_processed[col].values.reshape(-1, 1))
             
-            numerical_matrix = np.hstack(numerical_features) if numerical_features else np.empty((len(df_processed), 0))
+            numerical_matrix_all = np.hstack(numerical_features_all)
             
-            # Combine features
-            if categorical_encoded.shape[1] > 0 and numerical_matrix.shape[1] > 0:
-                features = np.hstack([categorical_encoded, numerical_matrix])
-            elif categorical_encoded.shape[1] > 0:
-                features = categorical_encoded
-            else:
-                features = numerical_matrix
+            # VERSION B: NO reading features (for Model 3)
+            numerical_features_no_reading = []
+            numerical_cols_no_reading = ['limits', 'month', 'season']  # ⬅️ NO reading, log_reading, exceedance_ratio
+            
+            for col in numerical_cols_no_reading:
+                if col in df_processed.columns:
+                    numerical_features_no_reading.append(df_processed[col].values.reshape(-1, 1))
+            
+            numerical_matrix_no_reading = np.hstack(numerical_features_no_reading)
+            
+            # ============================================================
+            # STEP 3: Combine Features - TWO VERSIONS
+            # ============================================================
+            # Full features (Models 1, 2, 4)
+            features_all = np.hstack([categorical_encoded, numerical_matrix_all])
+            
+            # Reduced features (Model 3)
+            features_no_reading = np.hstack([categorical_encoded, numerical_matrix_no_reading])
             
             # Handle NaN values
-            if np.isnan(features).any():
-                print("Warning: NaN values found in features, filling with median")
+            if np.isnan(features_all).any():
+                print("Warning: NaN values found, filling with median")
                 from sklearn.impute import SimpleImputer
-                imputer = SimpleImputer(strategy='median')
-                features = imputer.fit_transform(features)
-                self.feature_imputer = imputer
+                
+                imputer_all = SimpleImputer(strategy='median')
+                features_all = imputer_all.fit_transform(features_all)
+                self.feature_imputer = imputer_all
+                
+                imputer_no_reading = SimpleImputer(strategy='median')
+                features_no_reading = imputer_no_reading.fit_transform(features_no_reading)
+                self.feature_imputer_no_reading = imputer_no_reading
             
-            # Scale features
-            features_scaled = self.scaler.fit_transform(features)
+            # ============================================================
+            # STEP 4: Scale Features - TWO SCALERS
+            # ============================================================
+            from sklearn.preprocessing import StandardScaler
             
-            # Create target variables
+            # Scaler for full features
+            self.scaler = StandardScaler()
+            features_all_scaled = self.scaler.fit_transform(features_all)
+            
+            # Scaler for reduced features
+            self.scaler_no_reading = StandardScaler()
+            features_no_reading_scaled = self.scaler_no_reading.fit_transform(features_no_reading)
+            
+            # ============================================================
+            # STEP 5: Create Target Variables
+            # ============================================================
             y_dict = {
                 'compliance': df_processed['is_compliant'].values,
                 'pesticide_group': self.group_label_encoder.fit_transform(df_processed['pesticide_group']),
                 'concentration': df_processed['log_reading'].values,
-                'risk_level': df_processed['risk_score'].values - 1  # Convert to 0-indexed
+                'risk_level': df_processed['risk_score'].values - 1
             }
             
-            # Create train/validation/test splits
+            # ============================================================
+            # STEP 6: Train/Val/Test Splits - TWO VERSIONS
+            # ============================================================
             print(f"Creating train/validation/test splits...")
-            print(f"Test size: {test_size}, Validation size: {val_size}")
             
-            # First split: separate test set
-            X_temp, X_test, indices_temp, indices_test = train_test_split(
-                features_scaled, range(len(features_scaled)), 
+            # Split for full features
+            X_temp_all, X_test_all, indices_temp, indices_test = train_test_split(
+                features_all_scaled, range(len(features_all_scaled)), 
                 test_size=test_size, random_state=42
             )
             
-            # Second split: separate train and validation
             val_size_adjusted = val_size / (1 - test_size)
-            X_train, X_val, indices_train, indices_val = train_test_split(
-                X_temp, indices_temp, 
+            X_train_all, X_val_all, indices_train, indices_val = train_test_split(
+                X_temp_all, indices_temp, 
                 test_size=val_size_adjusted, random_state=42
             )
             
-            # Create target splits
+            # Split for reduced features (same indices!)
+            X_train_no_reading = features_no_reading_scaled[indices_train]
+            X_val_no_reading = features_no_reading_scaled[indices_val]
+            X_test_no_reading = features_no_reading_scaled[indices_test]
+            
+            # Target splits
             y_train = {name: values[indices_train] for name, values in y_dict.items()}
             y_val = {name: values[indices_val] for name, values in y_dict.items()}
             y_test = {name: values[indices_test] for name, values in y_dict.items()}
-
-            print("Debug - checking encoders after training:")
-            for name, encoder in self.onehot_encoders.items():
-                print(f"  {name}: {encoder is not None}")
-                if encoder is not None:
-                    print(f"    Categories: {len(encoder.categories_[0])}")
             
             print(f"Data splits created:")
-            print(f"  Training: {X_train.shape[0]} samples")
-            print(f"  Validation: {X_val.shape[0]} samples")
-            print(f"  Test: {X_test.shape[0]} samples")
+            print(f"  Training: {X_train_all.shape[0]} samples")
+            print(f"  Validation: {X_val_all.shape[0]} samples")
+            print(f"  Test: {X_test_all.shape[0]} samples")
             
-            # Train models
-            models = self.build_models(X_train, y_train)
+            # ============================================================
+            # STEP 7: Build Models with Different Feature Sets
+            # ============================================================
+            models = self.build_models_separate_features(
+                X_train_all, X_train_no_reading, y_train
+            )
             
             # Store models
             self.compliance_model = models['compliance']
-            self.group_classifier = models['pesticide_group'] 
+            self.group_classifier = models['pesticide_group']
             self.concentration_predictor = models['concentration']
             self.risk_classifier = models['risk_level']
             
-            # Evaluate on validation set
-            print("\nValidation Results:")
+            # ============================================================
+            # STEP 8: Validation
+            # ============================================================
+            print("\n📊 Validation Results:")
             val_results = {}
             
-            # Compliance evaluation
-            val_pred_compliance = self.compliance_model.predict(X_val)
+            # Model 1: Compliance
+            val_pred_compliance = self.compliance_model.predict(X_val_all)
             val_acc_compliance = accuracy_score(y_val['compliance'], val_pred_compliance)
             val_results['compliance_accuracy'] = val_acc_compliance
-            print(f"Compliance validation accuracy: {val_acc_compliance:.4f}")
+            print(f"  Compliance accuracy: {val_acc_compliance:.4f}")
             
-            # Test set evaluation
-            print("\nTest Results:")
+            # Model 3: Concentration (with NO reading in features!)
+            val_pred_concentration = self.concentration_predictor.predict(X_val_no_reading)
+            val_mse_concentration = mean_squared_error(y_val['concentration'], val_pred_concentration)
+            val_results['concentration_mse'] = val_mse_concentration
+            print(f"  Concentration MSE: {val_mse_concentration:.4f}")
+            
+            # Test results
+            print("\n📊 Test Results:")
             test_results = {}
             
-            test_pred_compliance = self.compliance_model.predict(X_test)
+            test_pred_compliance = self.compliance_model.predict(X_test_all)
             test_acc_compliance = accuracy_score(y_test['compliance'], test_pred_compliance)
             test_results['compliance_accuracy'] = test_acc_compliance
-            print(f"Compliance test accuracy: {test_acc_compliance:.4f}")
+            print(f"  Compliance test accuracy: {test_acc_compliance:.4f}")
             
-            print("\nAll models trained successfully!")
+            test_pred_concentration = self.concentration_predictor.predict(X_test_no_reading)
+            test_mse_concentration = mean_squared_error(y_test['concentration'], test_pred_concentration)
+            test_results['concentration_mse'] = test_mse_concentration
+            print(f"  Concentration test MSE: {test_mse_concentration:.4f}")
+            
+            print("\n✅ All models trained successfully!")
             
             return {
                 'processed_data': df_processed,
+                'statistical_baseline': statistical_baseline,
                 'validation_results': val_results,
                 'test_results': test_results,
-                'train_data': (X_train, y_train),
-                'val_data': (X_val, y_val),
-                'test_data': (X_test, y_test)
+                'train_data': (X_train_all, X_train_no_reading, y_train),
+                'val_data': (X_val_all, X_val_no_reading, y_val),
+                'test_data': (X_test_all, X_test_no_reading, y_test)
             }
             
         except Exception as e:
@@ -572,65 +654,85 @@ class PesticideClassificationModel:
             import traceback
             traceback.print_exc()
             return None
-    
 
-    # src/models/PesticideClassificationModel.py
+
 
     def predict_comprehensive_analysis(self, vegetable, pesticide_group, reading, limits, uncertainty=50):
-        """Make comprehensive predictions with ALL 4 models"""
+        """
+        Make comprehensive predictions with backward compatibility
+        """
         if not hasattr(self, 'onehot_encoders') or not self.onehot_encoders:
-            return {'error': 'Models not trained yet - encoders not available'}
+            return {'error': 'Models not trained yet'}
         
         try:
-            # Create input data
+            # Check if we have new models or old models
+            has_new_scaler = hasattr(self, 'scaler_no_reading') and self.scaler_no_reading is not None
+            has_statistical_baseline = hasattr(self, 'statistical_baseline') and self.statistical_baseline
+            
+            # ============================================================
+            # STATISTICAL VALIDATION (if available)
+            # ============================================================
+            statistical_check = None
+            if has_statistical_baseline:
+                season = self.get_season(6)
+                statistical_check = self.validate_reading_statistical(
+                    vegetable, pesticide_group, reading, season
+                )
+            
+            # ============================================================
+            # PREPARE FEATURES
+            # ============================================================
             input_data = pd.DataFrame({
                 'vegetable_english': [vegetable],
                 'pesticide_group': [pesticide_group],
                 'vegetable_category': [self.categorize_vegetable(vegetable)]
             })
             
-            # Encode categorical features
+            # Encode categorical
             encoded_features = []
             for feature in ['vegetable_english', 'pesticide_group', 'vegetable_category']:
-                if feature in self.onehot_encoders and self.onehot_encoders[feature] is not None:
-                    try:
-                        encoder = self.onehot_encoders[feature]
-                        encoded = encoder.transform(input_data[[feature]])
-                        encoded_features.append(encoded)
-                    except Exception as e:
-                        print(f"Error encoding {feature}: {e}")
-                        return {'error': f'Encoding failed for {feature}: {str(e)}'}
-            
-            if not encoded_features:
-                return {'error': 'Could not encode any categorical features'}
+                if feature in self.onehot_encoders:
+                    encoded = self.onehot_encoders[feature].transform(input_data[[feature]])
+                    encoded_features.append(encoded)
             
             categorical_encoded = np.hstack(encoded_features)
             
             # Numerical features
             log_reading = np.log1p(reading)
             exceedance_ratio = reading / limits if limits > 0 else 0
-            numerical_features = np.array([[reading, limits, log_reading, exceedance_ratio, 6, 2]])
             
-            # Combine features
-            features = np.hstack([categorical_encoded, numerical_features])
+            # VERSION A: All features (for Models 1, 2, 4)
+            numerical_all = np.array([[reading, limits, log_reading, exceedance_ratio, 6, 2]])
+            features_all = np.hstack([categorical_encoded, numerical_all])
             
-            # Apply preprocessing
+            # Apply preprocessing - FIXED: Check if imputer exists
             if hasattr(self, 'feature_imputer') and self.feature_imputer is not None:
-                features = self.feature_imputer.transform(features)
+                features_all = self.feature_imputer.transform(features_all)
             
-            if hasattr(self, 'scaler') and self.scaler is not None:
-                features_scaled = self.scaler.transform(features)
+            features_all_scaled = self.scaler.transform(features_all)
+            
+            # VERSION B: No reading features (for Model 3) - ONLY if new model
+            if has_new_scaler:
+                numerical_no_reading = np.array([[limits, 6, 2]])
+                features_no_reading = np.hstack([categorical_encoded, numerical_no_reading])
+                
+                # FIXED: Check if imputer exists
+                if hasattr(self, 'feature_imputer_no_reading') and self.feature_imputer_no_reading is not None:
+                    features_no_reading = self.feature_imputer_no_reading.transform(features_no_reading)
+                
+                features_no_reading_scaled = self.scaler_no_reading.transform(features_no_reading)
             else:
-                return {'error': 'Scaler not available'}
+                # Old model - use all features (with leakage)
+                features_no_reading_scaled = features_all_scaled
             
             results = {}
             
             # ============================================================
-            # MODEL 1: COMPLIANCE PREDICTION (RandomForest)
+            # MODEL 1: COMPLIANCE
             # ============================================================
             if self.compliance_model is not None:
                 try:
-                    compliance_prob = self.compliance_model.predict_proba(features_scaled)[0]
+                    compliance_prob = self.compliance_model.predict_proba(features_all_scaled)[0]
                     results['compliance'] = {
                         'model_type': 'RandomForest',
                         'probability_compliant': float(compliance_prob[1]),
@@ -638,98 +740,178 @@ class PesticideClassificationModel:
                         'prediction': 'Compliant' if compliance_prob[1] > 0.5 else 'Non-compliant',
                         'confidence': float(max(compliance_prob))
                     }
-                    print("✅ Compliance prediction successful (Model 1/4)")
+                    print("✅ Compliance prediction (Model 1/4)")
                 except Exception as e:
-                    print(f"❌ Compliance prediction error: {e}")
+                    print(f"❌ Compliance error: {e}")
                     results['compliance'] = {'error': str(e)}
             
             # ============================================================
-            # MODEL 2: GROUP CLASSIFICATION (Neural Network or RandomForest)
+            # MODEL 2: GROUP CLASSIFICATION
             # ============================================================
             if self.group_classifier is not None:
                 try:
-                    # Check if it's a Keras model or sklearn model
-                    is_keras = hasattr(self.group_classifier, 'predict_proba') == False
+                    is_keras = not hasattr(self.group_classifier, 'predict_proba')
                     
                     if is_keras:
-                        # Keras Neural Network
-                        group_probs = self.group_classifier.predict(features_scaled, verbose=0)[0]
-                        predicted_group_idx = int(np.argmax(group_probs))
-                        predicted_group = self.group_label_encoder.inverse_transform([predicted_group_idx])[0]
-                        confidence = float(group_probs[predicted_group_idx])
-                        model_type = 'Keras Neural Network'
+                        group_probs = self.group_classifier.predict(features_all_scaled, verbose=0)[0]
                     else:
-                        # RandomForest
-                        group_probs = self.group_classifier.predict_proba(features_scaled)[0]
-                        predicted_group_idx = int(np.argmax(group_probs))
-                        predicted_group = self.group_label_encoder.inverse_transform([predicted_group_idx])[0]
-                        confidence = float(group_probs[predicted_group_idx])
-                        model_type = 'RandomForest'
+                        group_probs = self.group_classifier.predict_proba(features_all_scaled)[0]
+                    
+                    predicted_group_idx = int(np.argmax(group_probs))
+                    predicted_group = self.group_label_encoder.inverse_transform([predicted_group_idx])[0]
                     
                     results['pesticide_group_classification'] = {
-                        'model_type': model_type,
+                        'model_type': 'Keras NN' if is_keras else 'RandomForest',
                         'predicted_group': predicted_group,
                         'input_group': pesticide_group,
                         'matches_input': predicted_group == pesticide_group,
-                        'confidence': confidence,
+                        'confidence': float(group_probs[predicted_group_idx]),
                         'all_probabilities': {
-                            str(self.group_label_encoder.inverse_transform([i])[0]): float(prob) 
+                            str(self.group_label_encoder.inverse_transform([i])[0]): float(prob)
                             for i, prob in enumerate(group_probs)
                         }
                     }
-                    print("✅ Group classification successful (Model 2/4)")
+                    print("✅ Group classification (Model 2/4)")
                 except Exception as e:
                     print(f"❌ Group classification error: {e}")
                     results['pesticide_group_classification'] = {'error': str(e)}
             
             # ============================================================
-            # MODEL 3: CONCENTRATION VALIDATION (GradientBoosting)
+            # MODEL 3: CONCENTRATION VALIDATION (HYBRID)
             # ============================================================
             if self.concentration_predictor is not None:
                 try:
-                    # Predict what we EXPECT based on patterns
-                    expected_log = self.concentration_predictor.predict(features_scaled)[0]
-                    expected_concentration = np.expm1(expected_log)
+                    # Predict concentration
+                    predicted_log = self.concentration_predictor.predict(features_no_reading_scaled)[0]
+                    expected_concentration = np.expm1(predicted_log)
                     
-                    # Compare with actual
-                    deviation = abs(expected_concentration - reading)
-                    relative_error = (deviation / reading * 100) if reading > 0 else 0
+                    ml_deviation = abs(expected_concentration - reading)
+                    ml_relative_error = (ml_deviation / reading * 100) if reading > 0 else 0
                     
-                    # Determine if reading is suspicious
-                    if relative_error > 50:
-                        status = "⚠️ ANOMALY - Reading far from expected pattern"
-                        action = "Verify sensor calibration and retest"
-                    elif relative_error > 30:
-                        status = "⚠️ WARNING - Reading higher than typical"
-                        action = "Consider retesting for confirmation"
-                    else:
-                        status = "✅ NORMAL - Reading within expected range"
-                        action = "No action needed"
-                    
-                    results['reading_validation'] = {
-                        'model_type': 'GradientBoosting - Pattern Validator',
-                        'expected_concentration': float(expected_concentration),
-                        'actual_reading': float(reading),
-                        'deviation': float(deviation),
-                        'relative_error_percent': float(relative_error),
-                        'status': status,
-                        'recommended_action': action,
-                        'interpretation': f'Based on {vegetable} + {pesticide_group} patterns, expected {expected_concentration:.1f} μg/kg, got {reading:.1f} μg/kg'
+                    # Build validation result
+                    validation_result = {
+                        'model_type': 'Hybrid: Statistical + GradientBoosting' if has_statistical_baseline else 'GradientBoosting Only',
+                        'ml_prediction': {
+                            'expected_concentration': float(expected_concentration),
+                            'actual_reading': float(reading),
+                            'deviation': float(ml_deviation),
+                            'relative_error_percent': float(ml_relative_error)
+                        }
                     }
-                    print("✅ Reading validation successful (Model 3/4)")
+                    
+                    # Add statistical validation if available
+                    if statistical_check:
+                        validation_result['statistical'] = statistical_check
+                        
+                        # Hybrid decision logic
+                        z_score = statistical_check.get('z_score')
+                        
+                        if statistical_check['status'] == 'NO_BASELINE':
+                            if ml_relative_error > 50:
+                                final_status = '🚨 ANOMALY (ML only)'
+                                action = 'Verify reading - significant deviation'
+                            elif ml_relative_error > 30:
+                                final_status = '⚠️ WARNING (ML only)'
+                                action = 'Consider retesting'
+                            else:
+                                final_status = '✅ NORMAL (ML only)'
+                                action = 'No action needed'
+                        
+                        elif z_score is not None and abs(z_score) > 3:
+                            if ml_relative_error < 30:
+                                final_status = '🚨 STATISTICAL ANOMALY (ML normal)'
+                                action = 'Statistical anomaly - verify with duplicate test'
+                            else:
+                                final_status = '🚨 ANOMALY (Both methods agree)'
+                                action = 'CRITICAL - immediate investigation required'
+                        
+                        elif abs(z_score) > 2:
+                            if ml_relative_error > 30:
+                                final_status = '⚠️ WARNING (Both methods concerned)'
+                                action = 'Approaching limits - consider retesting'
+                            else:
+                                final_status = '⚠️ STATISTICAL WARNING (ML normal)'
+                                action = 'Monitor closely'
+                        
+                        else:
+                            if ml_relative_error > 50:
+                                final_status = '⚠️ ML ANOMALY (Statistics normal)'
+                                action = 'ML detects unusual pattern - verify pesticide'
+                            elif ml_relative_error > 30:
+                                final_status = '⚠️ ML WARNING (Statistics normal)'
+                                action = 'Slight deviation from prediction'
+                            else:
+                                final_status = '✅ NORMAL (Both methods agree)'
+                                action = 'No action needed'
+                        
+                        validation_result['final_status'] = final_status
+                        validation_result['recommended_action'] = action
+                        
+                        # Generate interpretation
+                        baseline = statistical_check.get('baseline', {})
+                        interpretation_parts = []
+                        
+                        if statistical_check['status'] != 'NO_BASELINE':
+                            interpretation_parts.append(
+                                f"Statistical: Reading of {reading:.1f} μg/kg is {z_score:.2f} standard deviations "
+                                f"from historical mean of {baseline.get('mean', 0):.1f} μg/kg "
+                                f"(based on {baseline.get('historical_samples', 0)} samples). "
+                                f"Control limits: {baseline.get('lcl', 0):.1f} - {baseline.get('ucl', 0):.1f} μg/kg."
+                            )
+                        
+                        interpretation_parts.append(
+                            f"ML Prediction: Based on {vegetable} + {pesticide_group} patterns, "
+                            f"expected {expected_concentration:.1f} μg/kg, got {reading:.1f} μg/kg "
+                            f"({ml_relative_error:.1f}% deviation)."
+                        )
+                        
+                        if abs(z_score or 0) < 2 and ml_relative_error < 30:
+                            interpretation_parts.append("✅ Both methods confirm this is a normal reading.")
+                        elif abs(z_score or 0) > 3 and ml_relative_error > 50:
+                            interpretation_parts.append("🚨 CRITICAL: Both methods detect significant anomaly.")
+                        
+                        validation_result['interpretation'] = " ".join(interpretation_parts)
+                    
+                    else:
+                        # ML-only decision (no statistical baseline)
+                        if ml_relative_error > 50:
+                            final_status = '🚨 ANOMALY'
+                            action = 'Verify reading - significant deviation'
+                        elif ml_relative_error > 30:
+                            final_status = '⚠️ WARNING'
+                            action = 'Consider retesting'
+                        else:
+                            final_status = '✅ NORMAL'
+                            action = 'No action needed'
+                        
+                        validation_result['final_status'] = final_status
+                        validation_result['recommended_action'] = action
+                        validation_result['interpretation'] = (
+                            f'Based on {vegetable} + {pesticide_group} patterns, '
+                            f'expected {expected_concentration:.1f} μg/kg, got {reading:.1f} μg/kg '
+                            f'({ml_relative_error:.1f}% deviation).'
+                        )
+                    
+                    # Add warning if using old model
+                    if not has_new_scaler:
+                        validation_result['warning'] = '⚠️ Using legacy model with data leakage - retrain for optimal results'
+                    
+                    results['reading_validation'] = validation_result
+                    print("✅ Reading validation (Model 3/4)")
+                    
                 except Exception as e:
                     print(f"❌ Reading validation error: {e}")
+                    import traceback
+                    traceback.print_exc()
                     results['reading_validation'] = {'error': str(e)}
             
             # ============================================================
-            # MODEL 4: RISK CLASSIFICATION (Neural Network)
+            # MODEL 4: RISK CLASSIFICATION
             # ============================================================
             if self.risk_classifier is not None:
                 try:
-                    risk_probs = self.risk_classifier.predict(features_scaled, verbose=0)[0]
+                    risk_probs = self.risk_classifier.predict(features_all_scaled, verbose=0)[0]
                     predicted_risk_idx = int(np.argmax(risk_probs))
-                    
-                    # Risk levels: 0=Low, 1=Medium, 2=High, 3=Critical
                     risk_levels = ['Low', 'Medium', 'High', 'Critical']
                     predicted_risk = risk_levels[predicted_risk_idx]
                     
@@ -739,14 +921,13 @@ class PesticideClassificationModel:
                         'risk_index': predicted_risk_idx,
                         'confidence': float(risk_probs[predicted_risk_idx]),
                         'risk_probabilities': {
-                            level: float(prob) 
+                            level: float(prob)
                             for level, prob in zip(risk_levels, risk_probs)
                         }
                     }
-                    print("✅ Risk classification successful (Model 4/4)")
+                    print("✅ Risk classification (Model 4/4)")
                 except Exception as e:
                     print(f"❌ Risk classification error: {e}")
-                    # Fallback to rule-based
                     risk_level = 'Critical' if exceedance_ratio > 5 else 'High' if exceedance_ratio > 2 else 'Medium' if exceedance_ratio > 1 else 'Low'
                     results['risk_classification'] = {
                         'model_type': 'Rule-based (Fallback)',
@@ -758,7 +939,9 @@ class PesticideClassificationModel:
             results['model_summary'] = {
                 'total_models_used': 4,
                 'models_successful': sum(1 for k, v in results.items() if k != 'model_summary' and 'error' not in v),
-                'models': ['compliance', 'group_classification', 'reading_validation', 'risk_classification']
+                'models': ['compliance', 'group_classification', 'reading_validation_hybrid', 'risk_classification'],
+                'validation_approach': 'Hybrid (Statistical 3-sigma + ML)' if has_statistical_baseline else 'ML Only',
+                'model_version': 'NEW (no data leakage)' if has_new_scaler else 'LEGACY (with data leakage)'
             }
             
             return results
@@ -768,7 +951,44 @@ class PesticideClassificationModel:
             print(f"Full traceback:")
             traceback.print_exc()
             return {'error': f'Prediction failed: {str(e)}'}
-            
+        
+    def _generate_validation_interpretation(self, statistical_check, expected, actual, ml_error, vegetable, pesticide):
+        """Generate human-readable interpretation of validation results"""
+        
+        z_score = statistical_check.get('z_score')
+        baseline = statistical_check.get('baseline', {})
+        
+        interpretation_parts = []
+        
+        # Statistical component
+        if statistical_check['status'] != 'NO_BASELINE':
+            interpretation_parts.append(
+                f"Statistical: Reading of {actual:.1f} μg/kg is {z_score:.2f} standard deviations "
+                f"from historical mean of {baseline.get('mean', 0):.1f} μg/kg "
+                f"(based on {baseline.get('historical_samples', 0)} samples). "
+                f"Control limits: {baseline.get('lcl', 0):.1f} - {baseline.get('ucl', 0):.1f} μg/kg."
+            )
+        
+        # ML component
+        interpretation_parts.append(
+            f"ML Prediction: Based on {vegetable} + {pesticide} patterns, "
+            f"expected {expected:.1f} μg/kg, got {actual:.1f} μg/kg "
+            f"({ml_error:.1f}% deviation)."
+        )
+        
+        # Overall assessment
+        if abs(z_score or 0) < 2 and ml_error < 30:
+            interpretation_parts.append("✅ Both methods confirm this is a normal reading.")
+        elif abs(z_score or 0) > 3 and ml_error > 50:
+            interpretation_parts.append("🚨 CRITICAL: Both methods detect significant anomaly - immediate action required.")
+        elif abs(z_score or 0) > 3 and ml_error < 30:
+            interpretation_parts.append("⚠️ Statistical anomaly detected, but ML suggests reading is plausible. May indicate shift in contamination patterns.")
+        elif abs(z_score or 0) < 2 and ml_error > 50:
+            interpretation_parts.append("⚠️ ML detects unusual pattern despite normal statistics. Verify pesticide identification.")
+        
+        return " ".join(interpretation_parts)
+
+
     def analyze_dataset_patterns(self, df_processed):
         """Analyze patterns in the dataset (from your working code)"""
         try:
@@ -817,6 +1037,118 @@ class PesticideClassificationModel:
             recommendations.append(f"Error generating recommendations: {str(e)}")
         
         return recommendations if recommendations else ["No specific recommendations available"]
+    
+    def calculate_statistical_baseline(self, df_processed):
+        """
+        Calculate control limits for each vegetable-pesticide-season combination
+        This implements Food Safety Best Practice: Control Charts
+        """
+        print("\n📊 Calculating Statistical Process Control Baselines...")
+        
+        # Group by key combinations
+        grouping_cols = ['vegetable_english', 'pesticide_group', 'season']
+        
+        baseline_stats = df_processed.groupby(grouping_cols)['reading'].agg([
+            'count',
+            'mean',
+            'std',
+            'median',
+            ('p25', lambda x: x.quantile(0.25)),
+            ('p75', lambda x: x.quantile(0.75)),
+            'min',
+            'max'
+        ]).reset_index()
+        
+        # Calculate control limits (3-sigma)
+        baseline_stats['ucl'] = baseline_stats['mean'] + 3 * baseline_stats['std']
+        baseline_stats['lcl'] = baseline_stats['mean'] - 3 * baseline_stats['std']
+        baseline_stats['lcl'] = baseline_stats['lcl'].clip(lower=0)  # Can't be negative
+        
+        # Store as dictionary for fast lookup
+        for _, row in baseline_stats.iterrows():
+            key = (row['vegetable_english'], row['pesticide_group'], row['season'])
+            self.statistical_baseline[key] = {
+                'count': int(row['count']),
+                'mean': float(row['mean']),
+                'std': float(row['std']),
+                'median': float(row['median']),
+                'p25': float(row['p25']),
+                'p75': float(row['p75']),
+                'min': float(row['min']),
+                'max': float(row['max']),
+                'ucl': float(row['ucl']),
+                'lcl': float(row['lcl'])
+            }
+        
+        print(f"   ✅ Statistical baseline calculated for {len(self.statistical_baseline)} combinations")
+        return baseline_stats
+    
+    def validate_reading_statistical(self, vegetable, pesticide_group, reading, season=2):
+        """
+        Validate reading using Statistical Process Control
+        Returns Z-score and control limit status
+        """
+        key = (vegetable, pesticide_group, season)
+        
+        if key not in self.statistical_baseline:
+            # Try without season specificity
+            key_no_season = (vegetable, pesticide_group, None)
+            baseline = None
+            
+            # Find any matching baseline
+            for k, v in self.statistical_baseline.items():
+                if k[0] == vegetable and k[1] == pesticide_group:
+                    baseline = v
+                    break
+            
+            if baseline is None:
+                return {
+                    'status': 'NO_BASELINE',
+                    'message': f'No historical data for {vegetable} + {pesticide_group}',
+                    'z_score': None,
+                    'within_control_limits': None
+                }
+        else:
+            baseline = self.statistical_baseline[key]
+        
+        # Calculate Z-score
+        mean = baseline['mean']
+        std = baseline['std']
+        
+        if std == 0 or std is None:
+            z_score = 0
+        else:
+            z_score = (reading - mean) / std
+        
+        # Check control limits
+        within_ucl = reading <= baseline['ucl']
+        within_lcl = reading >= baseline['lcl']
+        within_limits = within_ucl and within_lcl
+        
+        # Determine status
+        if abs(z_score) > 3:
+            status = '🚨 STATISTICAL ANOMALY'
+            interpretation = f'Reading is {abs(z_score):.1f} standard deviations from historical mean'
+        elif abs(z_score) > 2:
+            status = '⚠️ WARNING'
+            interpretation = f'Reading is {abs(z_score):.1f} standard deviations from mean (approaching limits)'
+        else:
+            status = '✅ NORMAL'
+            interpretation = f'Reading within expected range (Z={z_score:.2f})'
+        
+        return {
+            'status': status,
+            'z_score': float(z_score),
+            'within_control_limits': within_limits,
+            'interpretation': interpretation,
+            'baseline': {
+                'mean': mean,
+                'std': std,
+                'ucl': baseline['ucl'],
+                'lcl': baseline['lcl'],
+                'historical_samples': baseline['count']
+            }
+        }
 
 
 class SingleDatasetClassificationSystem:
@@ -979,8 +1311,10 @@ class SingleDatasetClassificationSystem:
             except Exception as e:
                 print(f"Prediction failed: {str(e)}")
     
+    # src/models/PesticideClassificationModel.py
+
     def save_system(self, output_dir: str = "single_dataset_system"):
-        """Save the trained system"""
+        """Save the trained system with statistical baseline"""
         if not self.training_results:
             print("No trained system to save!")
             return
@@ -1012,11 +1346,19 @@ class SingleDatasetClassificationSystem:
                 
                 # Save encoders and scalers
                 joblib.dump(self.classifier.scaler, models_dir / "scaler.pkl")
+                joblib.dump(self.classifier.scaler_no_reading, models_dir / "scaler_no_reading.pkl")  # NEW
                 joblib.dump(self.classifier.group_label_encoder, models_dir / "group_label_encoder.pkl")
                 joblib.dump(self.classifier.onehot_encoders, models_dir / "onehot_encoders.pkl")
                 
+                # Save statistical baseline (NEW)
+                joblib.dump(self.classifier.statistical_baseline, models_dir / "statistical_baseline.pkl")
+                print(f"  ✅ Statistical baseline saved ({len(self.classifier.statistical_baseline)} combinations)")
+                
                 if hasattr(self.classifier, 'feature_imputer') and self.classifier.feature_imputer:
                     joblib.dump(self.classifier.feature_imputer, models_dir / "feature_imputer.pkl")
+                
+                if hasattr(self.classifier, 'feature_imputer_no_reading') and self.classifier.feature_imputer_no_reading:
+                    joblib.dump(self.classifier.feature_imputer_no_reading, models_dir / "feature_imputer_no_reading.pkl")
                 
                 # Save TensorFlow models
                 if self.classifier.group_classifier:
@@ -1038,27 +1380,28 @@ class SingleDatasetClassificationSystem:
             with open(results_file, 'w', encoding='utf-8') as f:
                 import json
                 
-                # Prepare serializable results
                 serializable_results = {
                     'training_summary': {
                         'total_samples': len(df_processed),
                         'training_date': timestamp,
-                        'dataset_path': str(self.dataset_path)
+                        'dataset_path': str(self.dataset_path),
+                        'statistical_combinations': len(self.classifier.statistical_baseline)
                     },
                     'validation_results': self.training_results.get('validation_results', {}),
-                    'test_results': self.training_results.get('test_results', {})
+                    'test_results': self.training_results.get('test_results', {}),
+                    'approach': 'Hybrid: Statistical Process Control + ML Prediction (no data leakage)'
                 }
                 
                 json.dump(serializable_results, f, indent=2, default=str)
             
-            print(f"\nSystem saved successfully:")
-            print(f"• Processed dataset: {processed_file}")
-            print(f"• Training results: {results_file}")
-            print(f"• Models directory: {models_dir}")
+            print(f"\n✅ System saved successfully:")
+            print(f"  • Processed dataset: {processed_file}")
+            print(f"  • Training results: {results_file}")
+            print(f"  • Models directory: {models_dir}")
+            print(f"  • Statistical baseline: {len(self.classifier.statistical_baseline)} combinations")
             
         except Exception as e:
             print(f"Error saving system: {e}")
-
 
 def main():
     """Main function to run the single dataset classification system"""
