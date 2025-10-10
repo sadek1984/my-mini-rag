@@ -4,12 +4,13 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 class PesticideSampleInput(BaseModel):
-    """Input model for single pesticide sample prediction"""
-    vegetable: str = Field(..., description="Vegetable type (e.g., tomato, pepper, cucumber)")
-    pesticide_group: str = Field(..., description="Pesticide group classification")
-    reading: float = Field(..., description="Device reading value", ge=0)
-    limits: float = Field(..., description="Acceptable limits", gt=0)
-    sample_code: Optional[str] = Field(None, description="Optional sample identifier")
+    vegetable: str
+    pesticide_name: str                    # ⬅️ REQUIRED: Actual pesticide (e.g., "Bifenthrin")
+    pesticide_group: Optional[str] = None  # ⬅️ OPTIONAL: Auto-derived if not provided
+    reading: float
+    limits: float
+    sample_code: Optional[str] = None
+    
     
     @validator('vegetable')
     def validate_vegetable(cls, v):
@@ -17,17 +18,26 @@ class PesticideSampleInput(BaseModel):
             raise ValueError('Vegetable name cannot be empty')
         return v.strip().lower()
     
-    @validator('pesticide_group')
-    def validate_pesticide_group(cls, v):
-        valid_groups = [
-            'pyrethroid', 'organophosphorus', 'chitin_synthesis_inhibitor',
-            'mite_control', 'phenylpyrazole', 'triazole_fungicide',
-            'juvenile_hormone_mimic', 'herbicide', 'dicarboximide_fungicide',
-            'carbamate', 'gibberellin_inhibitor', 'other'
-        ]
-        if v not in valid_groups:
-            raise ValueError(f'Invalid pesticide group. Must be one of: {valid_groups}')
+    @validator('pesticide_group', always=True)
+    def set_pesticide_group(cls, v, values):
+        """Auto-derive group from pesticide name if not provided"""
+        if v is None and 'pesticide_name' in values:
+            # Import here to avoid circular dependency
+            from models.PesticideClassificationModel import PesticideClassificationModel
+            classifier = PesticideClassificationModel()
+            v = classifier.classify_pesticide_group(values['pesticide_name'])
         return v
+    class Config:
+        schema_extra = {
+            "example": {
+                "vegetable": "tomato",
+                "pesticide_name": "Bifenthrin",      # ⬅️ Specific pesticide
+                "pesticide_group": "pyrethroid",      # ⬅️ Auto-derived
+                "reading": 21.0,
+                "limits": 10.0,
+                "sample_code": "SAMPLE_001"
+            }
+        }
 
 class BatchPredictionInput(BaseModel):
     """Input model for batch pesticide sample predictions"""

@@ -574,8 +574,10 @@ class PesticideClassificationModel:
             return None
     
 
+    # src/models/PesticideClassificationModel.py
+
     def predict_comprehensive_analysis(self, vegetable, pesticide_group, reading, limits, uncertainty=50):
-        """Make comprehensive predictions with detailed debugging"""
+        """Make comprehensive predictions with ALL 4 models"""
         if not hasattr(self, 'onehot_encoders') or not self.onehot_encoders:
             return {'error': 'Models not trained yet - encoders not available'}
         
@@ -586,76 +588,178 @@ class PesticideClassificationModel:
                 'pesticide_group': [pesticide_group],
                 'vegetable_category': [self.categorize_vegetable(vegetable)]
             })
-            print(f"Input data created: {input_data}")
             
-            # Encode categorical features with detailed debugging
+            # Encode categorical features
             encoded_features = []
             for feature in ['vegetable_english', 'pesticide_group', 'vegetable_category']:
                 if feature in self.onehot_encoders and self.onehot_encoders[feature] is not None:
                     try:
-                        print(f"Encoding {feature}...")
                         encoder = self.onehot_encoders[feature]
-                        print(f"  Encoder type: {type(encoder)}")
-                        print(f"  Input data shape: {input_data[[feature]].shape}")
                         encoded = encoder.transform(input_data[[feature]])
-                        print(f"  Encoded shape: {encoded.shape}")
                         encoded_features.append(encoded)
                     except Exception as e:
                         print(f"Error encoding {feature}: {e}")
                         return {'error': f'Encoding failed for {feature}: {str(e)}'}
-                else:
-                    print(f"Skipping {feature} - encoder not available")
-            
-            print(f"Total encoded features: {len(encoded_features)}")
             
             if not encoded_features:
                 return {'error': 'Could not encode any categorical features'}
             
             categorical_encoded = np.hstack(encoded_features)
-            print(f"Combined categorical features shape: {categorical_encoded.shape}")
             
             # Numerical features
             log_reading = np.log1p(reading)
             exceedance_ratio = reading / limits if limits > 0 else 0
             numerical_features = np.array([[reading, limits, log_reading, exceedance_ratio, 6, 2]])
-            print(f"Numerical features shape: {numerical_features.shape}")
             
             # Combine features
             features = np.hstack([categorical_encoded, numerical_features])
-            print(f"Combined features shape: {features.shape}")
             
             # Apply preprocessing
             if hasattr(self, 'feature_imputer') and self.feature_imputer is not None:
-                print("Applying feature imputer...")
                 features = self.feature_imputer.transform(features)
             
             if hasattr(self, 'scaler') and self.scaler is not None:
-                print("Applying scaler...")
-                print(f"Scaler type: {type(self.scaler)}")
                 features_scaled = self.scaler.transform(features)
-                print(f"Scaled features shape: {features_scaled.shape}")
             else:
                 return {'error': 'Scaler not available'}
             
             results = {}
             
-            # Compliance prediction
+            # ============================================================
+            # MODEL 1: COMPLIANCE PREDICTION (RandomForest)
+            # ============================================================
             if self.compliance_model is not None:
                 try:
-                    print("Making compliance prediction...")
-                    print(f"Compliance model type: {type(self.compliance_model)}")
                     compliance_prob = self.compliance_model.predict_proba(features_scaled)[0]
                     results['compliance'] = {
+                        'model_type': 'RandomForest',
                         'probability_compliant': float(compliance_prob[1]),
-                        'prediction': 'Compliant' if compliance_prob[1] > 0.5 else 'Non-compliant'
+                        'probability_non_compliant': float(compliance_prob[0]),
+                        'prediction': 'Compliant' if compliance_prob[1] > 0.5 else 'Non-compliant',
+                        'confidence': float(max(compliance_prob))
                     }
-                    print("Compliance prediction successful")
+                    print("✅ Compliance prediction successful (Model 1/4)")
                 except Exception as e:
-                    print(f"Compliance prediction error: {e}")
+                    print(f"❌ Compliance prediction error: {e}")
+                    results['compliance'] = {'error': str(e)}
             
-            # Risk prediction (rule-based)
-            risk_level = 'Critical' if exceedance_ratio > 5 else 'High' if exceedance_ratio > 2 else 'Medium' if exceedance_ratio > 1 else 'Low'
-            results['risk_score'] = {'predicted_level': risk_level}
+            # ============================================================
+            # MODEL 2: GROUP CLASSIFICATION (Neural Network or RandomForest)
+            # ============================================================
+            if self.group_classifier is not None:
+                try:
+                    # Check if it's a Keras model or sklearn model
+                    is_keras = hasattr(self.group_classifier, 'predict_proba') == False
+                    
+                    if is_keras:
+                        # Keras Neural Network
+                        group_probs = self.group_classifier.predict(features_scaled, verbose=0)[0]
+                        predicted_group_idx = int(np.argmax(group_probs))
+                        predicted_group = self.group_label_encoder.inverse_transform([predicted_group_idx])[0]
+                        confidence = float(group_probs[predicted_group_idx])
+                        model_type = 'Keras Neural Network'
+                    else:
+                        # RandomForest
+                        group_probs = self.group_classifier.predict_proba(features_scaled)[0]
+                        predicted_group_idx = int(np.argmax(group_probs))
+                        predicted_group = self.group_label_encoder.inverse_transform([predicted_group_idx])[0]
+                        confidence = float(group_probs[predicted_group_idx])
+                        model_type = 'RandomForest'
+                    
+                    results['pesticide_group_classification'] = {
+                        'model_type': model_type,
+                        'predicted_group': predicted_group,
+                        'input_group': pesticide_group,
+                        'matches_input': predicted_group == pesticide_group,
+                        'confidence': confidence,
+                        'all_probabilities': {
+                            str(self.group_label_encoder.inverse_transform([i])[0]): float(prob) 
+                            for i, prob in enumerate(group_probs)
+                        }
+                    }
+                    print("✅ Group classification successful (Model 2/4)")
+                except Exception as e:
+                    print(f"❌ Group classification error: {e}")
+                    results['pesticide_group_classification'] = {'error': str(e)}
+            
+            # ============================================================
+            # MODEL 3: CONCENTRATION VALIDATION (GradientBoosting)
+            # ============================================================
+            if self.concentration_predictor is not None:
+                try:
+                    # Predict what we EXPECT based on patterns
+                    expected_log = self.concentration_predictor.predict(features_scaled)[0]
+                    expected_concentration = np.expm1(expected_log)
+                    
+                    # Compare with actual
+                    deviation = abs(expected_concentration - reading)
+                    relative_error = (deviation / reading * 100) if reading > 0 else 0
+                    
+                    # Determine if reading is suspicious
+                    if relative_error > 50:
+                        status = "⚠️ ANOMALY - Reading far from expected pattern"
+                        action = "Verify sensor calibration and retest"
+                    elif relative_error > 30:
+                        status = "⚠️ WARNING - Reading higher than typical"
+                        action = "Consider retesting for confirmation"
+                    else:
+                        status = "✅ NORMAL - Reading within expected range"
+                        action = "No action needed"
+                    
+                    results['reading_validation'] = {
+                        'model_type': 'GradientBoosting - Pattern Validator',
+                        'expected_concentration': float(expected_concentration),
+                        'actual_reading': float(reading),
+                        'deviation': float(deviation),
+                        'relative_error_percent': float(relative_error),
+                        'status': status,
+                        'recommended_action': action,
+                        'interpretation': f'Based on {vegetable} + {pesticide_group} patterns, expected {expected_concentration:.1f} μg/kg, got {reading:.1f} μg/kg'
+                    }
+                    print("✅ Reading validation successful (Model 3/4)")
+                except Exception as e:
+                    print(f"❌ Reading validation error: {e}")
+                    results['reading_validation'] = {'error': str(e)}
+            
+            # ============================================================
+            # MODEL 4: RISK CLASSIFICATION (Neural Network)
+            # ============================================================
+            if self.risk_classifier is not None:
+                try:
+                    risk_probs = self.risk_classifier.predict(features_scaled, verbose=0)[0]
+                    predicted_risk_idx = int(np.argmax(risk_probs))
+                    
+                    # Risk levels: 0=Low, 1=Medium, 2=High, 3=Critical
+                    risk_levels = ['Low', 'Medium', 'High', 'Critical']
+                    predicted_risk = risk_levels[predicted_risk_idx]
+                    
+                    results['risk_classification'] = {
+                        'model_type': 'Keras Neural Network',
+                        'predicted_risk_level': predicted_risk,
+                        'risk_index': predicted_risk_idx,
+                        'confidence': float(risk_probs[predicted_risk_idx]),
+                        'risk_probabilities': {
+                            level: float(prob) 
+                            for level, prob in zip(risk_levels, risk_probs)
+                        }
+                    }
+                    print("✅ Risk classification successful (Model 4/4)")
+                except Exception as e:
+                    print(f"❌ Risk classification error: {e}")
+                    # Fallback to rule-based
+                    risk_level = 'Critical' if exceedance_ratio > 5 else 'High' if exceedance_ratio > 2 else 'Medium' if exceedance_ratio > 1 else 'Low'
+                    results['risk_classification'] = {
+                        'model_type': 'Rule-based (Fallback)',
+                        'predicted_risk_level': risk_level,
+                        'exceedance_ratio': exceedance_ratio
+                    }
+            
+            # Add summary
+            results['model_summary'] = {
+                'total_models_used': 4,
+                'models_successful': sum(1 for k, v in results.items() if k != 'model_summary' and 'error' not in v),
+                'models': ['compliance', 'group_classification', 'reading_validation', 'risk_classification']
+            }
             
             return results
             
@@ -664,7 +768,7 @@ class PesticideClassificationModel:
             print(f"Full traceback:")
             traceback.print_exc()
             return {'error': f'Prediction failed: {str(e)}'}
-        
+            
     def analyze_dataset_patterns(self, df_processed):
         """Analyze patterns in the dataset (from your working code)"""
         try:

@@ -163,20 +163,40 @@ class PesticidePredictionService:
                 "prediction_mode": "Rule-based (Fallback)"
             }
     
+    # src/services/pesticide_prediction_service.py
+# src/services/pesticide_prediction_service.py
+
     def predict_sample_compliance(
         self, 
         vegetable: str, 
-        pesticide_group: str, 
+        pesticide_name: str,              
+        pesticide_group: str,             
         reading: float, 
         limits: float, 
         sample_code: str = None
     ) -> Dict[str, Any]:
         """
-        Predict compliance using trained ML models or fallback to rule-based
+        Predict compliance for a single sample using specific pesticide name
         """
         try:
-            # Validate inputs
-            validation_result = self._validate_inputs(vegetable, pesticide_group, reading, limits)
+            # Auto-derive group if not provided or empty
+            if not pesticide_group:
+                # Import here to avoid issues
+                if hasattr(self.classifier, 'classify_pesticide_group'):
+                    pesticide_group = self.classifier.classify_pesticide_group(pesticide_name)
+                else:
+                    # Fallback if classifier not available
+                    pesticide_group = 'other'
+            
+            # Validate inputs - NOW WITH 5 PARAMETERS
+            validation_result = self._validate_inputs(
+                vegetable, 
+                pesticide_name,        # ⬅️ Added
+                pesticide_group, 
+                reading, 
+                limits
+            )
+            
             if not validation_result['valid']:
                 return {
                     'success': False,
@@ -191,11 +211,18 @@ class PesticidePredictionService:
             if self.model_loaded and self.classifier:
                 self.logger.info(f"🤖 Using ML models for prediction")
                 ml_prediction = self._ml_based_prediction(
-                    vegetable, pesticide_group, reading, limits, exceedance_ratio
+                    vegetable, 
+                    pesticide_name,        # ⬅️ Pass pesticide_name
+                    pesticide_group, 
+                    reading, 
+                    limits, 
+                    exceedance_ratio
                 )
                 
                 if 'error' not in ml_prediction:
                     # Add additional metadata
+                    ml_prediction['sample_info']['pesticide_name'] = pesticide_name
+                    ml_prediction['sample_info']['pesticide_group'] = pesticide_group
                     ml_prediction['sample_info']['sample_code'] = sample_code or f"AUTO_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                     ml_prediction['model_version'] = self.model_version
                     ml_prediction['prediction_mode'] = "ML Models"
@@ -207,6 +234,17 @@ class PesticidePredictionService:
                         ml_prediction, vegetable, pesticide_group, exceedance_ratio
                     )
                     
+                    # Check for group mismatch warnings
+                    if 'predictions' in ml_prediction and 'group_classification' in ml_prediction['predictions']:
+                        group_pred = ml_prediction['predictions']['group_classification']
+                        if not group_pred.get('matches_input', True):
+                            if 'warnings' not in ml_prediction:
+                                ml_prediction['warnings'] = []
+                            ml_prediction['warnings'].append(
+                                f"⚠️ Group mismatch: Model predicts {group_pred.get('predicted_group')} "
+                                f"but input was {pesticide_group}. Verify pesticide identification."
+                            )
+                    
                     return ml_prediction
                 else:
                     self.logger.warning(f"ML prediction failed: {ml_prediction['error']}, falling back to rule-based")
@@ -214,7 +252,13 @@ class PesticidePredictionService:
             # Fallback to rule-based prediction
             self.logger.info(f"📊 Using rule-based prediction (fallback)")
             return self._rule_based_prediction(
-                vegetable, pesticide_group, reading, limits, exceedance_ratio, sample_code
+                vegetable, 
+                pesticide_name,        # ⬅️ Pass pesticide_name
+                pesticide_group, 
+                reading, 
+                limits, 
+                exceedance_ratio, 
+                sample_code
             )
             
         except Exception as e:
@@ -226,10 +270,14 @@ class PesticidePredictionService:
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
             }
-    
+        
+    # src/services/pesticide_prediction_service.py
+
+    # Update the key from 'concentration_prediction' to 'reading_validation'
     def _ml_based_prediction(
         self, 
-        vegetable: str, 
+        vegetable: str,
+        pesticide_name: str,      # ⬅️ Add this parameter
         pesticide_group: str, 
         reading: float, 
         limits: float,
@@ -248,18 +296,25 @@ class PesticidePredictionService:
             if 'error' in prediction_result:
                 return prediction_result
             
-            # Format the response
+            # Format the response with ALL 4 models
             formatted_result = {
                 'sample_info': {
                     'vegetable': vegetable,
+                    'pesticide_name': pesticide_name,        # ⬅️ Include name
                     'pesticide_group': pesticide_group,
                     'reading': reading,
                     'limits': limits,
                     'exceedance_ratio': round(exceedance_ratio, 3)
                 },
-                'predictions': prediction_result,
+                'predictions': {
+                    'compliance': prediction_result.get('compliance', {}),
+                    'group_classification': prediction_result.get('pesticide_group_classification', {}),
+                    'reading_validation': prediction_result.get('reading_validation', {}),
+                    'risk': prediction_result.get('risk_classification', {})
+                },
+                'model_summary': prediction_result.get('model_summary', {}),
                 'risk_assessment': {
-                    'risk_level': prediction_result.get('risk_score', {}).get('predicted_level', 'Unknown'),
+                    'risk_level': prediction_result.get('risk_classification', {}).get('predicted_risk_level', 'Unknown'),
                     'risk_description': self._get_risk_description(exceedance_ratio),
                     'exceedance_factor': round(exceedance_ratio, 2),
                     'pesticide_group_risk': self.group_risk_profiles.get(pesticide_group, {})
@@ -275,6 +330,7 @@ class PesticidePredictionService:
     def _rule_based_prediction(
         self,
         vegetable: str,
+        pesticide_name: str,      # ⬅️ Add this parameter
         pesticide_group: str,
         reading: float,
         limits: float,
@@ -291,6 +347,7 @@ class PesticidePredictionService:
             "sample_info": {
                 "sample_code": sample_code or f"AUTO_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                 "vegetable": vegetable,
+                "pesticide_name": pesticide_name,        # ⬅️ Include name
                 "pesticide_group": pesticide_group,
                 "reading": reading,
                 "limits": limits,
@@ -300,7 +357,7 @@ class PesticidePredictionService:
                 "compliance": {
                     "prediction": "Compliant" if is_compliant else "Non-Compliant",
                     "probability_compliant": round(compliance_probability, 3),
-                    "confidence": 0.70  # Lower confidence for rule-based
+                    "confidence": 0.70
                 }
             },
             "risk_assessment": {
@@ -318,7 +375,7 @@ class PesticidePredictionService:
         }
         
         return result
-    
+        
     def _calculate_risk_level(self, exceedance_ratio: float) -> str:
         """Calculate risk level from exceedance ratio"""
         if exceedance_ratio <= 1.0:
@@ -439,11 +496,24 @@ class PesticidePredictionService:
                 "timestamp": datetime.now().isoformat()
             }
     
-    def _validate_inputs(self, vegetable: str, pesticide_group: str, reading: float, limits: float) -> Dict[str, Any]:
+    # src/services/pesticide_prediction_service.py
+
+    def _validate_inputs(
+        self, 
+        vegetable: str, 
+        pesticide_name: str,        # ⬅️ Add this parameter
+        pesticide_group: str, 
+        reading: float, 
+        limits: float
+    ) -> Dict[str, Any]:
         """Validate input parameters"""
         
         if not vegetable or not isinstance(vegetable, str):
             return {'valid': False, 'error': 'Invalid vegetable parameter'}
+        
+        # Validate pesticide name
+        if not pesticide_name or not isinstance(pesticide_name, str):
+            return {'valid': False, 'error': 'Invalid pesticide_name parameter'}
         
         if not pesticide_group or not isinstance(pesticide_group, str):
             return {'valid': False, 'error': 'Invalid pesticide_group parameter'}

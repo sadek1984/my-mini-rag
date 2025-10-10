@@ -65,6 +65,8 @@ async def get_model_status(service: PesticidePredictionService = Depends(get_pre
         logger.error(f"Status check failed: {e}")
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
 
+# src/routes/prediction.py
+
 @prediction_router.post("/predict", response_model=PredictionResult)
 async def predict_sample_compliance(
     sample: PesticideSampleInput,
@@ -73,15 +75,14 @@ async def predict_sample_compliance(
     """
     Predict compliance and risk for a single pesticide sample
     
-    This endpoint provides real-time classification for new samples including:
-    - Compliance probability
-    - Risk assessment
-    - Actionable recommendations
+    Now requires specific pesticide name (e.g., "Bifenthrin")
+    The group is auto-derived from the pesticide name
     """
     try:
         result = service.predict_sample_compliance(
             vegetable=sample.vegetable,
-            pesticide_group=sample.pesticide_group,
+            pesticide_name=sample.pesticide_name,      # ⬅️ Changed
+            pesticide_group=sample.pesticide_group,    # ⬅️ Optional now
             reading=sample.reading,
             limits=sample.limits,
             sample_code=sample.sample_code
