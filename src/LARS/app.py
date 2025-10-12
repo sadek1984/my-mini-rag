@@ -1331,6 +1331,57 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+st.header("📊 Statistical Insights")
+
+try:
+    # Fetch insights from API
+    response = requests.get("http://localhost:8000/api/v1/analytics/statistical-insights")
+    response.raise_for_status()  # Raise error for bad status codes
+    
+    data = response.json()
+    
+    # Check if insights exist
+    if 'insights' not in data:
+        st.warning(f"⚠️ No insights key in response. Response: {data}")
+        st.stop()
+    
+    insights = data['insights']
+    
+    # Check if insights list is empty
+    if not insights:
+        st.info("ℹ️ No statistical insights available yet. Need more data for analysis.")
+        st.stop()
+    
+    # Display insights
+    severity_color = {
+        'high': '🔴',
+        'medium': '🟡',
+        'low': '🟢'
+    }
+    
+    for insight in insights:
+        st.info(f"{severity_color.get(insight.get('severity', 'low'), '⚪')} {insight.get('message', 'No message')}")
+        
+        # Show additional data if available
+        if 'season_data' in insight:
+            st.bar_chart(insight['season_data'])
+        
+        if 'category_data' in insight:
+            st.bar_chart(insight['category_data'])
+
+except requests.exceptions.ConnectionError:
+    st.error("❌ Cannot connect to API. Make sure the server is running on http://localhost:8000")
+    
+except requests.exceptions.RequestException as e:
+    st.error(f"❌ API Error: {str(e)}")
+    
+except Exception as e:
+    st.error(f"❌ Unexpected error: {str(e)}")
+
+# Add this temporarily to see what the API returns
+response = requests.get("http://localhost:8000/api/v1/analytics/statistical-insights")
+st.write("API Response:", response.json())
+
 # ============================================================================
 # CONSTANTS
 # ============================================================================
