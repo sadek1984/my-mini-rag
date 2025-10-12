@@ -65,6 +65,7 @@ async def get_model_status(service: PesticidePredictionService = Depends(get_pre
         logger.error(f"Status check failed: {e}")
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
 
+
 # src/routes/prediction.py
 
 @prediction_router.post("/predict", response_model=PredictionResult)
@@ -75,17 +76,20 @@ async def predict_sample_compliance(
     """
     Predict compliance and risk for a single pesticide sample
     
-    Now requires specific pesticide name (e.g., "Bifenthrin")
-    The group is auto-derived from the pesticide name
+    Now includes:
+    - Specific pesticide name (not just group)
+    - Season-aware predictions based on collection_date
+    - Hybrid validation (Statistical + ML)
     """
     try:
         result = service.predict_sample_compliance(
             vegetable=sample.vegetable,
-            pesticide_name=sample.pesticide_name,      # ⬅️ Changed
-            pesticide_group=sample.pesticide_group,    # ⬅️ Optional now
+            pesticide_name=sample.pesticide_name,        # ⬅️ Specific pesticide
+            pesticide_group=sample.pesticide_group,
             reading=sample.reading,
             limits=sample.limits,
-            sample_code=sample.sample_code
+            sample_code=sample.sample_code,
+            collection_date=sample.collection_date       # ⬅️ Date for season
         )
         
         if not result['success']:
@@ -111,27 +115,26 @@ async def predict_batch_samples(
     service: PesticidePredictionService = Depends(get_prediction_service)
 ):
     """
-    Predict compliance for multiple samples in batch
-    
-    Efficiently process multiple samples at once with detailed results
-    for each sample and overall batch statistics.
+    Predict compliance for multiple samples
+    Now supports season-aware batch predictions
     """
     try:
-        # Convert Pydantic models to dictionaries for service
-        samples_dict = [sample.dict() for sample in batch_input.samples]
+        samples_list = []
+        for sample in batch_input.samples:
+            samples_list.append({
+                'vegetable': sample.vegetable,
+                'pesticide_name': sample.pesticide_name,
+                'pesticide_group': sample.pesticide_group,
+                'reading': sample.reading,
+                'limits': sample.limits,
+                'sample_code': sample.sample_code,
+                'collection_date': sample.collection_date
+            })
         
-        result = service.predict_batch_samples(samples_dict)
-        
-        if not result['success']:
-            raise HTTPException(
-                status_code=400,
-                detail="Batch prediction failed"
-            )
+        result = service.predict_batch_samples(samples_list)
         
         return BatchPredictionResult(**result)
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Batch prediction failed: {e}")
         raise HTTPException(

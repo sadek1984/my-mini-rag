@@ -458,8 +458,9 @@ class PesticideClassificationModel:
         
         return models
 
+
     def train_all_models(self, df, verbose_training=False, test_size=0.2, val_size=0.2):
-        """Complete training pipeline with separate feature sets for Model 3"""
+        """Complete training pipeline with pesticide name and season features"""
         print("Training comprehensive pesticide classification models...")
         
         # Prepare features
@@ -470,17 +471,24 @@ class PesticideClassificationModel:
             return None
         
         print(f"Training on {len(df_processed)} samples...")
+        print(f"Unique pesticides: {df_processed['pesticide_standardized'].nunique()}")
+        print(f"Unique groups: {df_processed['pesticide_group'].nunique()}")
         
         try:
             # ============================================================
-            # STEP 1: Calculate Statistical Baseline (NEW!)
+            # STEP 1: Calculate Statistical Baseline
             # ============================================================
             statistical_baseline = self.calculate_statistical_baseline(df_processed)
             
             # ============================================================
-            # STEP 2: Prepare Features - TWO VERSIONS
+            # STEP 2: Prepare Features - WITH PESTICIDE NAME
             # ============================================================
-            categorical_features = ['vegetable_english', 'pesticide_group', 'vegetable_category']
+            categorical_features = [
+                'vegetable_english',
+                'pesticide_standardized',  # ⬅️ NEW: Specific pesticide
+                'pesticide_group',         # Keep for generalization
+                'vegetable_category'
+            ]
             
             # Encode categorical features
             encoded_features = []
@@ -492,8 +500,10 @@ class PesticideClassificationModel:
                     encoded = encoder.fit_transform(df_processed[[feature]])
                     encoded_features.append(encoded)
                     self.onehot_encoders[feature] = encoder
+                    print(f"  ✅ Encoded {feature}: {encoded.shape[1]} categories")
             
             categorical_encoded = np.hstack(encoded_features)
+            print(f"  Total categorical features: {categorical_encoded.shape[1]}")
             
             # VERSION A: ALL numerical features (for Models 1, 2, 4)
             numerical_features_all = []
@@ -507,7 +517,7 @@ class PesticideClassificationModel:
             
             # VERSION B: NO reading features (for Model 3)
             numerical_features_no_reading = []
-            numerical_cols_no_reading = ['limits', 'month', 'season']  # ⬅️ NO reading, log_reading, exceedance_ratio
+            numerical_cols_no_reading = ['limits', 'month', 'season']
             
             for col in numerical_cols_no_reading:
                 if col in df_processed.columns:
@@ -515,18 +525,21 @@ class PesticideClassificationModel:
             
             numerical_matrix_no_reading = np.hstack(numerical_features_no_reading)
             
-            # ============================================================
-            # STEP 3: Combine Features - TWO VERSIONS
-            # ============================================================
-            # Full features (Models 1, 2, 4)
-            features_all = np.hstack([categorical_encoded, numerical_matrix_all])
+            print(f"  Numerical features (all): {numerical_matrix_all.shape[1]}")
+            print(f"  Numerical features (no reading): {numerical_matrix_no_reading.shape[1]}")
             
-            # Reduced features (Model 3)
+            # ============================================================
+            # STEP 3: Combine Features
+            # ============================================================
+            features_all = np.hstack([categorical_encoded, numerical_matrix_all])
             features_no_reading = np.hstack([categorical_encoded, numerical_matrix_no_reading])
+            
+            print(f"  Final feature count (all): {features_all.shape[1]}")
+            print(f"  Final feature count (no reading): {features_no_reading.shape[1]}")
             
             # Handle NaN values
             if np.isnan(features_all).any():
-                print("Warning: NaN values found, filling with median")
+                print("  Imputing NaN values with median...")
                 from sklearn.impute import SimpleImputer
                 
                 imputer_all = SimpleImputer(strategy='median')
@@ -536,19 +549,22 @@ class PesticideClassificationModel:
                 imputer_no_reading = SimpleImputer(strategy='median')
                 features_no_reading = imputer_no_reading.fit_transform(features_no_reading)
                 self.feature_imputer_no_reading = imputer_no_reading
+            else:
+                self.feature_imputer = None
+                self.feature_imputer_no_reading = None
             
             # ============================================================
-            # STEP 4: Scale Features - TWO SCALERS
+            # STEP 4: Scale Features
             # ============================================================
             from sklearn.preprocessing import StandardScaler
             
-            # Scaler for full features
             self.scaler = StandardScaler()
             features_all_scaled = self.scaler.fit_transform(features_all)
             
-            # Scaler for reduced features
             self.scaler_no_reading = StandardScaler()
             features_no_reading_scaled = self.scaler_no_reading.fit_transform(features_no_reading)
+            
+            print("  ✅ Features scaled")
             
             # ============================================================
             # STEP 5: Create Target Variables
@@ -561,11 +577,10 @@ class PesticideClassificationModel:
             }
             
             # ============================================================
-            # STEP 6: Train/Val/Test Splits - TWO VERSIONS
+            # STEP 6: Train/Val/Test Splits
             # ============================================================
-            print(f"Creating train/validation/test splits...")
+            print(f"\n📊 Creating train/validation/test splits...")
             
-            # Split for full features
             X_temp_all, X_test_all, indices_temp, indices_test = train_test_split(
                 features_all_scaled, range(len(features_all_scaled)), 
                 test_size=test_size, random_state=42
@@ -577,7 +592,7 @@ class PesticideClassificationModel:
                 test_size=val_size_adjusted, random_state=42
             )
             
-            # Split for reduced features (same indices!)
+            # Split for reduced features (same indices)
             X_train_no_reading = features_no_reading_scaled[indices_train]
             X_val_no_reading = features_no_reading_scaled[indices_val]
             X_test_no_reading = features_no_reading_scaled[indices_test]
@@ -587,19 +602,18 @@ class PesticideClassificationModel:
             y_val = {name: values[indices_val] for name, values in y_dict.items()}
             y_test = {name: values[indices_test] for name, values in y_dict.items()}
             
-            print(f"Data splits created:")
             print(f"  Training: {X_train_all.shape[0]} samples")
             print(f"  Validation: {X_val_all.shape[0]} samples")
             print(f"  Test: {X_test_all.shape[0]} samples")
             
             # ============================================================
-            # STEP 7: Build Models with Different Feature Sets
+            # STEP 7: Build Models
             # ============================================================
+            print(f"\n🤖 Building models...")
             models = self.build_models_separate_features(
                 X_train_all, X_train_no_reading, y_train
             )
             
-            # Store models
             self.compliance_model = models['compliance']
             self.group_classifier = models['pesticide_group']
             self.concentration_predictor = models['concentration']
@@ -611,13 +625,11 @@ class PesticideClassificationModel:
             print("\n📊 Validation Results:")
             val_results = {}
             
-            # Model 1: Compliance
             val_pred_compliance = self.compliance_model.predict(X_val_all)
             val_acc_compliance = accuracy_score(y_val['compliance'], val_pred_compliance)
             val_results['compliance_accuracy'] = val_acc_compliance
             print(f"  Compliance accuracy: {val_acc_compliance:.4f}")
             
-            # Model 3: Concentration (with NO reading in features!)
             val_pred_concentration = self.concentration_predictor.predict(X_val_no_reading)
             val_mse_concentration = mean_squared_error(y_val['concentration'], val_pred_concentration)
             val_results['concentration_mse'] = val_mse_concentration
@@ -638,6 +650,8 @@ class PesticideClassificationModel:
             print(f"  Concentration test MSE: {test_mse_concentration:.4f}")
             
             print("\n✅ All models trained successfully!")
+            print(f"🎯 Model includes {df_processed['pesticide_standardized'].nunique()} specific pesticides")
+            print(f"📅 Model uses actual month/season from data")
             
             return {
                 'processed_data': df_processed,
@@ -657,43 +671,94 @@ class PesticideClassificationModel:
 
 
 
-    def predict_comprehensive_analysis(self, vegetable, pesticide_group, reading, limits, uncertainty=50):
+    def predict_comprehensive_analysis(
+        self, 
+        vegetable, 
+        pesticide_name,      # ⬅️ UPDATED: Now uses specific pesticide
+        pesticide_group, 
+        reading, 
+        limits,
+        collection_date=None  # ⬅️ NEW: Date for season extraction
+    ):
         """
-        Make comprehensive predictions with backward compatibility
+        Make comprehensive predictions with pesticide name and actual season
         """
         if not hasattr(self, 'onehot_encoders') or not self.onehot_encoders:
             return {'error': 'Models not trained yet'}
         
         try:
-            # Check if we have new models or old models
+            # ============================================================
+            # EXTRACT MONTH AND SEASON FROM DATE
+            # ============================================================
+            if collection_date:
+                try:
+                    from datetime import datetime
+                    date_obj = datetime.strptime(collection_date, "%Y-%m-%d")
+                    month = date_obj.month
+                    season = self.get_season(month)
+                except Exception as e:
+                    print(f"Warning: Could not parse date '{collection_date}': {e}")
+                    from datetime import datetime
+                    month = datetime.now().month
+                    season = self.get_season(month)
+            else:
+                from datetime import datetime
+                month = datetime.now().month
+                season = self.get_season(month)
+            
+            print(f"📅 Using: Month={month}, Season={season} ({['Winter','Spring','Summer','Fall'][season]})")
+            
+            # Check model version
             has_new_scaler = hasattr(self, 'scaler_no_reading') and self.scaler_no_reading is not None
             has_statistical_baseline = hasattr(self, 'statistical_baseline') and self.statistical_baseline
+            has_pesticide_name_encoder = 'pesticide_standardized' in self.onehot_encoders
             
             # ============================================================
-            # STATISTICAL VALIDATION (if available)
+            # STATISTICAL VALIDATION
             # ============================================================
             statistical_check = None
             if has_statistical_baseline:
-                season = self.get_season(6)
                 statistical_check = self.validate_reading_statistical(
                     vegetable, pesticide_group, reading, season
                 )
             
             # ============================================================
-            # PREPARE FEATURES
+            # PREPARE FEATURES WITH PESTICIDE NAME
             # ============================================================
-            input_data = pd.DataFrame({
-                'vegetable_english': [vegetable],
-                'pesticide_group': [pesticide_group],
-                'vegetable_category': [self.categorize_vegetable(vegetable)]
-            })
+            if has_pesticide_name_encoder:
+                # New model - includes pesticide name
+                input_data = pd.DataFrame({
+                    'vegetable_english': [vegetable],
+                    'pesticide_standardized': [pesticide_name],  # ⬅️ Specific pesticide
+                    'pesticide_group': [pesticide_group],
+                    'vegetable_category': [self.categorize_vegetable(vegetable)]
+                })
+                
+                feature_list = ['vegetable_english', 'pesticide_standardized', 'pesticide_group', 'vegetable_category']
+            else:
+                # Old model - only group
+                input_data = pd.DataFrame({
+                    'vegetable_english': [vegetable],
+                    'pesticide_group': [pesticide_group],
+                    'vegetable_category': [self.categorize_vegetable(vegetable)]
+                })
+                
+                feature_list = ['vegetable_english', 'pesticide_group', 'vegetable_category']
+                print("⚠️  OLD MODEL: Does not use specific pesticide name")
             
-            # Encode categorical
+            # Encode categorical features
             encoded_features = []
-            for feature in ['vegetable_english', 'pesticide_group', 'vegetable_category']:
+            for feature in feature_list:
                 if feature in self.onehot_encoders:
-                    encoded = self.onehot_encoders[feature].transform(input_data[[feature]])
-                    encoded_features.append(encoded)
+                    try:
+                        encoded = self.onehot_encoders[feature].transform(input_data[[feature]])
+                        encoded_features.append(encoded)
+                    except Exception as e:
+                        print(f"Warning: Could not encode {feature}: {e}")
+                        return {'error': f'Encoding failed for {feature}'}
+            
+            if not encoded_features:
+                return {'error': 'Could not encode any features'}
             
             categorical_encoded = np.hstack(encoded_features)
             
@@ -701,28 +766,30 @@ class PesticideClassificationModel:
             log_reading = np.log1p(reading)
             exceedance_ratio = reading / limits if limits > 0 else 0
             
-            # VERSION A: All features (for Models 1, 2, 4)
-            numerical_all = np.array([[reading, limits, log_reading, exceedance_ratio, 6, 2]])
+            # VERSION A: All features (with actual month/season)
+            numerical_all = np.array([[reading, limits, log_reading, exceedance_ratio, month, season]])
             features_all = np.hstack([categorical_encoded, numerical_all])
             
-            # Apply preprocessing - FIXED: Check if imputer exists
+            # VERSION B: No reading features (with actual month/season)
+            if has_new_scaler:
+                numerical_no_reading = np.array([[limits, month, season]])  # ⬅️ Uses actual season!
+                features_no_reading = np.hstack([categorical_encoded, numerical_no_reading])
+            else:
+                features_no_reading = features_all
+            
+            # Apply preprocessing
             if hasattr(self, 'feature_imputer') and self.feature_imputer is not None:
                 features_all = self.feature_imputer.transform(features_all)
             
+            if hasattr(self, 'feature_imputer_no_reading') and self.feature_imputer_no_reading is not None:
+                features_no_reading = self.feature_imputer_no_reading.transform(features_no_reading)
+            
+            # Scale
             features_all_scaled = self.scaler.transform(features_all)
             
-            # VERSION B: No reading features (for Model 3) - ONLY if new model
             if has_new_scaler:
-                numerical_no_reading = np.array([[limits, 6, 2]])
-                features_no_reading = np.hstack([categorical_encoded, numerical_no_reading])
-                
-                # FIXED: Check if imputer exists
-                if hasattr(self, 'feature_imputer_no_reading') and self.feature_imputer_no_reading is not None:
-                    features_no_reading = self.feature_imputer_no_reading.transform(features_no_reading)
-                
                 features_no_reading_scaled = self.scaler_no_reading.transform(features_no_reading)
             else:
-                # Old model - use all features (with leakage)
                 features_no_reading_scaled = features_all_scaled
             
             results = {}
@@ -781,16 +848,21 @@ class PesticideClassificationModel:
             # ============================================================
             if self.concentration_predictor is not None:
                 try:
-                    # Predict concentration
                     predicted_log = self.concentration_predictor.predict(features_no_reading_scaled)[0]
                     expected_concentration = np.expm1(predicted_log)
                     
                     ml_deviation = abs(expected_concentration - reading)
                     ml_relative_error = (ml_deviation / reading * 100) if reading > 0 else 0
                     
-                    # Build validation result
                     validation_result = {
                         'model_type': 'Hybrid: Statistical + GradientBoosting' if has_statistical_baseline else 'GradientBoosting Only',
+                        'uses_pesticide_name': has_pesticide_name_encoder,
+                        'uses_actual_season': True,
+                        'season_info': {
+                            'month': month,
+                            'season': season,
+                            'season_name': ['Winter', 'Spring', 'Summer', 'Fall'][season]
+                        },
                         'ml_prediction': {
                             'expected_concentration': float(expected_concentration),
                             'actual_reading': float(reading),
@@ -799,11 +871,9 @@ class PesticideClassificationModel:
                         }
                     }
                     
-                    # Add statistical validation if available
+                    # Hybrid decision logic
                     if statistical_check:
                         validation_result['statistical'] = statistical_check
-                        
-                        # Hybrid decision logic
                         z_score = statistical_check.get('z_score')
                         
                         if statistical_check['status'] == 'NO_BASELINE':
@@ -855,25 +925,25 @@ class PesticideClassificationModel:
                             interpretation_parts.append(
                                 f"Statistical: Reading of {reading:.1f} μg/kg is {z_score:.2f} standard deviations "
                                 f"from historical mean of {baseline.get('mean', 0):.1f} μg/kg "
-                                f"(based on {baseline.get('historical_samples', 0)} samples). "
+                                f"(based on {baseline.get('historical_samples', 0)} samples in {['Winter','Spring','Summer','Fall'][season]}). "
                                 f"Control limits: {baseline.get('lcl', 0):.1f} - {baseline.get('ucl', 0):.1f} μg/kg."
                             )
                         
                         interpretation_parts.append(
-                            f"ML Prediction: Based on {vegetable} + {pesticide_group} patterns, "
+                            f"ML Prediction: Based on {vegetable} + {pesticide_name} ({pesticide_group}) patterns in {['Winter','Spring','Summer','Fall'][season]}, "
                             f"expected {expected_concentration:.1f} μg/kg, got {reading:.1f} μg/kg "
                             f"({ml_relative_error:.1f}% deviation)."
                         )
                         
                         if abs(z_score or 0) < 2 and ml_relative_error < 30:
-                            interpretation_parts.append("✅ Both methods confirm this is a normal reading.")
+                            interpretation_parts.append("✅ Both methods confirm this is a normal reading for this season.")
                         elif abs(z_score or 0) > 3 and ml_relative_error > 50:
                             interpretation_parts.append("🚨 CRITICAL: Both methods detect significant anomaly.")
                         
                         validation_result['interpretation'] = " ".join(interpretation_parts)
                     
                     else:
-                        # ML-only decision (no statistical baseline)
+                        # ML-only
                         if ml_relative_error > 50:
                             final_status = '🚨 ANOMALY'
                             action = 'Verify reading - significant deviation'
@@ -887,14 +957,10 @@ class PesticideClassificationModel:
                         validation_result['final_status'] = final_status
                         validation_result['recommended_action'] = action
                         validation_result['interpretation'] = (
-                            f'Based on {vegetable} + {pesticide_group} patterns, '
+                            f'Based on {vegetable} + {pesticide_name} patterns in {["Winter","Spring","Summer","Fall"][season]}, '
                             f'expected {expected_concentration:.1f} μg/kg, got {reading:.1f} μg/kg '
                             f'({ml_relative_error:.1f}% deviation).'
                         )
-                    
-                    # Add warning if using old model
-                    if not has_new_scaler:
-                        validation_result['warning'] = '⚠️ Using legacy model with data leakage - retrain for optimal results'
                     
                     results['reading_validation'] = validation_result
                     print("✅ Reading validation (Model 3/4)")
@@ -941,7 +1007,12 @@ class PesticideClassificationModel:
                 'models_successful': sum(1 for k, v in results.items() if k != 'model_summary' and 'error' not in v),
                 'models': ['compliance', 'group_classification', 'reading_validation_hybrid', 'risk_classification'],
                 'validation_approach': 'Hybrid (Statistical 3-sigma + ML)' if has_statistical_baseline else 'ML Only',
-                'model_version': 'NEW (no data leakage)' if has_new_scaler else 'LEGACY (with data leakage)'
+                'features_used': {
+                    'pesticide_name': has_pesticide_name_encoder,
+                    'actual_season': True,
+                    'month': month,
+                    'season': ['Winter', 'Spring', 'Summer', 'Fall'][season]
+                }
             }
             
             return results
@@ -951,7 +1022,7 @@ class PesticideClassificationModel:
             print(f"Full traceback:")
             traceback.print_exc()
             return {'error': f'Prediction failed: {str(e)}'}
-        
+            
     def _generate_validation_interpretation(self, statistical_check, expected, actual, ml_error, vegetable, pesticide):
         """Generate human-readable interpretation of validation results"""
         

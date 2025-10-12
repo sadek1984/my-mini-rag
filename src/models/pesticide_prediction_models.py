@@ -5,51 +5,67 @@ from datetime import datetime
 
 class PesticideSampleInput(BaseModel):
     vegetable: str
-    pesticide_name: str                    # ⬅️ REQUIRED: Actual pesticide (e.g., "Bifenthrin")
-    pesticide_group: Optional[str] = None  # ⬅️ OPTIONAL: Auto-derived if not provided
+    pesticide_name: str
+    pesticide_group: Optional[str] = None
     reading: float
     limits: float
     sample_code: Optional[str] = None
-    
-    
-    @validator('vegetable')
-    def validate_vegetable(cls, v):
-        if not v or not v.strip():
-            raise ValueError('Vegetable name cannot be empty')
-        return v.strip().lower()
+    collection_date: Optional[str] = None  # ⬅️ NEW: Format "YYYY-MM-DD"
     
     @validator('pesticide_group', always=True)
     def set_pesticide_group(cls, v, values):
         """Auto-derive group from pesticide name if not provided"""
         if v is None and 'pesticide_name' in values:
-            # Import here to avoid circular dependency
             from models.PesticideClassificationModel import PesticideClassificationModel
             classifier = PesticideClassificationModel()
             v = classifier.classify_pesticide_group(values['pesticide_name'])
         return v
+    
+    @validator('collection_date', always=True)
+    def set_default_date(cls, v):
+        """Use current date if not provided"""
+        if v is None or v == '':
+            v = datetime.now().strftime("%Y-%m-%d")
+        return v
+    
     class Config:
         schema_extra = {
             "example": {
                 "vegetable": "tomato",
-                "pesticide_name": "Bifenthrin",      # ⬅️ Specific pesticide
-                "pesticide_group": "pyrethroid",      # ⬅️ Auto-derived
+                "pesticide_name": "Bifenthrin",
+                "pesticide_group": "pyrethroid",
                 "reading": 21.0,
                 "limits": 10.0,
-                "sample_code": "SAMPLE_001"
+                "sample_code": "SAMPLE_001",
+                "collection_date": "2025-06-15"
             }
         }
 
 class BatchPredictionInput(BaseModel):
-    """Input model for batch pesticide sample predictions"""
-    samples: List[PesticideSampleInput] = Field(..., description="List of samples to predict")
+    samples: list[PesticideSampleInput]
     
-    @validator('samples')
-    def validate_samples(cls, v):
-        if not v:
-            raise ValueError('At least one sample is required')
-        if len(v) > 100:  # Limit batch size
-            raise ValueError('Maximum 100 samples per batch')
-        return v
+    class Config:
+        schema_extra = {
+            "example": {
+                "samples": [
+                    {
+                        "vegetable": "tomato",
+                        "pesticide_name": "Bifenthrin",
+                        "reading": 21.0,
+                        "limits": 10.0,
+                        "collection_date": "2025-06-15"
+                    },
+                    {
+                        "vegetable": "cucumber",
+                        "pesticide_name": "Pyridaben",
+                        "reading": 8.5,
+                        "limits": 15.0,
+                        "collection_date": "2025-01-20"
+                    }
+                ]
+            }
+        }
+
 
 class SampleInfo(BaseModel):
     """Sample information in prediction response"""
