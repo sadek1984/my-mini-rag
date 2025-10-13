@@ -10,10 +10,101 @@ import json
 from typing import Dict, Any, Optional
 from datetime import datetime
 import re
+from scipy.stats import f_oneway
+import plotly.express as px
+import plotly.graph_objects as go
 
 # ============================================================================
 # PAGE CONFIGURATION
 # ============================================================================
+
+def perform_anova_analysis(df, group_by, target_col='reading'):
+    """
+    Perform ANOVA analysis grouped by specified column
+    
+    Parameters:
+    -----------
+    df : DataFrame
+        Your pesticide data
+    group_by : str
+        'season' or 'vegetable_english'
+    target_col : str
+        Column to analyze (default: 'reading')
+    
+    Returns:
+    --------
+    dict with f_stat, p_value, groups_data, summary
+    """
+    
+    # Group data
+    groups = df.groupby(group_by)[target_col].apply(list)
+    
+    # Perform ANOVA
+    f_stat, p_value = f_oneway(*groups.values)
+    
+    # Calculate group statistics
+    summary = df.groupby(group_by)[target_col].agg([
+        ('count', 'count'),
+        ('mean', 'mean'),
+        ('std', 'std'),
+        ('min', 'min'),
+        ('max', 'max')
+    ]).round(4)
+    
+    return {
+        'f_statistic': f_stat,
+        'p_value': p_value,
+        'groups_data': groups,
+        'summary': summary,
+        'significant': p_value < 0.05
+    }
+
+def create_anova_visualization(df, group_by, target_col='reading'):
+    """Create visualization for ANOVA results"""
+    
+    # Box plot
+    fig = px.box(
+        df, 
+        x=group_by, 
+        y=target_col,
+        color=group_by,
+        title=f'{target_col.title()} Distribution by {group_by.replace("_", " ").title()}',
+        labels={group_by: group_by.replace('_', ' ').title(), 
+                target_col: target_col.title()}
+    )
+    
+    fig.update_layout(
+        showlegend=False,
+        height=500
+    )
+    
+    return fig
+
+def create_means_comparison_plot(summary_df, group_by):
+    """Create bar plot comparing means with error bars"""
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Bar(
+        x=summary_df.index,
+        y=summary_df['mean'],
+        error_y=dict(
+            type='data',
+            array=summary_df['std'],
+            visible=True
+        ),
+        marker_color='lightblue',
+        name='Mean ± Std Dev'
+    ))
+    
+    fig.update_layout(
+        title=f'Mean Readings by {group_by.replace("_", " ").title()}',
+        xaxis_title=group_by.replace('_', ' ').title(),
+        yaxis_title='Mean Reading',
+        height=400
+    )
+    
+    return fig
 
 st.set_page_config(
     page_title="🔮 Predictive Analytics Dashboard",
@@ -1077,9 +1168,231 @@ def display_download_options(result: Dict, year: str, data_frame: list):
                 use_container_width=True
             )
 
+def statistical_analysis_page():
+    """Main statistical analysis page with dynamic switching"""
+    
+    st.title("📊 Statistical Analysis - ANOVA Testing")
+    
+    # Load your data
+    @st.cache_data
+    def load_data():
+        # Replace with your actual data loading
+        df = pd.read_excel('/Users/a12/mini-rag/src/data/processed_data_output.xlsx')
+        return df
+    
+    df = load_data()
+    
+    # ===== DYNAMIC SWITCHING CONTROLS =====
+    st.sidebar.header("🔧 Analysis Controls")
+    
+    # Main switch: Vegetables vs Seasons
+    analysis_mode = st.sidebar.radio(
+        "Group Analysis By:",
+        options=['Season', 'Vegetable'],
+        index=0,
+        help="Choose whether to compare across seasons or vegetables"
+    )
+    
+    # Map selection to column name
+    group_column = 'season' if analysis_mode == 'Season' else 'vegetable_english'
+    
+    # Optional filters
+    st.sidebar.subheader("🔍 Filters")
+    
+    if analysis_mode == 'Season':
+        # When analyzing by season, allow vegetable selection
+        available_vegetables = sorted(df['vegetable_english'].unique())
+        selected_vegetables = st.sidebar.multiselect(
+            "Filter by Vegetables:",
+            options=available_vegetables,
+            default=available_vegetables[:5] if len(available_vegetables) > 5 else available_vegetables
+        )
+        
+        if selected_vegetables:
+            df_filtered = df[df['vegetable_english'].isin(selected_vegetables)]
+        else:
+            df_filtered = df.copy()
+            
+    else:  # Vegetable mode
+        # When analyzing by vegetable, allow season selection
+        available_seasons = sorted(df['season'].unique())
+        selected_seasons = st.sidebar.multiselect(
+            "Filter by Seasons:",
+            options=available_seasons,
+            default=available_seasons
+        )
+        
+        if selected_seasons:
+            df_filtered = df[df['season'].isin(selected_seasons)]
+        else:
+            df_filtered = df.copy()
+    
+    # Additional filter: Pesticide type (optional)
+    selected_pesticides = st.sidebar.multiselect(
+        "Filter by Pesticide:",
+        options=sorted(df['pesticide'].unique()),
+        default=[]
+    )
+    
+    if selected_pesticides:
+        df_filtered = df_filtered[df_filtered['pesticide'].isin(selected_pesticides)]
+    
+    # Target variable selection
+    target_col = st.sidebar.selectbox(
+        "Analyze:",
+        options=['reading', 'exceedance_ratio', 'limits'],
+        index=0
+    )
+    
+    # ===== PERFORM ANALYSIS =====
+    st.header(f"Analysis: {target_col.replace('_', ' ').title()} by {analysis_mode}")
+    
+    if len(df_filtered) < 10:
+        st.warning("⚠️ Not enough data for analysis. Please adjust filters.")
+        return
+    
+    # Check if we have multiple groups
+    n_groups = df_filtered[group_column].nunique()
+    if n_groups < 2:
+        st.warning(f"⚠️ Need at least 2 {analysis_mode.lower()}s for comparison.")
+        return
+    
+    # Perform ANOVA
+    with st.spinner("Calculating ANOVA..."):
+        results = perform_anova_analysis(df_filtered, group_column, target_col)
+    
+    # ===== DISPLAY RESULTS =====
+    
+    # Key metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("F-Statistic", f"{results['f_statistic']:.4f}")
+    
+    with col2:
+        st.metric("P-Value", f"{results['p_value']:.6f}")
+    
+    with col3:
+        significance = "✅ Yes" if results['significant'] else "❌ No"
+        st.metric("Significant?", significance)
+    
+    with col4:
+        st.metric("Groups", n_groups)
+    
+    # Interpretation
+    st.subheader("📋 Interpretation")
+    
+    if results['significant']:
+        st.success(f"""
+        **Statistically Significant Difference Found!**
+        
+        - The {analysis_mode.lower()}s have significantly different {target_col} values
+        - P-value ({results['p_value']:.6f}) < 0.05
+        - F-statistic: {results['f_statistic']:.4f}
+        
+        **Conclusion:** {analysis_mode} DOES affect {target_col}!
+        """)
+    else:
+        st.info(f"""
+        **No Significant Difference Found**
+        
+        - The {analysis_mode.lower()}s have similar {target_col} values
+        - P-value ({results['p_value']:.6f}) ≥ 0.05
+        - F-statistic: {results['f_statistic']:.4f}
+        
+        **Conclusion:** {analysis_mode} does NOT significantly affect {target_col}
+        """)
+    
+    # Summary statistics table
+    st.subheader("📊 Group Statistics")
+    st.dataframe(
+        results['summary'].style.highlight_max(axis=0, color='lightgreen')
+                                .highlight_min(axis=0, color='lightcoral'),
+        use_container_width=True
+    )
+    
+    # Visualizations
+    st.subheader("📈 Visualizations")
+    
+    tab1, tab2 = st.tabs(["Box Plot", "Means Comparison"])
+    
+    with tab1:
+        fig_box = create_anova_visualization(df_filtered, group_column, target_col)
+        st.plotly_chart(fig_box, use_container_width=True)
+    
+    with tab2:
+        fig_means = create_means_comparison_plot(results['summary'], group_column)
+        st.plotly_chart(fig_means, use_container_width=True)
+    
+    # Post-hoc analysis (if significant)
+    if results['significant'] and n_groups > 2:
+        st.subheader("🔬 Post-Hoc Analysis")
+        
+        with st.expander("View Pairwise Comparisons (Tukey HSD)"):
+            from scipy.stats import tukey_hsd
+            
+            groups_list = [group.values for name, group in df_filtered.groupby(group_column)[target_col]]
+            
+            try:
+                res = tukey_hsd(*groups_list)
+                
+                # Create comparison matrix
+                group_names = sorted(df_filtered[group_column].unique())
+                comparison_df = pd.DataFrame(
+                    res.pvalue,
+                    index=group_names,
+                    columns=group_names
+                )
+                
+                st.write("**P-values for pairwise comparisons:**")
+                st.dataframe(
+                    comparison_df.style.background_gradient(cmap='RdYlGn_r', vmin=0, vmax=0.1),
+                    use_container_width=True
+                )
+                
+                st.caption("Green = significant difference (p < 0.05), Red = no significant difference")
+                
+            except Exception as e:
+                st.warning(f"Could not perform Tukey HSD: {e}")
+    
+    # Export results
+    st.subheader("💾 Export Results")
+    
+    # Prepare export data
+    export_data = {
+        'Analysis Type': f'ANOVA - {analysis_mode}',
+        'F-Statistic': results['f_statistic'],
+        'P-Value': results['p_value'],
+        'Significant': results['significant'],
+        'Sample Size': len(df_filtered),
+        'Number of Groups': n_groups
+    }
+    
+    export_df = pd.DataFrame([export_data])
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        csv = export_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Summary (CSV)",
+            data=csv,
+            file_name=f"anova_{analysis_mode.lower()}_{target_col}.csv",
+            mime="text/csv"
+        )
+    
+    with col2:
+        csv_detailed = results['summary'].to_csv()
+        st.download_button(
+            label="📥 Download Detailed Stats (CSV)",
+            data=csv_detailed,
+            file_name=f"anova_detailed_{analysis_mode.lower()}_{target_col}.csv",
+            mime="text/csv"
+        )
+
 # ============================================================================
 # RUN APPLICATION
 # ============================================================================
 
 if __name__ == "__main__":
-    main()
+    statistical_analysis_page()

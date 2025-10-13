@@ -160,3 +160,4 @@ def generate_statistical_insights(df):
 insights = generate_statistical_insights(df)
 for insight in insights:
     print(f"\n{insight['message']}")
+
