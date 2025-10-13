@@ -14,38 +14,36 @@ df['document_date'] = pd.to_datetime(df['document_date'])
 def mann_kendall_trend(df, pesticide_group=None):
     """Detect trends in readings over time"""
 
-    # Filter data by group if provided
     if pesticide_group:
         data = df[df['pesticide_group'] == pesticide_group].copy()
     else:
         data = df.copy()
-
+    
     # Aggregate by month
-    monthly = data.groupby(data['document_date'].dt.to_period('M'))['reading'].mean()
-
-    # Run Mann-Kendall test only if there’s enough data
-    if len(monthly) > 1:
-        result = mk.original_test(monthly.values)
-    else:
-        result = None
-
-    # Prepare trend data safely
-    if result:
-        trend_data = {
-            'trend': result.trend,
-            'p_value': result.p,
-            'tau': result.Tau,
-            'significant': result.h is True
-        }
-    else:
-        trend_data = {
-            'trend': 'insufficient data',
+    monthly = data.groupby([data['document_date'].dt.to_period('M')])['reading'].mean()
+    
+    # ✅ Check if we have enough data
+    if len(monthly) < 3:
+        return {
+            'trend': 'insufficient_data',
             'p_value': None,
             'tau': None,
-            'significant': False
+            'significant': False,
+            'message': f'Only {len(monthly)} month(s) of data - need at least 3',
+            'data_points': len(monthly)
         }
-
-    return trend_data
+    
+    # Run Mann-Kendall test
+    result = mk.original_test(monthly.values)
+    
+    return {
+        'trend': result.trend,  # 'increasing', 'decreasing', or 'no trend'
+        'p_value': result.p,
+        'tau': result.Tau,
+        'significant': result.p < 0.05,
+        'data_points': len(monthly),
+        'message': f'Analyzed {len(monthly)} months of data'
+    }
 
 # Test for pyrethroids
 pyrethroid_trend = mann_kendall_trend(df, pesticide_group='pyrethroid')
@@ -113,50 +111,48 @@ def generate_statistical_insights(df):
     """Generate statistical insights for pesticide readings"""
 
     insights = []
-
+    
     # Test all pesticide groups for trends
     for group in df['pesticide_group'].unique():
         trend = mann_kendall_trend(df, pesticide_group=group)
-
-        if trend and trend.get('significant'):
+        
+        if trend and trend.get('trend') == 'insufficient_data':
+            # ⚠️ Not enough data
+            insights.append({
+                'type': 'trend',
+                'pesticide_group': group,
+                'message': f"ℹ️ {group}: {trend['message']}",
+                'severity': 'low'
+            })
+        elif trend and trend['significant']:
+            # ✅ Significant trend found
             direction = "increasing" if trend['trend'] == 'increasing' else "decreasing"
             insights.append({
                 'type': 'trend',
                 'pesticide_group': group,
-                'message': f"⚠️ Significant {direction} trend detected in {group} readings (p={trend['p_value']:.3f})",
+                'message': f"⚠️ Significant {direction} trend in {group} (p={trend['p_value']:.3f}, {trend['data_points']} months)",
                 'severity': 'high' if direction == 'increasing' else 'medium'
             })
-        else:
-            # Optional: record that data was insufficient
+        elif trend:
+            # ✅ Test ran, but no significant trend (STABLE - good!)
             insights.append({
                 'type': 'trend',
                 'pesticide_group': group,
-                'message': f"ℹ️ No significant trend detected for {group} (insufficient or stable data)",
+                'message': f"✅ {group}: Stable over time (no significant trend, {trend['data_points']} months analyzed)",
                 'severity': 'low'
             })
-
+    
     # Seasonal analysis
     seasonal = seasonal_anova(df)
-    if seasonal and seasonal.get('significant'):
+    if seasonal and seasonal['significant']:
         highest_season = max(seasonal['season_means'], key=seasonal['season_means'].get)
         insights.append({
             'type': 'seasonal',
-            'message': f"📊 Significant seasonal variation detected (p={seasonal['p_value']:.3f}). Highest readings in season {highest_season}",
+            'message': f"📊 Significant seasonal variation (p={seasonal['p_value']:.3f}). Highest in season {highest_season}",
             'severity': 'medium',
             'season_data': seasonal['season_means']
         })
-
-    # Vegetable category analysis
-    veg = vegetable_category_anova(df)
-    if veg and veg.get('significant'):
-        highest_cat = max(veg['category_means'], key=veg['category_means'].get)
-        insights.append({
-            'type': 'category',
-            'message': f"🥬 Significant differences across vegetable categories (p={veg['p_value']:.3f}). Highest in {highest_cat}",
-            'severity': 'medium',
-            'category_data': veg['category_means']
-        })
-
+    
     return insights
 
 
