@@ -24,7 +24,7 @@ from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from services.pesticide_prediction_service import PesticidePredictionService
 import os
-from routes.analytics import analytics_router
+from routes import analytics, risk_assessment
 
 app = FastAPI(
     title="Pesticide & ISO RAG System",
@@ -174,7 +174,9 @@ app.include_router(risk_router, prefix="/api/v1")
 app.include_router(iso.router)
 app.include_router(timeseries_router)
 app.include_router(dashboard_router, prefix="/api/v1")
-app.include_router(analytics_router)
+app.include_router(analytics.analytics_router)
+app.include_router(risk_assessment.risk_ass_router, tags=["Risk Assessment"])
+
 
 # Include prediction router
 if prediction_router:
