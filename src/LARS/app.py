@@ -59,29 +59,115 @@ def perform_anova_analysis(df, group_by, target_col='reading'):
         'significant': p_value < 0.05
     }
 
-def create_anova_visualization(df, group_by, target_col='reading'):
-    """Create visualization for ANOVA results"""
+def create_anova_visualization(df: pd.DataFrame, group_by: str, target_col: str = 'reading'):
+    """Create box plot visualization for ANOVA results with custom colors"""
     
-    # Box plot
+    # ✅ Define color mapping for vegetables
+    vegetable_colors = {
+        'tomato': '#FF6B6B',
+        'tomatoes': '#FF6B6B',
+        'cucumber': '#51CF66',
+        'cucumbers': '#51CF66',
+        'pepper': '#FFA94D',
+        'peppers': '#FFA94D',
+        'lettuce': '#94D82D',
+        'parsley': '#2F9E44',
+        'carrot': '#FF922B',
+        'carrots': '#FF922B',
+        'potato': '#A0785A',
+        'potatoes': '#A0785A',
+        'eggplant': '#7950F2',
+        'eggplants': '#7950F2',
+        'spinach': '#37B24D',
+        'cabbage': '#74C0FC',
+        'onion': '#E7F5FF',
+        'onions': '#E7F5FF',
+        'garlic': '#F8F9FA',
+        'strawberry': '#FF6B9D',
+        'strawberries': '#FF6B9D',
+        'grape': '#9775FA',
+        'grapes': '#9775FA',
+        'apple': '#FA5252',
+        'apples': '#FA5252',
+        'orange': '#FF922B',
+        'oranges': '#FF922B'
+    }
+    
+    # Season colors
+    season_colors = {
+        'Winter': '#339AF0',
+        'Spring': '#51CF66',
+        'Summer': '#FF922B',
+        'Fall': '#FA5252',
+        'Autumn': '#FA5252'
+    }
+    
+    # Determine color map based on grouping
+    if group_by == 'vegetable_english':
+        # Create color map for vegetables
+        unique_veggies = df[group_by].unique()
+        color_map = {}
+        for veg in unique_veggies:
+            veg_lower = str(veg).lower()
+            color_map[veg] = vegetable_colors.get(veg_lower, '#868E96')  # Default gray
+    elif group_by == 'season':
+        # Use season colors
+        color_map = season_colors
+    else:
+        color_map = None
+    
+    # Create figure with colors
     fig = px.box(
         df, 
         x=group_by, 
         y=target_col,
         color=group_by,
-        title=f'{target_col.title()} Distribution by {group_by.replace("_", " ").title()}',
-        labels={group_by: group_by.replace('_', ' ').title(), 
-                target_col: target_col.title()}
+        color_discrete_map=color_map,
+        title=f'{target_col.replace("_", " ").title()} Distribution by {group_by.replace("_", " ").title()}',
+        labels={
+            group_by: group_by.replace('_', ' ').title(), 
+            target_col: target_col.replace('_', ' ').title()
+        },
+        points="outliers"  # Show outlier points
     )
     
     fig.update_layout(
         showlegend=False,
-        height=500
+        height=500,
+        hovermode='x unified',
+        xaxis_title=group_by.replace('_', ' ').title(),
+        yaxis_title=target_col.replace('_', ' ').title()
     )
     
     return fig
 
-def create_means_comparison_plot(summary_df, group_by):
-    """Create bar plot comparing means with error bars"""
+def create_means_comparison_plot(summary_df: pd.DataFrame, group_by: str):
+    """Create bar plot comparing means with error bars and colors"""
+    
+    # Same color mappings as above
+    vegetable_colors = {
+        'tomato': '#FF6B6B', 'cucumber': '#51CF66', 'pepper': '#FFA94D',
+        'lettuce': '#94D82D', 'parsley': '#2F9E44', 'carrot': '#FF922B',
+        'potato': '#A0785A', 'eggplant': '#7950F2', 'spinach': '#37B24D',
+        'cabbage': '#74C0FC', 'strawberry': '#FF6B9D', 'grape': '#9775FA',
+        'apple': '#FA5252', 'orange': '#FF922B'
+    }
+    
+    season_colors = {
+        'Winter': '#339AF0',
+        'Spring': '#51CF66',
+        'Summer': '#FF922B',
+        'Fall': '#FA5252',
+        'Autumn': '#FA5252'
+    }
+    
+    # Determine colors
+    if group_by == 'vegetable_english':
+        colors = [vegetable_colors.get(str(idx).lower(), '#868E96') for idx in summary_df.index]
+    elif group_by == 'season':
+        colors = [season_colors.get(str(idx), '#868E96') for idx in summary_df.index]
+    else:
+        colors = 'lightblue'
     
     fig = go.Figure()
     
@@ -93,15 +179,18 @@ def create_means_comparison_plot(summary_df, group_by):
             array=summary_df['std'],
             visible=True
         ),
-        marker_color='lightblue',
-        name='Mean ± Std Dev'
+        marker_color=colors,
+        name='Mean ± Std Dev',
+        text=summary_df['mean'].round(2),
+        textposition='outside'
     ))
     
     fig.update_layout(
-        title=f'Mean Readings by {group_by.replace("_", " ").title()}',
+        title=f'Mean {group_by.replace("_", " ").title()} Readings',
         xaxis_title=group_by.replace('_', ' ').title(),
         yaxis_title='Mean Reading',
-        height=400
+        height=400,
+        showlegend=False
     )
     
     return fig
@@ -319,7 +408,35 @@ def extract_year_from_text(text: str) -> Optional[str]:
         return year if year in AVAILABLE_YEARS else None
     
     return None
-
+def map_season_names(df):
+    """Convert numeric seasons to text names"""
+    season_mapping = {
+        0: 'Winter',
+        1: 'Spring', 
+        2: 'Summer',
+        3: 'Fall',
+        '0': 'Winter',
+        '1': 'Spring',
+        '2': 'Summer', 
+        '3': 'Fall',
+        'winter': 'Winter',
+        'spring': 'Spring',
+        'summer': 'Summer',
+        'fall': 'Fall',
+        'autumn': 'Fall'
+    }
+    
+    if 'season' in df.columns:
+        # Create new column with mapped names
+        df['season_name'] = df['season'].map(season_mapping)
+        
+        # If mapping failed (some values not in dict), keep original
+        df['season_name'] = df['season_name'].fillna(df['season'])
+        
+        # Use season_name for analysis
+        df['season'] = df['season_name']
+        
+    return df
 # ============================================================================
 # SESSION STATE INITIALIZATION
 # ============================================================================
@@ -358,40 +475,65 @@ Ask your question to get started! 🚀"""
 # ============================================================================
 # MAIN APPLICATION
 # ============================================================================
+def get_api_client():
+    """Get API client instance (not cached to avoid issues)"""
+    return APIClient()
 
 def main():
     """Main application entry point"""
     
-    initialize_session_state()
-    api_client = get_api_client()
+    try:
+        initialize_session_state()
+        api_client = get_api_client()
+        
+        # App header with emoji
+        st.title("🔮 Predictive Analytics Dashboard")
+        st.markdown("---")
+        
+        if 'page_nav' in st.session_state:
+            st.session_state.current_page = st.session_state.page_nav
+            del st.session_state.page_nav
+        
+        # Sidebar
+        render_sidebar(api_client)
+        
+        # Get selected page
+        page = st.session_state.get('current_page', '💬 AI Assistant')
+        
+        # Debug: Show current page
+        # st.sidebar.write(f"DEBUG: Current page = {page}")  # Uncomment for debugging
+        
+        # Route to pages
+        try:
+            if page == "🏠 Home":
+                show_home_page(api_client)
+            elif page == "🔮 Predictions":
+                show_predictions_page(api_client)
+            elif page == "💬 AI Assistant":
+                show_chat_page(api_client)
+            elif page == "📊 Statistical Insights":
+                show_statistical_insights_page(api_client)
+            elif page == "📈 ANOVA Analysis":
+                show_anova_analysis_page(api_client)
+            elif page == "🎯 Advanced Insights":
+                show_advanced_insights_page(api_client)
+            else:
+                st.error(f"Unknown page: {page}")
+                st.info("Available pages: Home, AI Assistant, Predictions, Statistical Insights, ANOVA Analysis, Advanced Insights")
+        
+        except Exception as page_error:
+            st.error(f"❌ Error loading page: {str(page_error)}")
+            st.exception(page_error)
+            
+            # Show fallback
+            st.markdown("---")
+            st.markdown("### 🏠 Welcome")
+            st.info("There was an error loading the selected page. Please select another page from the sidebar.")
     
-    # App header with emoji
-    st.title("🔮 Predictive Analytics Dashboard")
-    st.markdown("---")
-    if 'page_nav' in st.session_state:
-        st.session_state.current_page = st.session_state.page_nav
-        del st.session_state.page_nav
-    
-    # Sidebar
-    render_sidebar(api_client)
-    
-    # Get selected page
-    page = st.session_state.get('current_page', '💬 AI Assistant')
-    
-    # Route to pages
-    if page == "🏠 Home":
-        show_home_page(api_client)
-    elif page == "🔮 Predictions":
-        show_predictions_page(api_client)
-    elif page == "💬 AI Assistant":
-        show_chat_page(api_client)
-    elif page == "📊 Statistical Insights":
-        show_statistical_insights_page(api_client)
-
-@st.cache_resource
-def get_api_client():
-    """Get cached API client instance"""
-    return APIClient()
+    except Exception as e:
+        st.error(f"❌ Critical Error: {str(e)}")
+        st.exception(e)
+        st.info("Please check the terminal for detailed error messages.")
 
 # ============================================================================
 # SIDEBAR
@@ -426,9 +568,30 @@ def render_sidebar(api_client):
         
         # Navigation
         st.markdown("## 📍 Navigate to:")
+        
+        # ✅ FIX: Use index to set default page
+        page_options = [
+            "🏠 Home", 
+            "💬 AI Assistant", 
+            "🔮 Predictions", 
+            "📊 Statistical Insights",
+            "📈 ANOVA Analysis",
+            "🎯 Advanced Insights"
+        ]
+        
+        # Get current page or default to Home
+        current_page = st.session_state.get('current_page', '🏠 Home')
+        
+        # Find index of current page
+        try:
+            default_index = page_options.index(current_page)
+        except ValueError:
+            default_index = 0  # Default to Home if not found
+        
         page = st.selectbox(
             "Select page:",
-            ["🏠 Home", "💬 AI Assistant", "🔮 Predictions", "📊 Statistical Insights"],
+            page_options,
+            index=default_index,
             key="current_page"
         )
 
@@ -448,6 +611,7 @@ def show_home_page(api_client):
         This application provides:
         
         - 📊 **Statistical Insights** - Mann-Kendall trends, ANOVA analysis
+        - 📈 **ANOVA Analysis** - Compare readings by seasons/vegetables
         - 🔮 **Enhanced Risk Assessment** - Monte Carlo + Bayesian analysis
         - 💬 **AI Assistant** - Natural language queries
         - 📈 **Real-time Dashboards** - Executive, Laboratory views
@@ -464,6 +628,10 @@ def show_home_page(api_client):
         # ✅ Use unique keys for buttons and set state differently
         if st.button("📊 Statistical Insights", use_container_width=True, type="primary", key="home_btn_insights"):
             st.session_state.page_nav = "📊 Statistical Insights"
+            st.rerun()
+
+        if st.button("📈 ANOVA Analysis", use_container_width=True, type="primary", key="home_btn_anova"):
+            st.session_state.page_nav = "📈 ANOVA Analysis"
             st.rerun()
         
         if st.button("💬 AI Assistant", use_container_width=True, type="secondary", key="home_btn_assistant"):
@@ -1168,19 +1336,167 @@ def display_download_options(result: Dict, year: str, data_frame: list):
                 use_container_width=True
             )
 
-def statistical_analysis_page():
-    """Main statistical analysis page with dynamic switching"""
+def show_anova_analysis_page(api_client):
+    """ANOVA Analysis page with dynamic switching and Excel support"""
     
-    st.title("📊 Statistical Analysis - ANOVA Testing")
+    st.title("📈 ANOVA Analysis - Statistical Testing")
+    
+    st.info("""
+    **What is ANOVA?**
+    Analysis of Variance (ANOVA) tests if there are statistically significant differences 
+    between groups (seasons or vegetables). 
+    
+    - **F-statistic**: Measures variance between groups vs within groups
+    - **P-value < 0.05**: Groups ARE significantly different
+    - **P-value ≥ 0.05**: Groups are NOT significantly different
+    """)
     
     # Load your data
     @st.cache_data
-    def load_data():
-        # Replace with your actual data loading
-        df = pd.read_excel('/Users/a12/mini-rag/src/data/processed_data_output.xlsx')
-        return df
+    def load_data_from_path():
+        """Load pesticide data from predefined paths"""
+        try:
+            # Try multiple possible paths
+            possible_paths = [
+                'data/cleaned_data.csv',
+                '../data/cleaned_data.csv',
+                '../../data/cleaned_data.csv',
+                '/app/data/cleaned_data.csv',
+                'data/processed_data_output.xlsx',
+                '../data/processed_data_output.xlsx',
+                '../../data/processed_data_output.xlsx'
+            ]
+            
+            for path in possible_paths:
+                try:
+                    if path.endswith('.csv'):
+                        df = pd.read_csv(path)
+                    elif path.endswith(('.xlsx', '.xls')):
+                        df = pd.read_excel(path)
+                    else:
+                        continue
+                    
+                    st.success(f"✅ Data loaded from: {path}")
+                    return df
+                except FileNotFoundError:
+                    continue
+                except Exception as e:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            return None
     
-    df = load_data()
+    # Try to load from predefined paths first
+    df = load_data_from_path()
+    
+    # ✅ REMOVED WARNING MESSAGE - If no data found, show upload option directly
+    if df is None:
+        st.markdown("### 📤 Upload Your Data")
+        
+        # File uploader with multiple file types
+        uploaded_file = st.file_uploader(
+            "Upload CSV or Excel file",
+            type=['csv', 'xlsx', 'xls'],
+            help="Drag and drop file here (Limit 200MB per file)"
+        )
+        
+        if uploaded_file:
+            try:
+                # Determine file type and read accordingly
+                file_extension = uploaded_file.name.split('.')[-1].lower()
+                
+                with st.spinner(f"📂 Loading {file_extension.upper()} file..."):
+                    if file_extension == 'csv':
+                        df = pd.read_csv(uploaded_file)
+                    elif file_extension in ['xlsx', 'xls']:
+                        # For Excel files, allow sheet selection
+                        excel_file = pd.ExcelFile(uploaded_file)
+                        
+                        if len(excel_file.sheet_names) > 1:
+                            st.info(f"📋 Found {len(excel_file.sheet_names)} sheets in the Excel file")
+                            selected_sheet = st.selectbox(
+                                "Select sheet to analyze:",
+                                options=excel_file.sheet_names,
+                                index=0
+                            )
+                        else:
+                            selected_sheet = excel_file.sheet_names[0]
+                        
+                        df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
+                    else:
+                        st.error(f"❌ Unsupported file type: {file_extension}")
+                        return
+                
+                st.success(f"✅ Data uploaded successfully from {uploaded_file.name}!")
+                
+                # Show data preview
+                with st.expander("👀 Preview Data"):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Rows", len(df))
+                    with col2:
+                        st.metric("Total Columns", len(df.columns))
+                    with col3:
+                        st.metric("Memory Usage", f"{df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+                    
+                    st.dataframe(df.head(10), use_container_width=True)
+                    
+                    st.write("**Column Names:**")
+                    st.write(", ".join(df.columns.tolist()))
+                
+            except Exception as e:
+                st.error(f"❌ Error reading file: {str(e)}")
+                with st.expander("Error Details"):
+                    st.exception(e)
+                return
+        else:
+            # No file uploaded
+            st.info("Expected columns: vegetable_english, season, pesticide, reading, exceedance_ratio, limits")
+            return
+    
+    df = map_season_names(df)
+    
+    # ===== DATA VALIDATION =====
+    # Check for required columns
+    required_cols = ['vegetable_english', 'season', 'pesticide', 'reading']
+    available_cols = df.columns.tolist()
+    missing_cols = [col for col in required_cols if col not in available_cols]
+    
+    if missing_cols:
+        st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
+        
+        with st.expander("🔍 Column Mapping Helper"):
+            st.write("**Required columns:**", required_cols)
+            st.write("**Available columns:**", available_cols)
+            
+            st.markdown("**Suggestions:**")
+            st.markdown("- `vegetable_english` → vegetable name column")
+            st.markdown("- `season` → season/quarter/period column")
+            st.markdown("- `pesticide` → pesticide name column")
+            st.markdown("- `reading` → measured concentration value")
+            
+            # Allow column renaming
+            st.markdown("#### 🔄 Quick Column Rename")
+            
+            col_mapping = {}
+            for required_col in required_cols:
+                if required_col not in available_cols:
+                    selected_col = st.selectbox(
+                        f"Map '{required_col}' to:",
+                        options=['None'] + available_cols,
+                        key=f"map_{required_col}"
+                    )
+                    if selected_col != 'None':
+                        col_mapping[selected_col] = required_col
+            
+            if st.button("Apply Column Mapping"):
+                df = df.rename(columns=col_mapping)
+                st.success("✅ Columns renamed successfully!")
+                st.rerun()
+        
+        return
     
     # ===== DYNAMIC SWITCHING CONTROLS =====
     st.sidebar.header("🔧 Analysis Controls")
@@ -1201,64 +1517,101 @@ def statistical_analysis_page():
     
     if analysis_mode == 'Season':
         # When analyzing by season, allow vegetable selection
-        available_vegetables = sorted(df['vegetable_english'].unique())
+        available_vegetables = sorted(df['vegetable_english'].dropna().unique())
         selected_vegetables = st.sidebar.multiselect(
             "Filter by Vegetables:",
             options=available_vegetables,
-            default=available_vegetables[:5] if len(available_vegetables) > 5 else available_vegetables
+            default=[]  # ✅ Start with empty to avoid over-filtering
         )
         
         if selected_vegetables:
-            df_filtered = df[df['vegetable_english'].isin(selected_vegetables)]
+            df_filtered = df[df['vegetable_english'].isin(selected_vegetables)].copy()
         else:
             df_filtered = df.copy()
             
     else:  # Vegetable mode
         # When analyzing by vegetable, allow season selection
-        available_seasons = sorted(df['season'].unique())
+        available_seasons = sorted(df['season'].dropna().unique())
         selected_seasons = st.sidebar.multiselect(
             "Filter by Seasons:",
             options=available_seasons,
-            default=available_seasons
+            default=[]  # ✅ Start with empty
         )
         
         if selected_seasons:
-            df_filtered = df[df['season'].isin(selected_seasons)]
+            df_filtered = df[df['season'].isin(selected_seasons)].copy()
         else:
             df_filtered = df.copy()
     
     # Additional filter: Pesticide type (optional)
+    available_pesticides = sorted(df['pesticide'].dropna().unique())
     selected_pesticides = st.sidebar.multiselect(
         "Filter by Pesticide:",
-        options=sorted(df['pesticide'].unique()),
-        default=[]
+        options=available_pesticides,
+        default=[],
+        help="Leave empty to analyze all pesticides"
     )
     
     if selected_pesticides:
-        df_filtered = df_filtered[df_filtered['pesticide'].isin(selected_pesticides)]
+        df_filtered = df_filtered[df_filtered['pesticide'].isin(selected_pesticides)].copy()
     
     # Target variable selection
+    available_targets = ['reading']
+    if 'exceedance_ratio' in df.columns:
+        available_targets.append('exceedance_ratio')
+    if 'limits' in df.columns:
+        available_targets.append('limits')
+    
     target_col = st.sidebar.selectbox(
         "Analyze:",
-        options=['reading', 'exceedance_ratio', 'limits'],
+        options=available_targets,
         index=0
     )
+    
+    # Remove rows with NaN in target column
+    df_filtered = df_filtered.dropna(subset=[target_col, group_column])
     
     # ===== PERFORM ANALYSIS =====
     st.header(f"Analysis: {target_col.replace('_', ' ').title()} by {analysis_mode}")
     
+    # Show current filter status
+    with st.expander("📊 Current Filters Applied"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**Total Samples:** {len(df):,}")
+            st.write(f"**Filtered Samples:** {len(df_filtered):,}")
+        with col2:
+            st.write(f"**Analysis Mode:** {analysis_mode}")
+            st.write(f"**Target Variable:** {target_col}")
+            if selected_pesticides:
+                st.write(f"**Pesticide Filter:** {', '.join(selected_pesticides)}")
+    
+    # ✅ IMPROVED: More helpful minimum samples message
     if len(df_filtered) < 10:
         st.warning("⚠️ Not enough data for analysis. Please adjust filters.")
+        st.info(f"""
+        **Current situation:**
+        - Filtered samples: {len(df_filtered)}
+        - Minimum required: 10 samples
+        
+        **Suggestions:**
+        - Remove some filters (especially pesticide filter)
+        - Select more vegetables or seasons
+        - Try analyzing all data without filters
+        """)
         return
     
     # Check if we have multiple groups
     n_groups = df_filtered[group_column].nunique()
     if n_groups < 2:
         st.warning(f"⚠️ Need at least 2 {analysis_mode.lower()}s for comparison.")
+        unique_groups = df_filtered[group_column].unique().tolist()
+        st.info(f"Current {analysis_mode.lower()}(s) in filtered data: {', '.join(map(str, unique_groups))}")
+        st.info("💡 Tip: Remove some filters to get more groups")
         return
     
     # Perform ANOVA
-    with st.spinner("Calculating ANOVA..."):
+    with st.spinner("🔄 Calculating ANOVA..."):
         results = perform_anova_analysis(df_filtered, group_column, target_col)
     
     # ===== DISPLAY RESULTS =====
@@ -1317,6 +1670,7 @@ def statistical_analysis_page():
     tab1, tab2 = st.tabs(["Box Plot", "Means Comparison"])
     
     with tab1:
+        # ✅ PASS df_filtered INSTEAD OF results
         fig_box = create_anova_visualization(df_filtered, group_column, target_col)
         st.plotly_chart(fig_box, use_container_width=True)
     
@@ -1390,9 +1744,733 @@ def statistical_analysis_page():
             mime="text/csv"
         )
 
+def show_advanced_insights_page(api_client):
+    """Advanced insights with risk combinations and forecasting"""
+    
+    st.title("🎯 Advanced Risk Intelligence")
+    
+    st.markdown("""
+    **Strategic Analytics for Lab Operations**
+    - Identify high-risk vegetable-pesticide combinations
+    - Forecast seasonal contamination risks
+    - Optimize testing schedules and resource allocation
+    """)
+    
+    # Load data
+    @st.cache_data
+    def load_data_for_insights():
+        """Load pesticide data"""
+        try:
+            possible_paths = [
+                'data/cleaned_data.csv',
+                'data/processed_data_output.xlsx',
+                '../data/processed_data_output.xlsx',
+            ]
+            
+            for path in possible_paths:
+                try:
+                    if path.endswith('.csv'):
+                        df = pd.read_csv(path)
+                    elif path.endswith(('.xlsx', '.xls')):
+                        df = pd.read_excel(path)
+                    else:
+                        continue
+                    return df
+                except:
+                    continue
+            return None
+        except:
+            return None
+    
+    df = load_data_for_insights()
+    
+    if df is None:
+        st.warning("📤 Please upload your data first")
+        uploaded_file = st.file_uploader("Upload CSV or Excel file", type=['csv', 'xlsx', 'xls'])
+        
+        if uploaded_file:
+            try:
+                file_extension = uploaded_file.name.split('.')[-1].lower()
+                if file_extension == 'csv':
+                    df = pd.read_csv(uploaded_file)
+                else:
+                    df = pd.read_excel(uploaded_file)
+                st.success("✅ Data loaded successfully!")
+            except Exception as e:
+                st.error(f"Error: {e}")
+                return
+        else:
+            return
+    
+    # Map seasons
+    df = map_season_names(df)
+    
+    # Ensure required columns exist
+    required_cols = ['vegetable_english', 'season', 'pesticide', 'reading', 'limits']
+    if not all(col in df.columns for col in required_cols):
+        st.error("❌ Missing required columns")
+        return
+    
+    # Calculate compliance
+    if 'is_compliant' not in df.columns:
+        df['is_compliant'] = df['reading'] <= df['limits']
+    
+    df['violation'] = ~df['is_compliant']
+    
+    # Create tabs for different analyses
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🔥 High-Risk Combinations",
+        "📅 Seasonal Forecasting", 
+        "🗺️ Risk Heatmaps",
+        "📈 Trend Analysis"
+    ])
+    
+    # ============================================================================
+    # TAB 1: HIGH-RISK COMBINATIONS
+    # ============================================================================
+    
+    with tab1:
+        st.header("🔥 High-Risk Vegetable-Pesticide Combinations")
+        
+        st.info("""
+        **Business Value:** Focus your testing resources on combinations that cause 80% of violations.
+        These insights help you:
+        - Prioritize which samples to test first
+        - Allocate lab resources efficiently
+        - Identify recurring contamination patterns
+        """)
+        
+        # Calculate violation rates by combination
+        combinations = df.groupby(['vegetable_english', 'pesticide']).agg({
+            'violation': ['sum', 'count', 'mean'],
+            'reading': 'mean',
+            'limits': 'mean'
+        }).reset_index()
+        
+        combinations.columns = ['Vegetable', 'Pesticide', 'Violations', 'Total_Tests', 'Violation_Rate', 'Avg_Reading', 'Avg_Limit']
+        combinations['Risk_Score'] = (
+            combinations['Violation_Rate'] * 0.5 + 
+            (combinations['Violations'] / combinations['Violations'].max()) * 0.3 +
+            (combinations['Avg_Reading'] / combinations['Avg_Limit']) * 0.2
+        )
+        
+        # Sort by risk score
+        high_risk = combinations.nlargest(20, 'Risk_Score')
+        
+        # Display top 10 high-risk combinations
+        st.subheader("🎯 Top 10 High-Risk Combinations")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            total_violations = df['violation'].sum()
+            st.metric("Total Violations", f"{total_violations:,}")
+        
+        with col2:
+            top_10_violations = high_risk.head(10)['Violations'].sum()
+            coverage = (top_10_violations / total_violations * 100) if total_violations > 0 else 0
+            st.metric("Top 10 Coverage", f"{coverage:.1f}%", 
+                     delta=f"{top_10_violations:.0f} violations")
+        
+        with col3:
+            avg_risk = high_risk.head(10)['Violation_Rate'].mean() * 100
+            st.metric("Avg Violation Rate", f"{avg_risk:.1f}%")
+        
+        # Display table
+        st.dataframe(
+            high_risk.head(10)[['Vegetable', 'Pesticide', 'Violations', 'Total_Tests', 'Violation_Rate', 'Risk_Score']]
+            .style.background_gradient(subset=['Risk_Score'], cmap='Reds')
+            .format({
+                'Violation_Rate': '{:.1%}',
+                'Risk_Score': '{:.3f}',
+                'Violations': '{:.0f}',
+                'Total_Tests': '{:.0f}'
+            }),
+            use_container_width=True,
+            height=400
+        )
+        
+        # Pareto chart
+        st.subheader("📊 Pareto Analysis: Cumulative Violation Coverage")
+        
+        high_risk_sorted = high_risk.sort_values('Violations', ascending=False).head(20)
+        high_risk_sorted['Cumulative_Violations'] = high_risk_sorted['Violations'].cumsum()
+        high_risk_sorted['Cumulative_Pct'] = (high_risk_sorted['Cumulative_Violations'] / total_violations * 100)
+        high_risk_sorted['Combination'] = high_risk_sorted['Vegetable'] + ' + ' + high_risk_sorted['Pesticide']
+        
+        fig_pareto = go.Figure()
+        
+        # Bar chart
+        fig_pareto.add_trace(go.Bar(
+            x=high_risk_sorted['Combination'],
+            y=high_risk_sorted['Violations'],
+            name='Violations',
+            marker_color='#FF6B6B',
+            yaxis='y'
+        ))
+        
+        # Line chart
+        fig_pareto.add_trace(go.Scatter(
+            x=high_risk_sorted['Combination'],
+            y=high_risk_sorted['Cumulative_Pct'],
+            name='Cumulative %',
+            marker_color='#339AF0',
+            yaxis='y2',
+            mode='lines+markers'
+        ))
+        
+        fig_pareto.update_layout(
+            title='Top 20 High-Risk Combinations (80/20 Rule)',
+            xaxis_title='Vegetable-Pesticide Combination',
+            yaxis=dict(title='Number of Violations'),
+            yaxis2=dict(title='Cumulative Percentage', overlaying='y', side='right', range=[0, 100]),
+            hovermode='x unified',
+            height=500,
+            showlegend=True
+        )
+        
+        fig_pareto.update_xaxes(tickangle=45)
+        
+        st.plotly_chart(fig_pareto, use_container_width=True)
+        
+        # Actionable recommendations
+        st.subheader("💡 Recommended Actions")
+        
+        top_3 = high_risk.head(3)
+        
+        for idx, row in top_3.iterrows():
+            with st.expander(f"🔴 {row['Vegetable']} + {row['Pesticide']} (Risk Score: {row['Risk_Score']:.3f})"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write(f"**Violation Rate:** {row['Violation_Rate']:.1%}")
+                    st.write(f"**Total Violations:** {row['Violations']:.0f} out of {row['Total_Tests']:.0f} tests")
+                
+                with col2:
+                    st.write(f"**Avg Reading:** {row['Avg_Reading']:.2f}")
+                    st.write(f"**Avg Limit:** {row['Avg_Limit']:.2f}")
+                    st.write(f"**Exceedance:** {(row['Avg_Reading']/row['Avg_Limit']):.1f}x limit")
+                
+                st.markdown(f"""
+                **Recommended Actions:**
+                - ✅ Increase testing frequency for {row['Vegetable']} samples
+                - ✅ Implement enhanced screening for {row['Pesticide']}
+                - ✅ Alert suppliers about contamination pattern
+                - ✅ Review farming practices for this combination
+                """)
+        
+        # Export
+        st.download_button(
+            label="📥 Download High-Risk Combinations (CSV)",
+            data=high_risk.to_csv(index=False),
+            file_name="high_risk_combinations.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    # ============================================================================
+    # TAB 2: SEASONAL FORECASTING
+    # ============================================================================
+    
+    with tab2:
+        st.header("📅 Seasonal Risk Forecasting")
+        
+        st.info("""
+        **Business Value:** Optimize your testing schedule based on seasonal contamination patterns.
+        - Allocate more resources during high-risk seasons
+        - Plan staffing and equipment needs ahead of time
+        - Proactive risk mitigation
+        """)
+        
+        # Calculate seasonal violation rates
+        seasonal_stats = df.groupby('season').agg({
+            'violation': ['sum', 'count', 'mean'],
+            'reading': 'mean',
+            'vegetable_english': 'nunique',
+            'pesticide': 'nunique'
+        }).reset_index()
+        
+        seasonal_stats.columns = ['Season', 'Violations', 'Total_Tests', 'Violation_Rate', 
+                                   'Avg_Reading', 'Unique_Vegetables', 'Unique_Pesticides']
+        
+        seasonal_stats = seasonal_stats.sort_values('Violation_Rate', ascending=False)
+        
+        # Display seasonal metrics
+        st.subheader("🌍 Seasonal Risk Overview")
+        
+        cols = st.columns(len(seasonal_stats))
+        
+        season_colors = {
+            'Winter': '🔵',
+            'Spring': '🟢',
+            'Summer': '🟠',
+            'Fall': '🔴'
+        }
+        
+        for idx, (col, row) in enumerate(zip(cols, seasonal_stats.itertuples())):
+            with col:
+                icon = season_colors.get(row.Season, '⚪')
+                st.metric(
+                    f"{icon} {row.Season}",
+                    f"{row.Violation_Rate:.1%}",
+                    delta=f"{row.Violations:.0f} violations"
+                )
+                st.caption(f"{row.Total_Tests:.0f} tests")
+        
+        # Seasonal breakdown visualization
+        st.subheader("📊 Seasonal Testing Recommendations")
+        
+        # Calculate recommended testing allocation
+        total_tests = seasonal_stats['Total_Tests'].sum()
+        seasonal_stats['Current_Allocation'] = (seasonal_stats['Total_Tests'] / total_tests * 100)
+        seasonal_stats['Recommended_Allocation'] = (
+            seasonal_stats['Violation_Rate'] / seasonal_stats['Violation_Rate'].sum() * 100
+        )
+        seasonal_stats['Adjustment'] = (
+            seasonal_stats['Recommended_Allocation'] - seasonal_stats['Current_Allocation']
+        )
+        
+        fig_allocation = go.Figure()
+        
+        fig_allocation.add_trace(go.Bar(
+            x=seasonal_stats['Season'],
+            y=seasonal_stats['Current_Allocation'],
+            name='Current Testing %',
+            marker_color='lightblue'
+        ))
+        
+        fig_allocation.add_trace(go.Bar(
+            x=seasonal_stats['Season'],
+            y=seasonal_stats['Recommended_Allocation'],
+            name='Recommended Testing %',
+            marker_color='#FF6B6B'
+        ))
+        
+        fig_allocation.update_layout(
+            title='Current vs Recommended Testing Allocation by Season',
+            xaxis_title='Season',
+            yaxis_title='Percentage of Total Tests (%)',
+            barmode='group',
+            height=400
+        )
+        
+        st.plotly_chart(fig_allocation, use_container_width=True)
+        
+        # Display recommendations table
+        st.dataframe(
+            seasonal_stats[['Season', 'Violation_Rate', 'Current_Allocation', 
+                           'Recommended_Allocation', 'Adjustment']]
+            .style.background_gradient(subset=['Violation_Rate'], cmap='Reds')
+            .format({
+                'Violation_Rate': '{:.1%}',
+                'Current_Allocation': '{:.1f}%',
+                'Recommended_Allocation': '{:.1f}%',
+                'Adjustment': '{:+.1f}%'
+            }),
+            use_container_width=True
+        )
+        
+        # Seasonal crop priorities
+        st.subheader("🥬 High-Risk Crops by Season")
+        
+        for season in seasonal_stats['Season']:
+            season_data = df[df['season'] == season]
+            season_violations = season_data.groupby('vegetable_english').agg({
+                'violation': ['sum', 'mean']
+            }).reset_index()
+            season_violations.columns = ['Vegetable', 'Violations', 'Violation_Rate']
+            season_violations = season_violations.nlargest(5, 'Violations')
+            
+            with st.expander(f"🔍 {season} - Top 5 High-Risk Crops"):
+                st.dataframe(
+                    season_violations.style.format({
+                        'Violation_Rate': '{:.1%}',
+                        'Violations': '{:.0f}'
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
+        
+        # Export
+        st.download_button(
+            label="📥 Download Seasonal Forecast (CSV)",
+            data=seasonal_stats.to_csv(index=False),
+            file_name="seasonal_risk_forecast.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    # ============================================================================
+    # TAB 3: RISK HEATMAPS
+    # ============================================================================
+
+    with tab3:
+        st.header("🗺️ Risk Heatmaps")
+        
+        st.info("""
+        **Business Value:** Visual pattern recognition for contamination hotspots.
+        - Quickly identify which vegetable-pesticide combinations need attention
+        - Spot emerging contamination trends
+        - Communicate risk to stakeholders visually
+        """)
+        
+        # ✅ IMPROVED: Better data preparation
+        st.subheader("🔥 Violation Rate Heatmap (Top 15×15)")
+        
+        # Calculate violation rates by combination
+        heatmap_data = df.groupby(['vegetable_english', 'pesticide']).agg({
+            'violation': ['sum', 'count', 'mean']
+        }).reset_index()
+        
+        heatmap_data.columns = ['Vegetable', 'Pesticide', 'Violations', 'Tests', 'Violation_Rate']
+        
+        # Show data stats
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Combinations", len(heatmap_data))
+        with col2:
+            st.metric("Unique Vegetables", df['vegetable_english'].nunique())
+        with col3:
+            st.metric("Unique Pesticides", df['pesticide'].nunique())
+        
+        # ✅ FIX: More lenient filtering
+        min_tests = st.slider("Minimum tests required:", 1, 10, 3, 
+                            help="Combinations with fewer tests will be excluded")
+        
+        heatmap_filtered = heatmap_data[heatmap_data['Tests'] >= min_tests].copy()
+        
+        st.info(f"📊 Showing {len(heatmap_filtered)} combinations with at least {min_tests} tests")
+        
+        if len(heatmap_filtered) < 5:
+            st.warning("⚠️ Not enough data for heatmap visualization. Try:")
+            st.write("- Lower the minimum tests requirement")
+            st.write("- Upload a larger dataset")
+            st.write(f"- Current filtered combinations: {len(heatmap_filtered)}")
+            
+            # Show what we have
+            if len(heatmap_filtered) > 0:
+                st.write("**Available data:**")
+                st.dataframe(heatmap_filtered, use_container_width=True)
+            return
+        
+        # Get top vegetables and pesticides by violations
+        top_n = min(15, heatmap_filtered['Vegetable'].nunique())
+        top_vegetables = heatmap_filtered.groupby('Vegetable')['Violations'].sum().nlargest(top_n).index
+        top_pesticides = heatmap_filtered.groupby('Pesticide')['Violations'].sum().nlargest(top_n).index
+        
+        # Filter to top combinations
+        heatmap_top = heatmap_filtered[
+            heatmap_filtered['Vegetable'].isin(top_vegetables) & 
+            heatmap_filtered['Pesticide'].isin(top_pesticides)
+        ]
+        
+        st.write(f"**Displaying top {len(top_vegetables)} vegetables × {len(top_pesticides)} pesticides**")
+        
+        # Create pivot for heatmap 1: Violation Rate
+        pivot_violations = heatmap_top.pivot(
+            index='Vegetable',
+            columns='Pesticide',
+            values='Violation_Rate'
+        )
+        
+        # Fill NaN with 0 for visualization
+        pivot_violations = pivot_violations.fillna(0)
+        
+        # ✅ CHECK: Make sure we have data
+        if pivot_violations.empty or pivot_violations.shape[0] == 0:
+            st.error("❌ No data available after filtering. Please adjust filters.")
+            st.write("**Debug info:**")
+            st.write(f"- Pivot shape: {pivot_violations.shape}")
+            st.write(f"- Top vegetables: {list(top_vegetables)}")
+            st.write(f"- Top pesticides: {list(top_pesticides)}")
+        else:
+            # Create heatmap
+            fig_heatmap1 = px.imshow(
+                pivot_violations,
+                labels=dict(x="Pesticide", y="Vegetable", color="Violation Rate"),
+                x=pivot_violations.columns.tolist(),
+                y=pivot_violations.index.tolist(),
+                color_continuous_scale='Reds',
+                aspect='auto',
+                title=f'Violation Rate Heatmap ({pivot_violations.shape[0]}×{pivot_violations.shape[1]})',
+                zmin=0,
+                zmax=1
+            )
+            
+            fig_heatmap1.update_layout(
+                height=max(400, 30 * len(pivot_violations.index)),
+                xaxis={'side': 'bottom'},
+                margin=dict(l=150, r=50, t=80, b=150)
+            )
+            
+            fig_heatmap1.update_xaxes(tickangle=45)
+            
+            st.plotly_chart(fig_heatmap1, use_container_width=True)
+            
+            # Add interpretation
+            max_rate = pivot_violations.max().max()
+            max_combo = pivot_violations.stack().idxmax()
+            
+            if max_rate > 0:
+                st.warning(f"""
+                🔴 **Highest risk combination:** {max_combo[0]} + {max_combo[1]} 
+                - Violation rate: {max_rate:.1%}
+                """)
+        
+        # ============================================
+        # HEATMAP 2: Total Violations
+        # ============================================
+        
+        st.divider()
+        st.subheader("📊 Total Violations Heatmap")
+        
+        # Create pivot for total violations
+        pivot_total = heatmap_top.pivot(
+            index='Vegetable',
+            columns='Pesticide',
+            values='Violations'
+        ).fillna(0)
+        
+        if not pivot_total.empty and pivot_total.shape[0] > 0:
+            fig_heatmap2 = px.imshow(
+                pivot_total,
+                labels=dict(x="Pesticide", y="Vegetable", color="Total Violations"),
+                x=pivot_total.columns.tolist(),
+                y=pivot_total.index.tolist(),
+                color_continuous_scale='YlOrRd',
+                aspect='auto',
+                title=f'Total Violations Heatmap ({pivot_total.shape[0]}×{pivot_total.shape[1]})'
+            )
+            
+            fig_heatmap2.update_layout(
+                height=max(400, 30 * len(pivot_total.index)),
+                margin=dict(l=150, r=50, t=80, b=150)
+            )
+            
+            fig_heatmap2.update_xaxes(tickangle=45)
+            
+            st.plotly_chart(fig_heatmap2, use_container_width=True)
+            
+            # Show top 5 worst combinations
+            st.subheader("🎯 Top 5 Worst Combinations")
+            
+            top_5 = heatmap_top.nlargest(5, 'Violations')[
+                ['Vegetable', 'Pesticide', 'Violations', 'Tests', 'Violation_Rate']
+            ]
+            
+            st.dataframe(
+                top_5.style.background_gradient(subset=['Violations', 'Violation_Rate'], cmap='Reds')
+                .format({
+                    'Violation_Rate': '{:.1%}',
+                    'Violations': '{:.0f}',
+                    'Tests': '{:.0f}'
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+        
+        # ============================================
+        # HEATMAP 3: Seasonal Patterns
+        # ============================================
+        
+        st.divider()
+        st.subheader("🌍 Seasonal Violation Patterns")
+        
+        # Check if we have season data
+        if 'season' in df.columns:
+            # Calculate seasonal patterns
+            seasonal_pivot = df.groupby(['season', 'vegetable_english'])['violation'].mean().reset_index()
+            seasonal_pivot_wide = seasonal_pivot.pivot(
+                index='vegetable_english',
+                columns='season',
+                values='violation'
+            ).fillna(0)
+            
+            # Get top 20 vegetables by total violations
+            top_20_veg = df.groupby('vegetable_english')['violation'].sum().nlargest(20).index
+            seasonal_pivot_wide = seasonal_pivot_wide.loc[
+                seasonal_pivot_wide.index.isin(top_20_veg)
+            ]
+            
+            if not seasonal_pivot_wide.empty and seasonal_pivot_wide.shape[0] > 0:
+                fig_seasonal = px.imshow(
+                    seasonal_pivot_wide,
+                    labels=dict(x="Season", y="Vegetable", color="Violation Rate"),
+                    x=seasonal_pivot_wide.columns.tolist(),
+                    y=seasonal_pivot_wide.index.tolist(),
+                    color_continuous_scale='RdYlGn_r',
+                    aspect='auto',
+                    title=f'Seasonal Violation Patterns (Top {len(seasonal_pivot_wide)} Vegetables)',
+                    zmin=0,
+                    zmax=1
+                )
+                
+                fig_seasonal.update_layout(
+                    height=max(400, 25 * len(seasonal_pivot_wide.index)),
+                    margin=dict(l=150, r=50, t=80, b=100)
+                )
+                
+                st.plotly_chart(fig_seasonal, use_container_width=True)
+                
+                # Seasonal insights
+                st.subheader("📋 Seasonal Insights")
+                
+                seasonal_means = df.groupby('season')['violation'].mean().sort_values(ascending=False)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**🔴 Highest Risk Season:**")
+                    st.metric(seasonal_means.index[0], f"{seasonal_means.iloc[0]:.1%}")
+                
+                with col2:
+                    st.write("**🟢 Lowest Risk Season:**")
+                    st.metric(seasonal_means.index[-1], f"{seasonal_means.iloc[-1]:.1%}")
+            else:
+                st.warning("Not enough seasonal data for visualization")
+        else:
+            st.warning("⚠️ No season column found in data")
+        
+        # Export option
+        st.divider()
+        st.subheader("💾 Export Data")
+        
+        csv_heatmap = heatmap_filtered.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Heatmap Data (CSV)",
+            data=csv_heatmap,
+            file_name="violation_heatmap_data.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+        
+    # ============================================================================
+    # TAB 4: TREND ANALYSIS
+    # ============================================================================
+    
+    with tab4:
+        st.header("📈 Contamination Trend Analysis")
+        
+        st.info("""
+        **Business Value:** Track how contamination patterns change over time.
+        - Identify if contamination is improving or worsening
+        - Monitor effectiveness of interventions
+        - Predict future contamination risks
+        """)
+        
+        # Check if we have temporal data
+        if 'year' in df.columns or 'month' in df.columns or 'date' in df.columns:
+            
+            # Time series by pesticide group
+            if 'pesticide_group' in df.columns:
+                st.subheader("📊 Violation Trends by Pesticide Group")
+                
+                # Assuming you have year and month
+                if 'year' in df.columns and 'month' in df.columns:
+                    df['period'] = df['year'].astype(str) + '-' + df['month'].astype(str).str.zfill(2)
+                    
+                    trend_data = df.groupby(['period', 'pesticide_group']).agg({
+                        'violation': ['sum', 'count', 'mean']
+                    }).reset_index()
+                    
+                    trend_data.columns = ['Period', 'Pesticide_Group', 'Violations', 'Tests', 'Violation_Rate']
+                    
+                    fig_trend = px.line(
+                        trend_data,
+                        x='Period',
+                        y='Violation_Rate',
+                        color='Pesticide_Group',
+                        title='Violation Rate Trends by Pesticide Group Over Time',
+                        markers=True
+                    )
+                    
+                    fig_trend.update_layout(
+                        xaxis_title='Time Period',
+                        yaxis_title='Violation Rate',
+                        height=500,
+                        hovermode='x unified'
+                    )
+                    
+                    st.plotly_chart(fig_trend, use_container_width=True)
+                
+            # Seasonal trend
+            st.subheader("🌍 Seasonal Contamination Trends")
+            
+            seasonal_trend = df.groupby('season').agg({
+                'violation': 'mean',
+                'reading': 'mean'
+            }).reset_index()
+            
+            fig_seasonal_trend = go.Figure()
+            
+            fig_seasonal_trend.add_trace(go.Scatter(
+                x=seasonal_trend['season'],
+                y=seasonal_trend['violation'] * 100,
+                mode='lines+markers',
+                name='Violation Rate (%)',
+                marker=dict(size=12, color='#FF6B6B'),
+                line=dict(width=3)
+            ))
+            
+            fig_seasonal_trend.update_layout(
+                title='Seasonal Violation Rate Pattern',
+                xaxis_title='Season',
+                yaxis_title='Violation Rate (%)',
+                height=400,
+                showlegend=True
+            )
+            
+            st.plotly_chart(fig_seasonal_trend, use_container_width=True)
+            
+        else:
+            st.warning("⚠️ No temporal data available. Add 'year' or 'month' columns to enable trend analysis.")
+        
+        # Moving average of violations
+        st.subheader("📉 Rolling Violation Statistics")
+        
+        if 'sample_code' in df.columns:
+            # Create a sequence
+            df_sorted = df.sort_index().reset_index(drop=True)
+            df_sorted['sample_number'] = range(1, len(df_sorted) + 1)
+            
+            # Calculate rolling statistics
+            window = st.slider("Select rolling window size:", 10, 100, 30)
+            
+            df_sorted['rolling_violation_rate'] = df_sorted['violation'].rolling(window=window).mean()
+            df_sorted['rolling_avg_reading'] = df_sorted['reading'].rolling(window=window).mean()
+            
+            fig_rolling = go.Figure()
+            
+            fig_rolling.add_trace(go.Scatter(
+                x=df_sorted['sample_number'],
+                y=df_sorted['rolling_violation_rate'] * 100,
+                mode='lines',
+                name=f'{window}-Sample Moving Average',
+                line=dict(color='#FF6B6B', width=2)
+            ))
+            
+            fig_rolling.update_layout(
+                title=f'Violation Rate Moving Average ({window} samples)',
+                xaxis_title='Sample Number',
+                yaxis_title='Violation Rate (%)',
+                height=400
+            )
+            
+            st.plotly_chart(fig_rolling, use_container_width=True)
+            
+            # Interpretation
+            recent_avg = df_sorted['rolling_violation_rate'].tail(window).mean() * 100
+            overall_avg = df['violation'].mean() * 100
+            
+            if recent_avg > overall_avg:
+                st.warning(f"⚠️ Recent violation rate ({recent_avg:.1f}%) is **higher** than overall average ({overall_avg:.1f}%). Consider increasing inspection frequency.")
+            else:
+                st.success(f"✅ Recent violation rate ({recent_avg:.1f}%) is **lower** than overall average ({overall_avg:.1f}%). Contamination control is improving!")
+
+
 # ============================================================================
 # RUN APPLICATION
 # ============================================================================
 
 if __name__ == "__main__":
-    statistical_analysis_page()
+    main()
