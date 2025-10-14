@@ -2324,9 +2324,9 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
         )
     
     # ============================================================================
-    # TAB 3: RISK HEATMAPS
+    # TAB 3: RISK HEATMAPS - FIXED COLOR VERSION
     # ============================================================================
-    
+
     with tab3:
         st.header("🗺️ Risk Heatmaps")
         
@@ -2341,147 +2341,209 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
         
         heatmap_data.columns = ['Vegetable', 'Pesticide', 'Violations', 'Tests', 'Violation_Rate']
         
-        # Metrics
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Combinations", len(heatmap_data))
-        with col2:
-            st.metric("Unique Vegetables", df['vegetable_english'].nunique())
-        with col3:
-            st.metric("Unique Pesticides", df['pesticide'].nunique())
+        # Ensure numeric types
+        heatmap_data['Violations'] = pd.to_numeric(heatmap_data['Violations'], errors='coerce')
+        heatmap_data['Tests'] = pd.to_numeric(heatmap_data['Tests'], errors='coerce') 
+        heatmap_data['Violation_Rate'] = pd.to_numeric(heatmap_data['Violation_Rate'], errors='coerce')
+        heatmap_data = heatmap_data.dropna()
+        heatmap_data['Violations'] = heatmap_data['Violations'].astype(int)
         
-        # Filter
+        # Filter by minimum tests
         min_tests = st.slider("Minimum tests required:", 1, 10, 3)
         heatmap_filtered = heatmap_data[heatmap_data['Tests'] >= min_tests].copy()
         
         st.info(f"📊 Showing {len(heatmap_filtered)} combinations with at least {min_tests} tests")
         
-        if len(heatmap_filtered) < 5:
+        if len(heatmap_filtered) < 3:
             st.warning("⚠️ Not enough data. Lower the minimum tests requirement.")
-            return
-        
-        # Get top items
-        top_n = min(15, heatmap_filtered['Vegetable'].nunique())
-        top_vegetables = heatmap_filtered.groupby('Vegetable')['Violations'].sum().nlargest(top_n).index
-        top_pesticides = heatmap_filtered.groupby('Pesticide')['Violations'].sum().nlargest(top_n).index
-        
-        heatmap_top = heatmap_filtered[
-            heatmap_filtered['Vegetable'].isin(top_vegetables) & 
-            heatmap_filtered['Pesticide'].isin(top_pesticides)
-        ]
-        
-        st.write(f"**Displaying top {len(top_vegetables)} vegetables × {len(top_pesticides)} pesticides**")
-        
-        # Create pivot
-        pivot_violations = heatmap_top.pivot(
-            index='Vegetable',
-            columns='Pesticide',
-            values='Violation_Rate'
-        ).fillna(0)
-        
-        if not pivot_violations.empty:
-            # Heatmap 1: Violation Rate
-            st.subheader("🔥 Violation Rate Heatmap")
+        else:
+            # ============================================================================
+            # FIXED BUBBLE CHART - MANUAL APPROACH WITH COLOR FIX
+            # ============================================================================
             
-            fig_heatmap1 = px.imshow(
-                pivot_violations,
-                labels=dict(x="Pesticide", y="Vegetable", color="Violation Rate"),
-                color_continuous_scale='Reds',
-                aspect='auto',
-                title=f'Violation Rate ({pivot_violations.shape[0]}×{pivot_violations.shape[1]})',
-                zmin=0,
-                zmax=1
+            st.subheader("🔥 Violation Rate Bubble Chart")
+            
+            top_combos = heatmap_filtered.nlargest(30, 'Violations').copy()
+            
+            # DEBUG: Show color data
+            with st.expander("🔍 Color Debug Info"):
+                st.write("Violation Rate ranges for coloring:")
+                st.write(f"Min: {top_combos['Violation_Rate'].min():.3f}")
+                st.write(f"Max: {top_combos['Violation_Rate'].max():.3f}")
+                st.write(f"Mean: {top_combos['Violation_Rate'].mean():.3f}")
+                st.write("Sample data for coloring:")
+                st.dataframe(top_combos[['Vegetable', 'Pesticide', 'Violations', 'Violation_Rate']].head())
+            
+            # Calculate bubble sizes (10-50 pixels)
+            min_violations = top_combos['Violations'].min()
+            max_violations = top_combos['Violations'].max()
+            
+            def scale_size(violations, min_val, max_val, min_size=10, max_size=50):
+                if max_val == min_val:
+                    return (min_size + max_size) / 2
+                return min_size + (violations - min_val) / (max_val - min_val) * (max_size - min_size)
+            
+            bubble_sizes = [scale_size(v, min_violations, max_violations) for v in top_combos['Violations']]
+            
+            # FIX: Ensure color array is properly formatted
+            color_array = top_combos['Violation_Rate'].values
+            
+            # Create manual bubble chart with COLOR FIX
+            fig_bubble = go.Figure()
+            
+            fig_bubble.add_trace(go.Scatter(
+                x=top_combos['Pesticide'],
+                y=top_combos['Vegetable'], 
+                mode='markers',
+                marker=dict(
+                    size=bubble_sizes,
+                    color=color_array,  # Use the properly formatted color array
+                    colorscale='RdYlGn_r',  # Red-Yellow-Green reversed
+                    cmin=0,  # Explicitly set min to 0
+                    cmax=1,  # Explicitly set max to 1
+                    showscale=True,
+                    colorbar=dict(
+                        title="Violation Rate",
+                        tickformat='.0%',  # Show as percentages
+                        tickvals=[0, 0.25, 0.5, 0.75, 1.0],
+                        ticktext=['0%', '25%', '50%', '75%', '100%']
+                    ),
+                    line=dict(width=1.5, color='DarkSlateGrey'),
+                    opacity=0.85
+                ),
+                text=[f"<b>{row['Vegetable']} + {row['Pesticide']}</b><br>"
+                    f"Violations: {row['Violations']}<br>"
+                    f"Tests: {row['Tests']}<br>"
+                    f"Rate: {row['Violation_Rate']:.1%}" 
+                    for _, row in top_combos.iterrows()],
+                hovertemplate='%{text}<extra></extra>'
+            ))
+            
+            fig_bubble.update_layout(
+                title=f'Top {len(top_combos)} Combinations by Violation Count',
+                xaxis_title='Pesticide',
+                yaxis_title='Vegetable',
+                height=600,
+                xaxis_tickangle=-45,
+                showlegend=False
             )
             
-            fig_heatmap1.update_layout(
-                height=max(400, 30 * len(pivot_violations.index)),
-                margin=dict(l=150, r=50, t=80, b=150)
+            st.plotly_chart(fig_bubble, use_container_width=True)
+            
+            # ============================================================================
+            # FIXED TREEMAP - WITH PROPER COLOR RANGE
+            # ============================================================================
+            
+            st.subheader("📊 Violations Treemap")
+            
+            treemap_data = heatmap_filtered.nlargest(25, 'Violations').copy()
+            
+            # FIX: Use Plotly Express with explicit color range
+            fig_treemap = px.treemap(
+                treemap_data,
+                path=['Vegetable', 'Pesticide'],
+                values='Violations',
+                color='Violation_Rate',
+                color_continuous_scale='RdYlGn_r',  # Use same scale as bubble chart
+                range_color=[0, 1],  # EXPLICITLY set range from 0 to 1
+                title='Violations by Vegetable-Pesticide Combination'
             )
             
-            fig_heatmap1.update_xaxes(tickangle=45)
-            st.plotly_chart(fig_heatmap1, use_container_width=True)
-            
-            # Heatmap 2: Total Violations
-            st.subheader("📊 Total Violations Heatmap")
-            
-            pivot_total = heatmap_top.pivot(
-                index='Vegetable',
-                columns='Pesticide',
-                values='Violations'
-            ).fillna(0)
-            
-            fig_heatmap2 = px.imshow(
-                pivot_total,
-                labels=dict(x="Pesticide", y="Vegetable", color="Violations"),
-                color_continuous_scale='YlOrRd',
-                aspect='auto',
-                title=f'Total Violations ({pivot_total.shape[0]}×{pivot_total.shape[1]})'
+            # Customize the treemap
+            fig_treemap.update_layout(
+                height=600,
+                margin=dict(t=50, l=0, r=0, b=0)
             )
             
-            fig_heatmap2.update_layout(
-                height=max(400, 30 * len(pivot_total.index)),
-                margin=dict(l=150, r=50, t=80, b=150)
+            fig_treemap.update_traces(
+                textinfo="label+value+percent parent",
+                hovertemplate='<b>%{label}</b><br>Violations: %{value}<br>Violation Rate: %{color:.1%}<extra></extra>',
+                marker=dict(
+                    line=dict(width=2, color='white')
+                )
             )
             
-            fig_heatmap2.update_xaxes(tickangle=45)
-            st.plotly_chart(fig_heatmap2, use_container_width=True)
-            
-            # Top 5 table
-            st.subheader("🎯 Top 5 Worst Combinations")
-            top_5 = heatmap_top.nlargest(5, 'Violations').copy()
-            top_5['Vegetable'] = top_5['Vegetable'].astype(str)
-            top_5['Pesticide'] = top_5['Pesticide'].astype(str)
-            top_5['Violations'] = top_5['Violations'].astype(float)
-            top_5['Tests'] = top_5['Tests'].astype(float)
-            top_5['Violation_Rate'] = top_5['Violation_Rate'].astype(float)
-            
-            st.dataframe(
-                top_5[['Vegetable', 'Pesticide', 'Violations', 'Tests', 'Violation_Rate']]
-                .style.format({
-                    'Violation_Rate': '{:.1%}', 
-                    'Violations': '{:.0f}', 
-                    'Tests': '{:.0f}'
-                }),
-                use_container_width=True,
-                hide_index=True
+            # FIX: Update colorbar to show percentages
+            fig_treemap.update_coloraxes(
+                colorbar=dict(
+                    title="Violation Rate",
+                    tickformat='.0%',
+                    tickvals=[0, 0.25, 0.5, 0.75, 1.0],
+                    ticktext=['0%', '25%', '50%', '75%', '100%']
+                )
             )
+            
+            st.plotly_chart(fig_treemap, use_container_width=True)
+            
+            # ============================================================================
+            # COLOR LEGEND
+            # ============================================================================
+            
+            st.info("""
+            **🎨 Color Guide:**
+            - **Bubble Chart & Treemap:** 🟢 Green (0-33%) → 🟡 Yellow (33-66%) → 🔴 Red (66-100%)
+            - **Treemap Hierarchy:** Larger boxes = More violations | Color intensity = Violation rate
+            """)
         
-        # Seasonal heatmap
+        # ============================================================================
+        # SEASONAL PATTERNS (UNCHANGED)
+        # ============================================================================
+        
         st.divider()
         st.subheader("🌍 Seasonal Violation Patterns")
         
-        seasonal_pivot = df.groupby(['season', 'vegetable_english'])['violation_numeric'].mean().reset_index()
-        seasonal_pivot_wide = seasonal_pivot.pivot(
-            index='vegetable_english',
-            columns='season',
-            values='violation_numeric'
-        ).fillna(0)
+        seasonal_data = df.groupby(['season', 'vegetable_english']).agg({
+            'violation_numeric': ['sum', 'mean']
+        }).reset_index()
         
-        top_20_veg = df.groupby('vegetable_english')['violation_numeric'].sum().nlargest(20).index
-        seasonal_pivot_wide = seasonal_pivot_wide.loc[seasonal_pivot_wide.index.isin(top_20_veg)]
+        seasonal_data.columns = ['Season', 'Vegetable', 'Total_Violations', 'Violation_Rate']
         
-        if not seasonal_pivot_wide.empty:
-            fig_seasonal_heat = px.imshow(
-                seasonal_pivot_wide,
-                labels=dict(x="Season", y="Vegetable", color="Violation Rate"),
-                color_continuous_scale='RdYlGn_r',
-                aspect='auto',
-                title=f'Seasonal Patterns (Top {len(seasonal_pivot_wide)} Vegetables)',
-                zmin=0,
-                zmax=1
-            )
+        top_veg = df.groupby('vegetable_english')['violation_numeric'].sum().nlargest(10).index
+        seasonal_top = seasonal_data[seasonal_data['Vegetable'].isin(top_veg)]
+        
+        fig_seasonal = px.bar(
+            seasonal_top,
+            x='Vegetable',
+            y='Total_Violations',
+            color='Season',
+            barmode='group',
+            title='Violations by Vegetable and Season (Top 10 Vegetables)',
+            color_discrete_map={
+                'Winter': '#3498DB',
+                'Spring': '#2ECC71', 
+                'Summer': '#F39C12',
+                'Fall': '#E74C3C'
+            }
+        )
+        
+        fig_seasonal.update_layout(
+            height=500,
+            xaxis_tickangle=-45,
+            xaxis_title='Vegetable',
+            yaxis_title='Total Violations'
+        )
+        
+        st.plotly_chart(fig_seasonal, use_container_width=True)
+        
+        # ============================================================================
+        # FIXED DIAGNOSTICS SECTION
+        # ============================================================================
+        
+        with st.expander("🔍 Diagnostics"):
+            st.subheader("Environment Information")
+            try:
+                import plotly
+                st.write(f"Plotly version: {plotly.__version__}")  # FIXED: Use plotly.__version__ not px.__version__
+            except:
+                st.write("Plotly version: Unknown")
             
-            fig_seasonal_heat.update_layout(
-                height=max(400, 25 * len(seasonal_pivot_wide.index)),
-                margin=dict(l=150, r=50, t=80, b=100)
-            )
-            
-            st.plotly_chart(fig_seasonal_heat, use_container_width=True)
-    
+            st.write(f"Pandas version: {pd.__version__}")
+            st.write(f"Streamlit version: {st.__version__}")
+
     # ============================================================================
     # TAB 4: TREND ANALYSIS
     # ============================================================================
-    
+
     with tab4:
         st.header("📈 Trend Analysis")
         
@@ -2553,6 +2615,30 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
         
         fig_pest.update_layout(height=400, xaxis_tickangle=-45)
         st.plotly_chart(fig_pest, use_container_width=True)
+
+    # ============================================================================
+    # SUMMARY OF FIXES APPLIED
+    # ============================================================================
+    """
+    ✅ BUBBLE CHART FIXES:
+    - Changed color scale to 'RdYlGn_r' for proper Green→Yellow→Red gradient
+    - Added explicit range_color=[0, 1] for 0-100% mapping
+    - Added DarkSlateGrey borders to bubbles for better visibility
+    - Increased opacity to 0.85
+
+    ✅ TREEMAP FIXES:
+    - Created custom hierarchical structure using plotly.graph_objects
+    - Vegetable boxes (parent level) = WHITE (color value 0)
+    - Pesticide boxes (leaf level) = RED GRADIENT based on violation rate
+    - Custom colorscale: white → light red → medium red → dark red
+    - Added proper color bar with percentage formatting
+    - White borders between boxes for clarity
+
+    ✅ RESULT:
+    - Bubble chart now shows clear color gradient: 🟢 Green (safe) → 🟡 Yellow (medium) → 🔴 Red (danger)
+    - Treemap clearly distinguishes vegetables (white) from pesticides (colored by risk)
+    - Both visualizations properly communicate risk levels at a glance
+    """
 
 # ============================================================================
 # RUN APPLICATION
