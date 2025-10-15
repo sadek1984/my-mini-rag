@@ -2323,222 +2323,557 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
             use_container_width=True
         )
     
+    # # ============================================================================
+    # # TAB 3: RISK HEATMAPS - FIXED COLOR VERSION
+    # # ============================================================================
+
+    # with tab3:
+    #     st.header("🗺️ Risk Heatmaps")
+        
+    #     st.info("""
+    #     **Business Value:** Visual pattern recognition for contamination hotspots.
+    #     """)
+        
+    #     # Calculate violation rates by combination
+    #     heatmap_data = df.groupby(['vegetable_english', 'pesticide']).agg({
+    #         'violation_numeric': ['sum', 'count', 'mean']
+    #     }).reset_index()
+        
+    #     heatmap_data.columns = ['Vegetable', 'Pesticide', 'Violations', 'Tests', 'Violation_Rate']
+        
+    #     # Ensure numeric types
+    #     heatmap_data['Violations'] = pd.to_numeric(heatmap_data['Violations'], errors='coerce')
+    #     heatmap_data['Tests'] = pd.to_numeric(heatmap_data['Tests'], errors='coerce') 
+    #     heatmap_data['Violation_Rate'] = pd.to_numeric(heatmap_data['Violation_Rate'], errors='coerce')
+    #     heatmap_data = heatmap_data.dropna()
+    #     heatmap_data['Violations'] = heatmap_data['Violations'].astype(int)
+        
+    #     # Filter by minimum tests
+    #     min_tests = st.slider("Minimum tests required:", 1, 10, 3)
+    #     heatmap_filtered = heatmap_data[heatmap_data['Tests'] >= min_tests].copy()
+        
+    #     st.info(f"📊 Showing {len(heatmap_filtered)} combinations with at least {min_tests} tests")
+        
+    #     if len(heatmap_filtered) < 3:
+    #         st.warning("⚠️ Not enough data. Lower the minimum tests requirement.")
+    #     else:
+    #         # ============================================================================
+    #         # FIXED BUBBLE CHART - MANUAL APPROACH WITH COLOR FIX
+    #         # ============================================================================
+            
+    #         st.subheader("🔥 Violation Rate Bubble Chart")
+            
+    #         top_combos = heatmap_filtered.nlargest(30, 'Violations').copy()
+            
+    #         # DEBUG: Show color data
+    #         with st.expander("🔍 Color Debug Info"):
+    #             st.write("Violation Rate ranges for coloring:")
+    #             st.write(f"Min: {top_combos['Violation_Rate'].min():.3f}")
+    #             st.write(f"Max: {top_combos['Violation_Rate'].max():.3f}")
+    #             st.write(f"Mean: {top_combos['Violation_Rate'].mean():.3f}")
+    #             st.write("Sample data for coloring:")
+    #             st.dataframe(top_combos[['Vegetable', 'Pesticide', 'Violations', 'Violation_Rate']].head())
+            
+    #         # Calculate bubble sizes (10-50 pixels)
+    #         min_violations = top_combos['Violations'].min()
+    #         max_violations = top_combos['Violations'].max()
+            
+    #         def scale_size(violations, min_val, max_val, min_size=10, max_size=50):
+    #             if max_val == min_val:
+    #                 return (min_size + max_size) / 2
+    #             return min_size + (violations - min_val) / (max_val - min_val) * (max_size - min_size)
+            
+    #         bubble_sizes = [scale_size(v, min_violations, max_violations) for v in top_combos['Violations']]
+            
+    #         # FIX: Ensure color array is properly formatted
+    #         color_array = top_combos['Violation_Rate'].values
+            
+    #         # Create manual bubble chart with COLOR FIX
+    #         fig_bubble = go.Figure()
+            
+    #         fig_bubble.add_trace(go.Scatter(
+    #             x=top_combos['Pesticide'],
+    #             y=top_combos['Vegetable'], 
+    #             mode='markers',
+    #             marker=dict(
+    #                 size=bubble_sizes,
+    #                 color=color_array,  # Use the properly formatted color array
+    #                 colorscale='RdYlGn_r',  # Red-Yellow-Green reversed
+    #                 cmin=0,  # Explicitly set min to 0
+    #                 cmax=1,  # Explicitly set max to 1
+    #                 showscale=True,
+    #                 colorbar=dict(
+    #                     title="Violation Rate",
+    #                     tickformat='.0%',  # Show as percentages
+    #                     tickvals=[0, 0.25, 0.5, 0.75, 1.0],
+    #                     ticktext=['0%', '25%', '50%', '75%', '100%']
+    #                 ),
+    #                 line=dict(width=1.5, color='DarkSlateGrey'),
+    #                 opacity=0.85
+    #             ),
+    #             text=[f"<b>{row['Vegetable']} + {row['Pesticide']}</b><br>"
+    #                 f"Violations: {row['Violations']}<br>"
+    #                 f"Tests: {row['Tests']}<br>"
+    #                 f"Rate: {row['Violation_Rate']:.1%}" 
+    #                 for _, row in top_combos.iterrows()],
+    #             hovertemplate='%{text}<extra></extra>'
+    #         ))
+            
+    #         fig_bubble.update_layout(
+    #             title=f'Top {len(top_combos)} Combinations by Violation Count',
+    #             xaxis_title='Pesticide',
+    #             yaxis_title='Vegetable',
+    #             height=600,
+    #             xaxis_tickangle=-45,
+    #             showlegend=False
+    #         )
+            
+    #         st.plotly_chart(fig_bubble, use_container_width=True)
+            
+    #         # ============================================================================
+    #         # FIXED TREEMAP - WITH PROPER COLOR RANGE
+    #         # ============================================================================
+            
+    #         st.subheader("📊 Violations Treemap")
+            
+    #         treemap_data = heatmap_filtered.nlargest(25, 'Violations').copy()
+            
+    #         # FIX: Use Plotly Express with explicit color range
+    #         fig_treemap = px.treemap(
+    #             treemap_data,
+    #             path=['Vegetable', 'Pesticide'],
+    #             values='Violations',
+    #             color='Violation_Rate',
+    #             color_continuous_scale='RdYlGn_r',  # Use same scale as bubble chart
+    #             range_color=[0, 1],  # EXPLICITLY set range from 0 to 1
+    #             title='Violations by Vegetable-Pesticide Combination'
+    #         )
+            
+    #         # Customize the treemap
+    #         fig_treemap.update_layout(
+    #             height=600,
+    #             margin=dict(t=50, l=0, r=0, b=0)
+    #         )
+            
+    #         fig_treemap.update_traces(
+    #             textinfo="label+value+percent parent",
+    #             hovertemplate='<b>%{label}</b><br>Violations: %{value}<br>Violation Rate: %{color:.1%}<extra></extra>',
+    #             marker=dict(
+    #                 line=dict(width=2, color='white')
+    #             )
+    #         )
+            
+    #         # FIX: Update colorbar to show percentages
+    #         fig_treemap.update_coloraxes(
+    #             colorbar=dict(
+    #                 title="Violation Rate",
+    #                 tickformat='.0%',
+    #                 tickvals=[0, 0.25, 0.5, 0.75, 1.0],
+    #                 ticktext=['0%', '25%', '50%', '75%', '100%']
+    #             )
+    #         )
+            
+    #         st.plotly_chart(fig_treemap, use_container_width=True)
+            
+    #         # ============================================================================
+    #         # COLOR LEGEND
+    #         # ============================================================================
+            
+    #         st.info("""
+    #         **🎨 Color Guide:**
+    #         - **Bubble Chart & Treemap:** 🟢 Green (0-33%) → 🟡 Yellow (33-66%) → 🔴 Red (66-100%)
+    #         - **Treemap Hierarchy:** Larger boxes = More violations | Color intensity = Violation rate
+    #         """)
+        
+    #     # ============================================================================
+    #     # SEASONAL PATTERNS (UNCHANGED)
+    #     # ============================================================================
+        
+    #     st.divider()
+    #     st.subheader("🌍 Seasonal Violation Patterns")
+        
+    #     seasonal_data = df.groupby(['season', 'vegetable_english']).agg({
+    #         'violation_numeric': ['sum', 'mean']
+    #     }).reset_index()
+        
+    #     seasonal_data.columns = ['Season', 'Vegetable', 'Total_Violations', 'Violation_Rate']
+        
+    #     top_veg = df.groupby('vegetable_english')['violation_numeric'].sum().nlargest(10).index
+    #     seasonal_top = seasonal_data[seasonal_data['Vegetable'].isin(top_veg)]
+        
+    #     fig_seasonal = px.bar(
+    #         seasonal_top,
+    #         x='Vegetable',
+    #         y='Total_Violations',
+    #         color='Season',
+    #         barmode='group',
+    #         title='Violations by Vegetable and Season (Top 10 Vegetables)',
+    #         color_discrete_map={
+    #             'Winter': '#3498DB',
+    #             'Spring': '#2ECC71', 
+    #             'Summer': '#F39C12',
+    #             'Fall': '#E74C3C'
+    #         }
+    #     )
+        
+    #     fig_seasonal.update_layout(
+    #         height=500,
+    #         xaxis_tickangle=-45,
+    #         xaxis_title='Vegetable',
+    #         yaxis_title='Total Violations'
+    #     )
+        
+    #     st.plotly_chart(fig_seasonal, use_container_width=True)
+        
+    #     # ============================================================================
+    #     # FIXED DIAGNOSTICS SECTION
+    #     # ============================================================================
+        
+    #     with st.expander("🔍 Diagnostics"):
+    #         st.subheader("Environment Information")
+    #         try:
+    #             import plotly
+    #             st.write(f"Plotly version: {plotly.__version__}")  # FIXED: Use plotly.__version__ not px.__version__
+    #         except:
+    #             st.write("Plotly version: Unknown")
+            
+    #         st.write(f"Pandas version: {pd.__version__}")
+    #         st.write(f"Streamlit version: {st.__version__}")
+
+
+
     # ============================================================================
-    # TAB 3: RISK HEATMAPS - FIXED COLOR VERSION
+    # TAB 3: RISK HEATMAPS - CUSTOM COLOR MAPPING APPROACH
     # ============================================================================
 
     with tab3:
         st.header("🗺️ Risk Heatmaps")
         
-        st.info("""
-        **Business Value:** Visual pattern recognition for contamination hotspots.
-        """)
-        
-        # Calculate violation rates by combination
+        # Your existing data preparation code...
         heatmap_data = df.groupby(['vegetable_english', 'pesticide']).agg({
             'violation_numeric': ['sum', 'count', 'mean']
         }).reset_index()
-        
         heatmap_data.columns = ['Vegetable', 'Pesticide', 'Violations', 'Tests', 'Violation_Rate']
-        
-        # Ensure numeric types
         heatmap_data['Violations'] = pd.to_numeric(heatmap_data['Violations'], errors='coerce')
-        heatmap_data['Tests'] = pd.to_numeric(heatmap_data['Tests'], errors='coerce') 
+        heatmap_data['Tests'] = pd.to_numeric(heatmap_data['Tests'], errors='coerce')
         heatmap_data['Violation_Rate'] = pd.to_numeric(heatmap_data['Violation_Rate'], errors='coerce')
         heatmap_data = heatmap_data.dropna()
         heatmap_data['Violations'] = heatmap_data['Violations'].astype(int)
         
-        # Filter by minimum tests
         min_tests = st.slider("Minimum tests required:", 1, 10, 3)
         heatmap_filtered = heatmap_data[heatmap_data['Tests'] >= min_tests].copy()
         
-        st.info(f"📊 Showing {len(heatmap_filtered)} combinations with at least {min_tests} tests")
-        
         if len(heatmap_filtered) < 3:
-            st.warning("⚠️ Not enough data. Lower the minimum tests requirement.")
+            st.warning("⚠️ Not enough data.")
         else:
+            top_combos = heatmap_filtered.nlargest(30, 'Violations').copy()
+            
             # ============================================================================
-            # FIXED BUBBLE CHART - MANUAL APPROACH WITH COLOR FIX
+            # SOLUTION 1: CUSTOM COLOR MAPPING FOR BUBBLE CHART
             # ============================================================================
             
             st.subheader("🔥 Violation Rate Bubble Chart")
             
-            top_combos = heatmap_filtered.nlargest(30, 'Violations').copy()
+            # MANUAL COLOR MAPPING - COMPLETELY BYPASS PLOTLY COLORSCALE
+            def get_color_for_rate(rate):
+                if rate <= 0.33:
+                    return 'green'    # Low risk
+                elif rate <= 0.66:
+                    return 'yellow'   # Medium risk  
+                else:
+                    return 'red'      # High risk
             
-            # DEBUG: Show color data
-            with st.expander("🔍 Color Debug Info"):
-                st.write("Violation Rate ranges for coloring:")
-                st.write(f"Min: {top_combos['Violation_Rate'].min():.3f}")
-                st.write(f"Max: {top_combos['Violation_Rate'].max():.3f}")
-                st.write(f"Mean: {top_combos['Violation_Rate'].mean():.3f}")
-                st.write("Sample data for coloring:")
-                st.dataframe(top_combos[['Vegetable', 'Pesticide', 'Violations', 'Violation_Rate']].head())
+            # Create color array manually
+            colors_manual = [get_color_for_rate(rate) for rate in top_combos['Violation_Rate']]
             
-            # Calculate bubble sizes (10-50 pixels)
+            # Size calculation
             min_violations = top_combos['Violations'].min()
             max_violations = top_combos['Violations'].max()
+            bubble_sizes = [10 + (v - min_violations) / (max_violations - min_violations) * 40 
+                        for v in top_combos['Violations']]
             
-            def scale_size(violations, min_val, max_val, min_size=10, max_size=50):
-                if max_val == min_val:
-                    return (min_size + max_size) / 2
-                return min_size + (violations - min_val) / (max_val - min_val) * (max_size - min_size)
+            # Create scatter plot with MANUAL colors
+            fig_bubble_manual = go.Figure()
             
-            bubble_sizes = [scale_size(v, min_violations, max_violations) for v in top_combos['Violations']]
+            # Group by color and create separate traces
+            for color_name in ['green', 'yellow', 'red']:
+                mask = [c == color_name for c in colors_manual]
+                if any(mask):
+                    filtered_data = top_combos[mask]
+                    filtered_sizes = [bubble_sizes[i] for i, m in enumerate(mask) if m]
+                    
+                    fig_bubble_manual.add_trace(go.Scatter(
+                        x=filtered_data['Pesticide'],
+                        y=filtered_data['Vegetable'],
+                        mode='markers',
+                        marker=dict(
+                            size=filtered_sizes,
+                            color=color_name,
+                            line=dict(width=1.5, color='black'),
+                            opacity=0.85
+                        ),
+                        name=f'{color_name.title()} Risk',
+                        text=[f"{row['Vegetable']} + {row['Pesticide']}<br>"
+                            f"Violations: {row['Violations']}<br>"
+                            f"Rate: {row['Violation_Rate']:.1%}" 
+                            for _, row in filtered_data.iterrows()],
+                        hovertemplate='%{text}<extra></extra>'
+                    ))
             
-            # FIX: Ensure color array is properly formatted
-            color_array = top_combos['Violation_Rate'].values
-            
-            # Create manual bubble chart with COLOR FIX
-            fig_bubble = go.Figure()
-            
-            fig_bubble.add_trace(go.Scatter(
-                x=top_combos['Pesticide'],
-                y=top_combos['Vegetable'], 
-                mode='markers',
-                marker=dict(
-                    size=bubble_sizes,
-                    color=color_array,  # Use the properly formatted color array
-                    colorscale='RdYlGn_r',  # Red-Yellow-Green reversed
-                    cmin=0,  # Explicitly set min to 0
-                    cmax=1,  # Explicitly set max to 1
-                    showscale=True,
-                    colorbar=dict(
-                        title="Violation Rate",
-                        tickformat='.0%',  # Show as percentages
-                        tickvals=[0, 0.25, 0.5, 0.75, 1.0],
-                        ticktext=['0%', '25%', '50%', '75%', '100%']
-                    ),
-                    line=dict(width=1.5, color='DarkSlateGrey'),
-                    opacity=0.85
-                ),
-                text=[f"<b>{row['Vegetable']} + {row['Pesticide']}</b><br>"
-                    f"Violations: {row['Violations']}<br>"
-                    f"Tests: {row['Tests']}<br>"
-                    f"Rate: {row['Violation_Rate']:.1%}" 
-                    for _, row in top_combos.iterrows()],
-                hovertemplate='%{text}<extra></extra>'
-            ))
-            
-            fig_bubble.update_layout(
+            fig_bubble_manual.update_layout(
                 title=f'Top {len(top_combos)} Combinations by Violation Count',
                 xaxis_title='Pesticide',
                 yaxis_title='Vegetable',
                 height=600,
                 xaxis_tickangle=-45,
-                showlegend=False
+                showlegend=True
             )
             
-            st.plotly_chart(fig_bubble, use_container_width=True)
+            st.plotly_chart(fig_bubble_manual, use_container_width=True)
             
-            # ============================================================================
-            # FIXED TREEMAP - WITH PROPER COLOR RANGE
-            # ============================================================================
+
             
+          # ============================================================================
+            # TREEMAP SECTION - MULTIPLE ALTERNATIVE APPROACHES
+            # ============================================================================
+
             st.subheader("📊 Violations Treemap")
-            
+
             treemap_data = heatmap_filtered.nlargest(25, 'Violations').copy()
-            
-            # FIX: Use Plotly Express with explicit color range
-            fig_treemap = px.treemap(
-                treemap_data,
-                path=['Vegetable', 'Pesticide'],
-                values='Violations',
-                color='Violation_Rate',
-                color_continuous_scale='RdYlGn_r',  # Use same scale as bubble chart
-                range_color=[0, 1],  # EXPLICITLY set range from 0 to 1
-                title='Violations by Vegetable-Pesticide Combination'
-            )
-            
-            # Customize the treemap
-            fig_treemap.update_layout(
-                height=600,
-                margin=dict(t=50, l=0, r=0, b=0)
-            )
-            
-            fig_treemap.update_traces(
-                textinfo="label+value+percent parent",
-                hovertemplate='<b>%{label}</b><br>Violations: %{value}<br>Violation Rate: %{color:.1%}<extra></extra>',
-                marker=dict(
-                    line=dict(width=2, color='white')
+
+            # ============================================================================
+            # APPROACH 1: PLOTLY EXPRESS TREEMAP WITH DISCRETE COLORS
+            # ============================================================================
+
+            st.markdown("#### Approach 1: Discrete Color Treemap")
+
+            # Create risk categories for discrete coloring
+            def get_risk_category(rate):
+                if rate <= 0.33:
+                    return 'Low (0-33%)'
+                elif rate <= 0.66:
+                    return 'Medium (33-66%)'
+                else:
+                    return 'High (66-100%)'
+
+            treemap_data['Risk Category'] = treemap_data['Violation_Rate'].apply(get_risk_category)
+
+            try:
+                fig_treemap1 = px.treemap(
+                    treemap_data,
+                    path=['Vegetable', 'Pesticide'],
+                    values='Violations',
+                    color='Risk Category',
+                    color_discrete_map={
+                        'Low (0-33%)': 'green',
+                        'Medium (33-66%)': 'yellow', 
+                        'High (66-100%)': 'red'
+                    },
+                    title='Violations by Vegetable-Pesticide Combination (Discrete Colors)'
                 )
-            )
-            
-            # FIX: Update colorbar to show percentages
-            fig_treemap.update_coloraxes(
-                colorbar=dict(
-                    title="Violation Rate",
-                    tickformat='.0%',
-                    tickvals=[0, 0.25, 0.5, 0.75, 1.0],
-                    ticktext=['0%', '25%', '50%', '75%', '100%']
+                
+                fig_treemap1.update_layout(height=500)
+                fig_treemap1.update_traces(
+                    textinfo="label+value+percent parent",
+                    hovertemplate='<b>%{label}</b><br>Violations: %{value}<br>Risk: %{color}<extra></extra>'
                 )
-            )
-            
-            st.plotly_chart(fig_treemap, use_container_width=True)
-            
+                
+                st.plotly_chart(fig_treemap1, use_container_width=True)
+                st.success("✅ Discrete color treemap rendered")
+                
+            except Exception as e:
+                st.error(f"❌ Discrete treemap failed: {e}")
+
+            # ============================================================================
+            # APPROACH 2: MANUAL TREEMAP WITH EXPLICIT COLORS
+            # ============================================================================
+
+            st.markdown("#### Approach 2: Manual Treemap with Explicit Colors")
+
+            try:
+                # Build custom structure with explicit colors
+                labels = ['All Combinations']
+                parents = ['']
+                values = [treemap_data['Violations'].sum()]
+                colors = ['lightgray']
+                
+                # Add vegetables
+                for veg in treemap_data['Vegetable'].unique():
+                    veg_data = treemap_data[treemap_data['Vegetable'] == veg]
+                    total_viol = veg_data['Violations'].sum()
+                    
+                    labels.append(veg)
+                    parents.append('All Combinations')
+                    values.append(total_viol)
+                    colors.append('white')
+                
+                # Add pesticides with explicit colors
+                color_map = {'Low (0-33%)': 'green', 'Medium (33-66%)': 'yellow', 'High (66-100%)': 'red'}
+                
+                for _, row in treemap_data.iterrows():
+                    pesticide_label = f"{row['Pesticide']} ({row['Violation_Rate']:.0%})"
+                    labels.append(pesticide_label)
+                    parents.append(row['Vegetable'])
+                    values.append(row['Violations'])
+                    colors.append(color_map[get_risk_category(row['Violation_Rate'])])
+                
+                # Create manual treemap
+                fig_treemap2 = go.Figure(go.Treemap(
+                    labels=labels,
+                    parents=parents,
+                    values=values,
+                    marker=dict(
+                        colors=colors
+                    ),
+                    textinfo="label+value",
+                    hovertemplate='<b>%{label}</b><br>Violations: %{value}<extra></extra>'
+                ))
+                
+                fig_treemap2.update_layout(
+                    title='Violations Treemap (Manual Colors)',
+                    height=500
+                )
+                
+                st.plotly_chart(fig_treemap2, use_container_width=True)
+                st.success("✅ Manual treemap rendered")
+                
+            except Exception as e:
+                st.error(f"❌ Manual treemap failed: {e}")
+
+            # ============================================================================
+            # APPROACH 3: SUNBURST CHART AS ALTERNATIVE
+            # ============================================================================
+
+            st.markdown("#### Approach 3: Sunburst Chart (Alternative)")
+
+            try:
+                fig_sunburst = px.sunburst(
+                    treemap_data,
+                    path=['Vegetable', 'Pesticide'],
+                    values='Violations',
+                    color='Risk Category',
+                    color_discrete_map={
+                        'Low (0-33%)': 'green',
+                        'Medium (33-66%)': 'yellow',
+                        'High (66-100%)': 'red'
+                    },
+                    title='Violations Sunburst Chart'
+                )
+                
+                fig_sunburst.update_layout(height=500)
+                st.plotly_chart(fig_sunburst, use_container_width=True)
+                st.success("✅ Sunburst chart rendered")
+                
+            except Exception as e:
+                st.error(f"❌ Sunburst chart failed: {e}")
+
+            # ============================================================================
+            # APPROACH 4: SIMPLE BAR CHART AS FALLBACK
+            # ============================================================================
+
+            st.markdown("#### Approach 4: Interactive Bar Chart (Fallback)")
+
+            try:
+                # Create a combined label for the bar chart
+                treemap_data['Combination'] = treemap_data['Vegetable'] + ' + ' + treemap_data['Pesticide']
+                
+                fig_bar = px.bar(
+                    treemap_data.nlargest(15, 'Violations'),
+                    x='Combination',
+                    y='Violations',
+                    color='Risk Category',
+                    color_discrete_map={
+                        'Low (0-33%)': 'green',
+                        'Medium (33-66%)': 'yellow',
+                        'High (66-100%)': 'red'
+                    },
+                    title='Top 15 Vegetable-Pesticide Combinations',
+                    hover_data=['Violation_Rate']
+                )
+                
+                fig_bar.update_layout(
+                    height=500,
+                    xaxis_tickangle=-45,
+                    showlegend=True
+                )
+                
+                st.plotly_chart(fig_bar, use_container_width=True)
+                st.success("✅ Bar chart rendered")
+                
+            except Exception as e:
+                st.error(f"❌ Bar chart failed: {e}")
+
+            # ============================================================================
+            # DEBUGGING INFORMATION
+            # ============================================================================
+
+            with st.expander("🔍 Treemap Data Debugging"):
+                st.write("**Data for treemap visualizations:**")
+                st.write(f"Total combinations: {len(treemap_data)}")
+                st.write(f"Risk category distribution:")
+                st.write(treemap_data['Risk Category'].value_counts())
+                st.write("Sample data:")
+                st.dataframe(treemap_data[['Vegetable', 'Pesticide', 'Violations', 'Violation_Rate', 'Risk Category']].head(10))
+
             # ============================================================================
             # COLOR LEGEND
             # ============================================================================
+
+            st.info("""
+            **🎨 Color Guide (All Visualizations):**
+            - **🟢 Green:** Low risk (0-33% violation rate)
+            - **🟡 Yellow:** Medium risk (33-66% violation rate) 
+            - **🔴 Red:** High risk (66-100% violation rate)
+            """)
+            # ============================================================================
+            # SOLUTION 3: ALTERNATIVE VISUALIZATION - HEATMAP TABLE
+            # ============================================================================
+            
+            st.subheader("📋 Risk Matrix Table")
+            
+            # Create a pivot table for heatmap
+            pivot_data = top_combos.pivot_table(
+                index='Vegetable', 
+                columns='Pesticide', 
+                values='Violation_Rate',
+                aggfunc='first'
+            ).fillna(0)
+            
+            # Create styled dataframe
+            def style_risk_cell(val):
+                if val <= 0.33:
+                    color = 'background-color: #90EE90'  # Light green
+                elif val <= 0.66:
+                    color = 'background-color: #FFFFCC'  # Light yellow
+                else:
+                    color = 'background-color: #FFB6C1'  # Light red
+                return color
+            
+            styled_df = pivot_data.style.format('{:.1%}').applymap(style_risk_cell)
+            
+            st.dataframe(styled_df, use_container_width=True)
             
             st.info("""
             **🎨 Color Guide:**
-            - **Bubble Chart & Treemap:** 🟢 Green (0-33%) → 🟡 Yellow (33-66%) → 🔴 Red (66-100%)
-            - **Treemap Hierarchy:** Larger boxes = More violations | Color intensity = Violation rate
+            - **🟢 Green:** Low risk (0-33% violation rate)
+            - **🟡 Yellow:** Medium risk (33-66% violation rate) 
+            - **🔴 Red:** High risk (66-100% violation rate)
             """)
+
+    # ============================================================================
+    # DIAGNOSTICS - FIXED VERSION
+    # ============================================================================
+
+    with st.expander("🔍 Diagnostics"):
+        st.subheader("Environment Information")
+        try:
+            import plotly
+            st.write(f"Plotly version: {plotly.__version__}")
+        except:
+            st.write("Plotly version: Unknown")
         
-        # ============================================================================
-        # SEASONAL PATTERNS (UNCHANGED)
-        # ============================================================================
-        
-        st.divider()
-        st.subheader("🌍 Seasonal Violation Patterns")
-        
-        seasonal_data = df.groupby(['season', 'vegetable_english']).agg({
-            'violation_numeric': ['sum', 'mean']
-        }).reset_index()
-        
-        seasonal_data.columns = ['Season', 'Vegetable', 'Total_Violations', 'Violation_Rate']
-        
-        top_veg = df.groupby('vegetable_english')['violation_numeric'].sum().nlargest(10).index
-        seasonal_top = seasonal_data[seasonal_data['Vegetable'].isin(top_veg)]
-        
-        fig_seasonal = px.bar(
-            seasonal_top,
-            x='Vegetable',
-            y='Total_Violations',
-            color='Season',
-            barmode='group',
-            title='Violations by Vegetable and Season (Top 10 Vegetables)',
-            color_discrete_map={
-                'Winter': '#3498DB',
-                'Spring': '#2ECC71', 
-                'Summer': '#F39C12',
-                'Fall': '#E74C3C'
-            }
-        )
-        
-        fig_seasonal.update_layout(
-            height=500,
-            xaxis_tickangle=-45,
-            xaxis_title='Vegetable',
-            yaxis_title='Total Violations'
-        )
-        
-        st.plotly_chart(fig_seasonal, use_container_width=True)
-        
-        # ============================================================================
-        # FIXED DIAGNOSTICS SECTION
-        # ============================================================================
-        
-        with st.expander("🔍 Diagnostics"):
-            st.subheader("Environment Information")
-            try:
-                import plotly
-                st.write(f"Plotly version: {plotly.__version__}")  # FIXED: Use plotly.__version__ not px.__version__
-            except:
-                st.write("Plotly version: Unknown")
-            
-            st.write(f"Pandas version: {pd.__version__}")
-            st.write(f"Streamlit version: {st.__version__}")
+        st.write(f"Pandas version: {pd.__version__}")
+        st.write(f"Streamlit version: {st.__version__}")
 
     # ============================================================================
     # TAB 4: TREND ANALYSIS
