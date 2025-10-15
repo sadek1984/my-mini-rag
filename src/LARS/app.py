@@ -14,6 +14,91 @@ import re
 from scipy.stats import f_oneway
 import plotly.express as px
 import plotly.graph_objects as go
+import time
+
+
+# ============================================================================
+# ANIMATED INTRO FUNCTION
+# ============================================================================
+
+def show_lars_intro():
+    """Show LARS animated intro for 1 second"""
+    
+    # Create a container for the intro
+    intro_container = st.empty()
+    
+    # CSS for animation
+    intro_css = """
+    <style>
+    @keyframes slideUp {
+        0% {
+            transform: translateY(100vh);
+            opacity: 0;
+        }
+        20% {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        80% {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        100% {
+            transform: translateY(-100vh);
+            opacity: 0;
+        }
+    }
+    
+    .lars-intro {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100vh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        animation: slideUp 1.2s ease-in-out forwards;
+    }
+    
+    .lars-title {
+        font-size: 4rem;
+        font-weight: 900;
+        color: white;
+        text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        letter-spacing: 4px;
+    }
+    
+    .lars-subtitle {
+        font-size: 1.2rem;
+        color: rgba(255,255,255,0.9);
+        text-align: center;
+        margin-top: 1rem;
+    }
+    </style>
+    """
+    
+    # HTML for intro
+    intro_html = f"""
+    {intro_css}
+    <div class="lars-intro">
+        <div style="text-align: center;">
+            <div class="lars-title">LARS</div>
+            <div class="lars-subtitle">Laboratory Analytics & Risk System</div>
+        </div>
+    </div>
+    """
+    
+    # Show the intro
+    intro_container.markdown(intro_html, unsafe_allow_html=True)
+    
+    # Wait for 1.2 seconds (animation duration)
+    time.sleep(1.2)
+    
+    # Clear the intro
+    intro_container.empty()
 
 # ============================================================================
 # PAGE CONFIGURATION
@@ -203,19 +288,19 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for enhanced styling
+# Custom CSS for enhanced styling with LARS theme
 st.markdown("""
 <style>
     /* Main header styling */
     .main h1 {
-        color: #FF4B4B;
+        color: #2E8B57;
         font-size: 2.5rem !important;
         font-weight: 700 !important;
     }
     
     /* Sidebar styling */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #f0f2f6 0%, #e8eaf0 100%);
+        background: linear-gradient(180deg, #f0f8f0 0%, #e8f5e8 100%);
     }
     
     /* Button styling */
@@ -223,41 +308,52 @@ st.markdown("""
         border-radius: 10px;
         font-weight: 600;
         transition: all 0.3s ease;
+        background: linear-gradient(135deg, #2E8B57 0%, #3CB371 100%);
+        color: white;
     }
     
     .stButton>button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        box-shadow: 0 4px 12px rgba(46, 139, 87, 0.3);
     }
     
     /* Metric styling */
     [data-testid="stMetricValue"] {
         font-size: 1.8rem;
         font-weight: 700;
+        color: #2E8B57;
     }
     
     /* Info box styling */
     .stAlert {
         border-radius: 10px;
+        border-left: 4px solid #2E8B57;
     }
     
     /* Chat input styling */
     .stChatInputContainer {
-        border-top: 2px solid #f0f2f6;
+        border-top: 2px solid #f0f8f0;
         padding-top: 1rem;
     }
     
     /* Expander styling */
     .streamlit-expanderHeader {
-        background-color: #f8f9fa;
+        background-color: #f8fff8;
         border-radius: 8px;
         font-weight: 600;
+        border-left: 3px solid #2E8B57;
     }
     
     /* DataFrame styling */
     [data-testid="stDataFrame"] {
         border-radius: 10px;
         overflow: hidden;
+    }
+    
+    /* Success messages */
+    .stSuccess {
+        background-color: #f0fff0;
+        border-color: #2E8B57;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -472,6 +568,9 @@ Ask your question to get started! 🚀"""
     
     if 'project_id' not in st.session_state:
         st.session_state.project_id = "TrhBVe_m5gg2002_E5VVqS"
+    # Track if intro has been shown
+    if 'intro_shown' not in st.session_state:
+        st.session_state.intro_shown = False
 
 # ============================================================================
 # MAIN APPLICATION
@@ -479,6 +578,99 @@ Ask your question to get started! 🚀"""
 def get_api_client():
     """Get API client instance (not cached to avoid issues)"""
     return APIClient()
+def render_animated_header():
+    """Render the animated LARS header"""
+    html_code = """
+    <div class="lars-container">
+        <h1 class="main-title">LARS</h1>
+        <h2 class="subtitle">Laboratory <span class="accent">Analytics</span> & <span class="accent">Risk</span> System</h2>
+    </div>
+    
+    <style>
+        .lars-container {
+            text-align: center;
+            padding: 30px 20px;
+            border-radius: 15px;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            margin: 20px 0;
+            width: 100%;
+        }
+
+        .main-title {
+            font-size: 4.5rem;
+            font-weight: 900;
+            margin-bottom: 15px;
+            background: linear-gradient(45deg, #2e7d32, #4caf50, #81c784);
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            animation: shine 3s ease infinite, float 4s ease-in-out infinite;
+            text-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
+            letter-spacing: 2px;
+        }
+
+        .subtitle {
+            font-size: 1.5rem;
+            color: #1b5e20;
+            margin-bottom: 20px;
+            animation: fadeIn 2s ease;
+            font-weight: 500;
+        }
+
+        .accent {
+            color: #2e7d32;
+            font-weight: bold;
+        }
+
+        @keyframes shine {
+            0% {
+                background-position: 0% 50%;
+            }
+            50% {
+                background-position: 100% 50%;
+            }
+            100% {
+                background-position: 0% 50%;
+            }
+        }
+
+        @keyframes float {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-8px);
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .main-title {
+                font-size: 3rem;
+            }
+            
+            .subtitle {
+                font-size: 1.2rem;
+            }
+        }
+    </style>
+    """
+    
+    st.markdown(html_code, unsafe_allow_html=True)
+
 
 def main():
     """Main application entry point"""
@@ -487,8 +679,31 @@ def main():
         initialize_session_state()
         api_client = get_api_client()
         
-        # App header with emoji
-        st.title("🔮 Predictive Analytics Dashboard")
+        # Show LARS animated header only once (replaces the old intro)
+        if not st.session_state.intro_shown:
+            render_animated_header()  # This replaces show_lars_intro()
+            st.session_state.intro_shown = True
+        
+        # Remove the duplicate render_animated_header() call here
+        
+        # Your existing Streamlit content below
+        st.write("---")
+        st.header("Dashboard Overview")
+        
+        # Add your existing app components here
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Total Samples", "1,234", "12%")
+        
+        with col2:
+            st.metric("Risk Level", "Medium", "-3%")
+        
+        with col3:
+            st.metric("Completed Analysis", "89%", "4%")
+
+        # Remove the duplicate title since we have the animated header
+        # st.title("🌿 LARS - Laboratory Analytics & Risk System")  # Comment this out
         st.markdown("---")
         
         if 'page_nav' in st.session_state:
@@ -535,7 +750,6 @@ def main():
         st.error(f"❌ Critical Error: {str(e)}")
         st.exception(e)
         st.info("Please check the terminal for detailed error messages.")
-
 # ============================================================================
 # SIDEBAR
 # ============================================================================
@@ -2415,7 +2629,7 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
             st.plotly_chart(fig_bubble, use_container_width=True)
             
             # ============================================================================
-            # VISUALIZATION 2: CLEAN TREEMAP WITH WORKING GRADIENT
+            # VISUALIZATION 2: CLEAN TREEMAP WITH LIGHT GREEN COLOR SCHEME
             # ============================================================================
             
             st.subheader("📊 Clean Treemap - Actionable Insights")
@@ -2436,15 +2650,16 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
                     axis=1
                 )
                 
-                # Create treemap with proper color configuration
+                # ✅ UPDATED: Create treemap with LIGHT GREEN color scheme
                 fig_clean = px.treemap(
                     clean_treemap_data,
                     path=['Vegetable', 'Display_Label'],
                     values='Violations',
                     color='Violation_Rate',
-                    color_continuous_scale='RdYlGn_r',  # Red-Yellow-Green reversed
-                    range_color=[0, 1],  # CRITICAL: Explicit range
-                    title='Top 15 Highest-Risk Combinations (Proper Color Gradient)'
+                    # ✅ LIGHT GREEN COLOR SCHEME: Light green to dark green gradient
+                    color_continuous_scale=['#E8F5E8', '#2E8B57', '#1A5D1A'],
+                    range_color=[0, 1],
+                    title='Top 15 Highest-Risk Combinations (Light Green Theme)'
                 )
                 
                 # Clean up the layout
@@ -2470,7 +2685,7 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
                     )
                 )
                 
-                # CRITICAL FIX: Properly configure colorbar with explicit min/max
+                # ✅ UPDATED: Configure colorbar for green theme
                 fig_clean.update_coloraxes(
                     colorbar=dict(
                         title=dict(
@@ -2480,42 +2695,41 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
                         tickmode='array',
                         tickvals=[0, 0.33, 0.66, 1.0],
                         ticktext=[
-                            '🟢 Low (0-33%)',
-                            '🟡 Medium (33-66%)',
-                            '🟠 High (66-85%)',
-                            '🔴 Critical (85%+)'
+                            '🌱 Low (0-33%)',
+                            '🌿 Medium (33-66%)',
+                            '🍃 High (66-85%)',
+                            '🌲 Critical (85%+)'
                         ],
                         len=0.75,
                         thickness=22,
                         x=1.02
                     ),
-                    cmin=0,  # Force minimum to 0
-                    cmax=1   # Force maximum to 1
+                    cmin=0,
+                    cmax=1
                 )
                 
                 st.plotly_chart(fig_clean, use_container_width=True)
                 
             except Exception as e:
                 st.error(f"Treemap visualization failed: {e}")
-                st.info("Trying fallback solution...")
                 
-                # FALLBACK: Manual color assignment
+                # FALLBACK: Manual color assignment with green theme
                 try:
                     def get_risk_color(rate):
-                        """Assign color based on risk level"""
+                        """Assign green-based colors based on risk level"""
                         if rate < 0.33:
-                            return '#2ECC71'  # Green
+                            return '#E8F5E8'  # Very light green
                         elif rate < 0.66:
-                            return '#F39C12'  # Yellow
+                            return '#90EE90'  # Light green
                         elif rate < 0.85:
-                            return '#E67E22'  # Orange  
+                            return '#32CD32'  # Medium green
                         else:
-                            return '#E74C3C'  # Red
+                            return '#2E8B57'  # Sea green
                     
                     # Assign colors manually
                     clean_treemap_data['Manual_Color'] = clean_treemap_data['Violation_Rate'].apply(get_risk_color)
                     clean_treemap_data['Risk_Text'] = clean_treemap_data['Violation_Rate'].apply(
-                        lambda x: '🟢 Low' if x < 0.33 else '🟡 Medium' if x < 0.66 else '🟠 High' if x < 0.85 else '🔴 Critical'
+                        lambda x: '🌱 Low' if x < 0.33 else '🌿 Medium' if x < 0.66 else '🍃 High' if x < 0.85 else '🌲 Critical'
                     )
                     
                     # Create treemap with manual colors
@@ -2552,7 +2766,7 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
                         ))
                     
                     fig_fallback.update_layout(
-                        title='Top 15 Risk Combinations - Manual Color Assignment',
+                        title='Top 15 Risk Combinations - Green Theme',
                         height=550,
                         margin=dict(t=60, l=10, r=10, b=10)
                     )
@@ -2562,17 +2776,17 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
                     # Show color legend
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.markdown("🟢 **Low**: 0-33%")
+                        st.markdown("🌱 **Low**: 0-33%")
                     with col2:
-                        st.markdown("🟡 **Medium**: 33-66%")
+                        st.markdown("🌿 **Medium**: 33-66%")
                     with col3:
-                        st.markdown("🟠 **High**: 66-85%")
+                        st.markdown("🍃 **High**: 66-85%")
                     with col4:
-                        st.markdown("🔴 **Critical**: 85%+")
+                        st.markdown("🌲 **Critical**: 85%+")
                         
                 except Exception as e2:
                     st.error(f"Fallback also failed: {e2}")
-                    st.warning("Please check your data format and try again.")
+            
             
             # ============================================================================
             # VISUALIZATION 3: PRIORITY MATRIX TABLE
