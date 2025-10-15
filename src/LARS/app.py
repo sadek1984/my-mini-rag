@@ -375,6 +375,7 @@ ENDPOINTS = {
     "local_answer": "api/v1/nlp/local/answer",
     "statistical_insights": "api/v1/analytics/statistical-insights",
     "risk_assess": "api/v1/risk/assess",
+    "timeseries_dashboard": "api/v1/timeseries/interactive-dashboard"
 }
 
 AVAILABLE_YEARS = ["2022", "2023", "2024", "2025"]
@@ -733,6 +734,8 @@ def main():
                 show_anova_analysis_page(api_client)
             elif page == "🎯 Advanced Insights":
                 show_advanced_insights_page(api_client)
+            elif page == "🚀 Time Series Forecasting":
+                show_timeseries_page(api_client)
             else:
                 st.error(f"Unknown page: {page}")
                 st.info("Available pages: Home, AI Assistant, Predictions, Statistical Insights, ANOVA Analysis, Advanced Insights")
@@ -791,7 +794,8 @@ def render_sidebar(api_client):
             "🔮 Predictions", 
             "📊 Statistical Insights",
             "📈 ANOVA Analysis",
-            "🎯 Advanced Insights"
+            "🎯 Advanced Insights",
+            "🚀 Time Series Forecasting"
         ]
         
         # Get current page or default to Home
@@ -813,6 +817,89 @@ def render_sidebar(api_client):
 # ============================================================================
 # PAGE: HOME
 # ============================================================================
+def show_timeseries_page(api_client):
+    """Time Series Forecasting page with embedded dashboard"""
+    
+    st.title("🚀 Time Series Forecasting Dashboard")
+    
+    st.markdown("""
+    **Interactive Pesticide Forecasting**
+    - 📊 View historical trends and future predictions
+    - 📈 Multiple forecasting models (Prophet, ARIMA)
+    - 🔮 Confidence intervals and uncertainty estimates
+    - 📅 Different time horizons: Daily, Weekly, Monthly, Yearly
+    """)
+    
+    # Dashboard URL
+    dashboard_url = f"{api_client.base_url}/api/v1/timeseries/interactive-dashboard"
+    
+    # Display options
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        st.info(f"📡 **Dashboard URL:** `{dashboard_url}`")
+    
+    with col2:
+        if st.button("🔄 Refresh", key="refresh_timeseries", use_container_width=True):
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Access Dashboard Section
+    st.subheader("🌐 Access Dashboard")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown(f"""
+        <a href="{dashboard_url}" target="_blank">
+            <button style="
+                background: linear-gradient(135deg, #51CF66 0%, #40C057 100%);
+                color: white;
+                padding: 15px 30px;
+                font-size: 18px;
+                font-weight: bold;
+                border: none;
+                border-radius: 10px;
+                cursor: pointer;
+                width: 100%;
+                box-shadow: 0 4px 12px rgba(81, 207, 102, 0.3);
+            ">
+                🚀 Open Interactive Dashboard
+            </button>
+        </a>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.link_button(
+            "📱 Open in New Tab",
+            dashboard_url,
+            use_container_width=True
+        )
+    
+    st.markdown("---")
+    
+    # Embedded Dashboard
+    st.subheader("📺 Embedded Dashboard")
+    
+    iframe_height = st.slider(
+        "Adjust dashboard height:",
+        min_value=400,
+        max_value=1200,
+        value=800,
+        step=50
+    )
+    
+    st.markdown(f"""
+    <iframe 
+        src="{dashboard_url}" 
+        width="100%" 
+        height="{iframe_height}"
+        style="border: 2px solid #51CF66; border-radius: 10px;"
+        sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+    ></iframe>
+    """, unsafe_allow_html=True)
+
 
 def show_home_page(api_client):
     """Home page with overview"""
@@ -830,6 +917,7 @@ def show_home_page(api_client):
         - 🔮 **Enhanced Risk Assessment** - Monte Carlo + Bayesian analysis
         - 💬 **AI Assistant** - Natural language queries
         - 📈 **Real-time Dashboards** - Executive, Laboratory views
+        - 🚀 **Time Series Forecasting** - Interactive pesticide predictions
         
         ### 🚀 Getting Started:
         1. Check API connection in sidebar
@@ -848,7 +936,11 @@ def show_home_page(api_client):
         if st.button("📈 ANOVA Analysis", use_container_width=True, type="primary", key="home_btn_anova"):
             st.session_state.page_nav = "📈 ANOVA Analysis"
             st.rerun()
-        
+            
+        if st.button("🚀 Time Series Forecasting", use_container_width=True, type="primary", key="home_btn_timeseries"):
+            st.session_state.page_nav = "🚀 Time Series Forecasting"
+            st.rerun()
+
         if st.button("💬 AI Assistant", use_container_width=True, type="secondary", key="home_btn_assistant"):
             st.session_state.page_nav = "💬 AI Assistant"
             st.rerun()
