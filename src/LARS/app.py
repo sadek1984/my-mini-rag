@@ -2880,9 +2880,53 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
     # ============================================================================
 
     with tab4:
-        st.header("📈 Trend Analysis")
+        st.header("📈 Contamination Trend Analysis")
         
-        st.info("Temporal analysis of contamination patterns")
+        st.info("""
+        **Business Value:** Track how contamination patterns change over time.
+        - Identify if contamination is improving or worsening
+        - Monitor effectiveness of interventions
+        - Predict future contamination risks
+        """)
+        
+        # Check if we have temporal data
+        if 'year' in df.columns or 'month' in df.columns or 'date' in df.columns:
+            
+            # Time series by pesticide group
+            if 'pesticide_group' in df.columns:
+                st.subheader("📊 Violation Trends by Pesticide Group")
+                
+                # Assuming you have year and month
+                if 'year' in df.columns and 'month' in df.columns:
+                    df['period'] = df['year'].astype(str) + '-' + df['month'].astype(str).str.zfill(2)
+                    
+                    trend_data = df.groupby(['period', 'pesticide_group']).agg({
+                        'violation': ['sum', 'count', 'mean']
+                    }).reset_index()
+                    
+                    trend_data.columns = ['Period', 'Pesticide_Group', 'Violations', 'Tests', 'Violation_Rate']
+                    
+                    fig_trend = px.line(
+                        trend_data,
+                        x='Period',
+                        y='Violation_Rate',
+                        color='Pesticide_Group',
+                        title='Violation Rate Trends by Pesticide Group Over Time',
+                        markers=True
+                    )
+                    
+                    fig_trend.update_layout(
+                        xaxis_title='Time Period',
+                        yaxis_title='Violation Rate',
+                        height=500,
+                        hovermode='x unified'
+                    )
+                    
+                    st.plotly_chart(fig_trend, use_container_width=True)
+                
+            # Seasonal trend
+            st.subheader("🌍 Seasonal Contamination Trends")
+
         
         # Seasonal trend
         seasonal_trend = df.groupby('season').agg({
