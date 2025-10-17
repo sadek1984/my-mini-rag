@@ -21,6 +21,81 @@ import time
 # ANIMATED INTRO FUNCTION
 # ============================================================================
 
+import streamlit as st
+
+# ============================================================================
+# SESSION STATE INITIALIZATION - Add this at the TOP of your file
+# ============================================================================
+
+def initialize_session_state():
+    """
+    Initialize all session state variables to prevent AttributeError.
+    Call this at the very beginning of main() function.
+    """
+    
+    # Header display control
+    if "intro_shown" not in st.session_state:
+        st.session_state.intro_shown = False
+    
+    # Page navigation
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "🏠 Home"
+    
+    # AI Assistant chat states
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    
+    # Year selection for filtering
+    if "selected_year" not in st.session_state:
+        st.session_state.selected_year = None  # or set a default year like 2024
+    
+    # Project ID (if you're using projects)
+    if "project_id" not in st.session_state:
+        st.session_state.project_id = None
+    
+    # Sample/data selection states
+    if "selected_sample" not in st.session_state:
+        st.session_state.selected_sample = None
+    
+    if "selected_samples" not in st.session_state:
+        st.session_state.selected_samples = []
+    
+    # Analysis states
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = None
+    
+    if "prediction_results" not in st.session_state:
+        st.session_state.prediction_results = None
+    
+    # Filter states
+    if "filter_status" not in st.session_state:
+        st.session_state.filter_status = "all"
+    
+    if "filter_date_range" not in st.session_state:
+        st.session_state.filter_date_range = None
+    
+    # Data loading states
+    if "data_loaded" not in st.session_state:
+        st.session_state.data_loaded = False
+    
+    if "current_data" not in st.session_state:
+        st.session_state.current_data = None
+    
+    # User preferences
+    if "theme" not in st.session_state:
+        st.session_state.theme = "light"
+    
+    if "language" not in st.session_state:
+        st.session_state.language = "en"
+    
+    # Add any other session state variables your app uses
+    # Format: if "variable_name" not in st.session_state:
+    #             st.session_state.variable_name = default_value
+
+
 def show_lars_intro():
     """Show LARS animated intro for 1 second"""
     
@@ -282,7 +357,7 @@ def create_means_comparison_plot(summary_df: pd.DataFrame, group_by: str):
     return fig
 
 st.set_page_config(
-    page_title="🔮 Predictive Analytics Dashboard",
+    page_title="🔮 LARS Dashboard",
     page_icon="🔮",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -291,69 +366,299 @@ st.set_page_config(
 # Custom CSS for enhanced styling with LARS theme
 st.markdown("""
 <style>
-    /* Main header styling */
+    /* ===============================================
+       GLOBAL ENHANCEMENTS
+       =============================================== */
+    
+    /* Import Google Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
+    
+    /* Global font */
+    * {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    
+    /* Main app background */
+    .main {
+        background: linear-gradient(135deg, #f8fff8 0%, #e8f5e8 100%);
+    }
+    
+    /* ===============================================
+       HEADER STYLING
+       =============================================== */
     .main h1 {
-        color: #2E8B57;
+        color: #2e7d32;
         font-size: 2.5rem !important;
         font-weight: 700 !important;
+        background: linear-gradient(135deg, #1b5e20, #4caf50);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
     
-    /* Sidebar styling */
+    .main h2 {
+        color: #2e7d32;
+        font-weight: 600;
+    }
+    
+    .main h3 {
+        color: #388e3c;
+        font-weight: 600;
+    }
+    
+    /* ===============================================
+       SIDEBAR ENHANCEMENTS
+       =============================================== */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #f0f8f0 0%, #e8f5e8 100%);
+        background: linear-gradient(180deg, #e8f5e8 0%, #c8e6c9 100%);
+        border-right: 3px solid #81c784;
     }
     
-    /* Button styling */
+    [data-testid="stSidebar"] h2 {
+        color: #1b5e20;
+        font-weight: 700;
+    }
+    
+    /* ===============================================
+       BUTTON STYLING
+       =============================================== */
     .stButton>button {
-        border-radius: 10px;
+        border-radius: 12px;
         font-weight: 600;
         transition: all 0.3s ease;
-        background: linear-gradient(135deg, #2E8B57 0%, #3CB371 100%);
+        background: linear-gradient(135deg, #2e7d32 0%, #43a047 100%);
         color: white;
+        border: none;
+        padding: 12px 24px;
+        font-size: 16px;
+        box-shadow: 0 4px 12px rgba(46, 125, 50, 0.25);
     }
     
     .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(46, 139, 87, 0.3);
+        transform: translateY(-3px);
+        box-shadow: 0 8px 20px rgba(46, 125, 50, 0.4);
+        background: linear-gradient(135deg, #1b5e20 0%, #2e7d32 100%);
     }
     
-    /* Metric styling */
+    .stButton>button:active {
+        transform: translateY(-1px);
+    }
+    
+    /* Primary button variant */
+    .stButton>button[kind="primary"] {
+        background: linear-gradient(135deg, #1b5e20 0%, #388e3c 100%);
+    }
+    
+    /* Secondary button variant */
+    .stButton>button[kind="secondary"] {
+        background: linear-gradient(135deg, #81c784 0%, #66bb6a 100%);
+        color: #1b5e20;
+    }
+    
+    /* ===============================================
+       METRIC CARDS
+       =============================================== */
     [data-testid="stMetricValue"] {
-        font-size: 1.8rem;
+        font-size: 2rem;
         font-weight: 700;
-        color: #2E8B57;
+        background: linear-gradient(135deg, #1b5e20, #4caf50);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
     
-    /* Info box styling */
-    .stAlert {
-        border-radius: 10px;
-        border-left: 4px solid #2E8B57;
-    }
-    
-    /* Chat input styling */
-    .stChatInputContainer {
-        border-top: 2px solid #f0f8f0;
-        padding-top: 1rem;
-    }
-    
-    /* Expander styling */
-    .streamlit-expanderHeader {
-        background-color: #f8fff8;
-        border-radius: 8px;
+    [data-testid="stMetricDelta"] {
         font-weight: 600;
-        border-left: 3px solid #2E8B57;
     }
     
-    /* DataFrame styling */
-    [data-testid="stDataFrame"] {
-        border-radius: 10px;
-        overflow: hidden;
+    /* Metric container enhancement */
+    [data-testid="metric-container"] {
+        background: white;
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        border-left: 4px solid #4caf50;
+        transition: all 0.3s ease;
     }
     
-    /* Success messages */
+    [data-testid="metric-container"]:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 25px rgba(46, 125, 50, 0.2);
+    }
+    
+    /* ===============================================
+       INFO BOXES & ALERTS
+       =============================================== */
+    .stAlert {
+        border-radius: 12px;
+        border-left: 4px solid #4caf50;
+        background: linear-gradient(135deg, #f1f8e9 0%, #dcedc8 100%);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+    
     .stSuccess {
-        background-color: #f0fff0;
-        border-color: #2E8B57;
+        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+        border-color: #4caf50;
+    }
+    
+    .stInfo {
+        background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+        border-color: #2196f3;
+    }
+    
+    .stWarning {
+        background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+        border-color: #ff9800;
+    }
+    
+    .stError {
+        background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+        border-color: #f44336;
+    }
+    
+    /* ===============================================
+       EXPANDER STYLING
+       =============================================== */
+    .streamlit-expanderHeader {
+        background: linear-gradient(135deg, #f1f8e9 0%, #dcedc8 100%);
+        border-radius: 10px;
+        font-weight: 600;
+        border-left: 4px solid #4caf50;
+        padding: 15px;
+        transition: all 0.3s ease;
+    }
+    
+    .streamlit-expanderHeader:hover {
+        background: linear-gradient(135deg, #dcedc8 0%, #c5e1a5 100%);
+        transform: translateX(5px);
+    }
+    
+    /* ===============================================
+       DATAFRAME STYLING
+       =============================================== */
+    [data-testid="stDataFrame"] {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        border: 2px solid #c8e6c9;
+    }
+    
+    /* ===============================================
+       TAB STYLING
+       =============================================== */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        background: linear-gradient(135deg, #f1f8e9 0%, #dcedc8 100%);
+        padding: 10px;
+        border-radius: 12px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px;
+        padding: 10px 20px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #2e7d32 0%, #43a047 100%);
+        color: white;
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background: #c8e6c9;
+    }
+    
+    /* ===============================================
+       INPUT FIELDS
+       =============================================== */
+    .stTextInput>div>div>input,
+    .stNumberInput>div>div>input,
+    .stSelectbox>div>div>select {
+        border-radius: 10px;
+        border: 2px solid #c8e6c9;
+        transition: all 0.3s ease;
+    }
+    
+    .stTextInput>div>div>input:focus,
+    .stNumberInput>div>div>input:focus,
+    .stSelectbox>div>div>select:focus {
+        border-color: #4caf50;
+        box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+    }
+    
+    /* ===============================================
+       SLIDER STYLING
+       =============================================== */
+    .stSlider>div>div>div>div {
+        background: linear-gradient(90deg, #c8e6c9 0%, #4caf50 100%);
+    }
+    
+    /* ===============================================
+       CHAT MESSAGE STYLING
+       =============================================== */
+    .stChatMessage {
+        background: white;
+        border-radius: 15px;
+        padding: 15px;
+        margin: 10px 0;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        border-left: 4px solid #4caf50;
+    }
+    
+    /* ===============================================
+       DIVIDER
+       =============================================== */
+    hr {
+        border: none;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #4caf50, transparent);
+        margin: 30px 0;
+    }
+    
+    /* ===============================================
+       SCROLLBAR
+       =============================================== */
+    ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #f1f8e9;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, #81c784, #4caf50);
+        border-radius: 5px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(135deg, #66bb6a, #388e3c);
+    }
+    
+    /* ===============================================
+       LOADING SPINNER
+       =============================================== */
+    .stSpinner > div {
+        border-top-color: #4caf50 !important;
+    }
+    
+    /* ===============================================
+       DOWNLOAD BUTTON
+       =============================================== */
+    .stDownloadButton>button {
+        background: linear-gradient(135deg, #1b5e20 0%, #2e7d32 100%);
+        color: white;
+        border-radius: 12px;
+        padding: 12px 24px;
+        font-weight: 600;
+        box-shadow: 0 4px 12px rgba(46, 125, 50, 0.25);
+    }
+    
+    .stDownloadButton>button:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 20px rgba(46, 125, 50, 0.4);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -579,119 +884,395 @@ Ask your question to get started! 🚀"""
 def get_api_client():
     """Get API client instance (not cached to avoid issues)"""
     return APIClient()
-def render_animated_header():
-    """Render the animated LARS header"""
-    html_code = """
-    <div class="lars-container">
-        <h1 class="main-title">LARS</h1>
-        <h2 class="subtitle">Laboratory <span class="accent">Analytics</span> & <span class="accent">Risk</span> System</h2>
-    </div>
+
+
+# def render_animated_header():
+#     """Render the animated LARS header exactly as shown in the screenshot"""
     
-    <style>
-        .lars-container {
-            text-align: center;
-            padding: 30px 20px;
-            border-radius: 15px;
-            background: rgba(255, 255, 255, 0.2);
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-            margin: 20px 0;
-            width: 100%;
-        }
-
-        .main-title {
-            font-size: 4.5rem;
-            font-weight: 900;
-            margin-bottom: 15px;
-            background: linear-gradient(45deg, #2e7d32, #4caf50, #81c784);
-            background-size: 200% 200%;
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            animation: shine 3s ease infinite, float 4s ease-in-out infinite;
-            text-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
-            letter-spacing: 2px;
-        }
-
-        .subtitle {
-            font-size: 1.5rem;
-            color: #1b5e20;
-            margin-bottom: 20px;
-            animation: fadeIn 2s ease;
-            font-weight: 500;
-        }
-
-        .accent {
-            color: #2e7d32;
-            font-weight: bold;
-        }
-
-        @keyframes shine {
-            0% {
-                background-position: 0% 50%;
-            }
-            50% {
-                background-position: 100% 50%;
-            }
-            100% {
-                background-position: 0% 50%;
-            }
-        }
-
-        @keyframes float {
-            0%, 100% {
-                transform: translateY(0);
-            }
-            50% {
-                transform: translateY(-8px);
-            }
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(15px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        @media (max-width: 768px) {
-            .main-title {
-                font-size: 3rem;
-            }
+#     st.markdown("""
+#     <div class="lars-container">
+#         <div class="lars-content">
+#             <h1 class="lars-main-title">
+#                 <span class="letter" style="animation-delay: 0s">L</span>
+#                 <span class="letter" style="animation-delay: 0.1s">A</span>
+#                 <span class="letter" style="animation-delay: 0.2s">R</span>
+#                 <span class="letter" style="animation-delay: 0.3s">S</span>
+#             </h1>
             
-            .subtitle {
-                font-size: 1.2rem;
-            }
-        }
-    </style>
-    """
+#             <h2 class="lars-subtitle-enhanced">
+#                 <span class="highlight">Laboratory</span>
+#                 <span class="accent-text">Analytics</span>
+#                 & 
+#                 <span class="accent-text">Risk</span>
+#                 <span class="highlight">System</span>
+#             </h2>
+            
+#             <p class="lars-tagline">
+#                 Powered by AI • Trusted by Scientists • Protecting Public Health  
+#             </p>
+            
+#             <div class="feature-badges">
+#                 <div class="badge">Real-time Analysis</div>
+#                 <div class="badge">Advanced Analytics</div>
+#                 <div class="badge">Secure & Compliant</div>
+#             </div>
+#         </div>
+#     </div>
+
+#     <style>
+#     .lars-container {
+#         text-align: center;
+#         padding: 40px 20px;
+#         margin: 0 auto;
+#         max-width: 1200px;
+#         background: transparent;
+#     }
     
-    st.markdown(html_code, unsafe_allow_html=True)
+#     .lars-content {
+#         padding: 30px;
+#         background: rgba(255, 255, 255, 0.1);
+#         backdrop-filter: blur(10px);
+#         border-radius: 20px;
+#         border: 1px solid rgba(255, 255, 255, 0.2);
+#         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+#     }
+    
+#     .lars-main-title {
+#         font-size: 4.5rem;
+#         font-weight: 900;
+#         margin: 20px 0;
+#         letter-spacing: 15px;
+#         color: #1b5e20;
+#         text-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+#     }
+    
+#     .letter {
+#         display: inline-block;
+#         opacity: 0;
+#         transform: translateY(-30px);
+#         animation: letterPop 0.8s ease-out forwards;
+#         background: linear-gradient(135deg, #1b5e20, #2e7d32, #4caf50);
+#         -webkit-background-clip: text;
+#         -webkit-text-fill-color: transparent;
+#         background-clip: text;
+#     }
+    
+#     .letter:nth-child(1) { animation-delay: 0s; }
+#     .letter:nth-child(2) { animation-delay: 0.1s; }
+#     .letter:nth-child(3) { animation-delay: 0.2s; }
+#     .letter:nth-child(4) { animation-delay: 0.3s; }
+    
+#     @keyframes letterPop {
+#         0% {
+#             opacity: 0;
+#             transform: translateY(-30px) scale(0.8);
+#         }
+#         50% {
+#             transform: translateY(5px) scale(1.05);
+#         }
+#         100% {
+#             opacity: 1;
+#             transform: translateY(0) scale(1);
+#         }
+#     }
+    
+#     .lars-subtitle-enhanced {
+#         font-size: 1.8rem;
+#         margin: 25px 0;
+#         font-weight: 500;
+#         color: #1b5e20;
+#         animation: fadeInUp 1s ease 0.5s both;
+#     }
+    
+#     .highlight {
+#         font-weight: 700;
+#         color: #2e7d32;
+#     }
+    
+#     .accent-text {
+#         font-weight: 700;
+#         color: #1b5e20;
+#         position: relative;
+#     }
+    
+#     .accent-text::after {
+#         content: '';
+#         position: absolute;
+#         bottom: -2px;
+#         left: 0;
+#         width: 100%;
+#         height: 2px;
+#         background: linear-gradient(90deg, transparent, #4caf50, transparent);
+#         animation: shimmer 3s infinite;
+#     }
+    
+#     @keyframes shimmer {
+#         0%, 100% { opacity: 0.3; }
+#         50% { opacity: 1; }
+#     }
+    
+#     @keyframes fadeInUp {
+#         from {
+#             opacity: 0;
+#             transform: translateY(20px);
+#         }
+#         to {
+#             opacity: 1;
+#             transform: translateY(0);
+#         }
+#     }
+    
+#     .lars-tagline {
+#         font-size: 1.1rem;
+#         color: #1b5e20;
+#         margin: 30px 0;
+#         font-weight: 500;
+#         opacity: 0.9;
+#         animation: fadeInUp 1s ease 0.7s both;
+#     }
+    
+#     .feature-badges {
+#         display: flex;
+#         justify-content: center;
+#         gap: 20px;
+#         flex-wrap: wrap;
+#         margin-top: 35px;
+#         animation: fadeInUp 1s ease 0.9s both;
+#     }
+    
+#     .badge {
+#         background: rgba(46, 125, 50, 0.1);
+#         color: #2e7d32;
+#         padding: 12px 25px;
+#         border-radius: 25px;
+#         font-size: 0.95rem;
+#         font-weight: 600;
+#         border: 1px solid rgba(46, 125, 50, 0.2);
+#         transition: all 0.3s ease;
+#         backdrop-filter: blur(10px);
+#     }
+    
+#     .badge:hover {
+#         transform: translateY(-3px);
+#         background: rgba(46, 125, 50, 0.15);
+#         box-shadow: 0 5px 15px rgba(46, 125, 50, 0.2);
+#     }
+    
+#     /* Responsive design */
+#     @media (max-width: 768px) {
+#         .lars-main-title {
+#             font-size: 3rem;
+#             letter-spacing: 10px;
+#         }
+        
+#         .lars-subtitle-enhanced {
+#             font-size: 1.4rem;
+#         }
+        
+#         .lars-tagline {
+#             font-size: 1rem;
+#         }
+        
+#         .feature-badges {
+#             gap: 15px;
+#         }
+        
+#         .badge {
+#             padding: 10px 20px;
+#             font-size: 0.9rem;
+#         }
+#     }
+    
+#     @media (max-width: 480px) {
+#         .lars-main-title {
+#             font-size: 2.5rem;
+#             letter-spacing: 8px;
+#         }
+        
+#         .lars-subtitle-enhanced {
+#             font-size: 1.2rem;
+#         }
+        
+#         .feature-badges {
+#             flex-direction: column;
+#             align-items: center;
+#         }
+#     }
+#     </style>
+#     """, unsafe_allow_html=True)
 
 
+import textwrap
+
+def render_animated_header():
+    """Render the animated LARS header exactly as shown in the screenshot"""
+    
+    html_content = (
+        '<div class="lars-hero-container">'
+        '<div class="lars-content">'
+        '<h1 class="lars-main-title">'
+        '<span class="letter" style="animation-delay: 0s">L</span>'
+        '<span class="letter" style="animation-delay: 0.1s">A</span>'
+        '<span class="letter" style="animation-delay: 0.2s">R</span>'
+        '<span class="letter" style="animation-delay: 0.3s">S</span>'
+        '</h1>'
+        '<h2 class="lars-subtitle-enhanced">'
+        '<span class="highlight">Laboratory</span> <span class="accent-text">Analytics</span> & <span class="accent-text">Risk</span> <span class="highlight">System</span>'
+        '</h2>'
+        '<p class="lars-tagline">'
+        'Powered by AI • Trusted by Scientists • Protecting Public Health'
+        '</p>'
+        '<div class="feature-badges">'
+        '<div class="badge">Real-time Analysis</div>'
+        '<div class="badge">Advanced Analytics</div>'
+        '<div class="badge">Secure & Compliant</div>'
+        '</div>'
+        '</div>'
+        '</div>'
+    )
+    
+    st.markdown(html_content, unsafe_allow_html=True)
+    
+    css_styles = textwrap.dedent("""
+    <style>
+    .lars-hero-container {
+        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 25%, #a5d6a7 50%, #81c784 75%, #66bb6a 100%);
+        padding: 60px 20px;
+        margin: -20px -60px 40px -60px;
+        border-radius: 0 0 30px 30px;
+        box-shadow: 0 8px 30px rgba(46, 125, 50, 0.25);
+        text-align: center;
+    }
+    
+    .lars-content {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+    
+    .lars-main-title {
+        font-size: 4.5rem;
+        font-weight: 900;
+        margin: 20px 0;
+        letter-spacing: 15px;
+        color: #1b5e20;
+    }
+    
+    .letter {
+        display: inline-block;
+        opacity: 0;
+        transform: translateY(-30px);
+        animation: letterPop 0.8s ease-out forwards;
+        background: linear-gradient(135deg, #1b5e20, #2e7d32, #4caf50);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    @keyframes letterPop {
+        0% { opacity: 0; transform: translateY(-30px) scale(0.8); }
+        50% { transform: translateY(5px) scale(1.05); }
+        100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    
+    .lars-subtitle-enhanced {
+        font-size: 1.8rem;
+        margin: 25px 0;
+        font-weight: 500;
+        color: #1b5e20;
+        animation: fadeInUp 1s ease 0.5s both;
+    }
+    
+    .highlight {
+        font-weight: 700;
+        color: #2e7d32;
+    }
+    
+    .accent-text {
+        font-weight: 700;
+        color: #1b5e20;
+    }
+    
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .lars-tagline {
+        font-size: 1.1rem;
+        color: #1b5e20;
+        margin: 30px 0;
+        font-weight: 500;
+        opacity: 0.9;
+        animation: fadeInUp 1s ease 0.7s both;
+    }
+    
+    .feature-badges {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-top: 35px;
+        animation: fadeInUp 1s ease 0.9s both;
+    }
+    
+    .badge {
+        background: rgba(255, 255, 255, 0.9);
+        color: #2e7d32;
+        padding: 12px 25px;
+        border-radius: 25px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        border: 1px solid rgba(46, 125, 50, 0.2);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+    }
+    
+    .badge:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 20px rgba(46, 125, 50, 0.2);
+        background: white;
+    }
+    
+    /* Responsive design */
+    @media (max-width: 768px) {
+        .lars-hero-container { padding: 40px 15px; margin: -20px -20px 30px -20px; }
+        .lars-main-title { font-size: 3rem; letter-spacing: 10px; }
+        .lars-subtitle-enhanced { font-size: 1.4rem; }
+        .lars-tagline { font-size: 1rem; }
+        .feature-badges { gap: 15px; }
+        .badge { padding: 10px 20px; font-size: 0.9rem; }
+    }
+    
+    @media (max-width: 480px) {
+        .lars-main-title { font-size: 2.5rem; letter-spacing: 8px; }
+        .lars-subtitle-enhanced { font-size: 1.2rem; }
+        .feature-badges { flex-direction: column; align-items: center; }
+    }
+    </style>
+    """)
+    
+    st.markdown(css_styles, unsafe_allow_html=True)
+
+# The main function remains the same, as the issue was in the header rendering
 def main():
     """Main application entry point"""
-    
+    initialize_session_state()
+    if 'intro_shown' not in st.session_state:
+        st.session_state.intro_shown = False
+
     try:
-        initialize_session_state()
-        api_client = get_api_client()
-        
-        # Show LARS animated header only once (replaces the old intro)
+        # Show LARS animated header only once
         if not st.session_state.intro_shown:
-            render_animated_header()  # This replaces show_lars_intro()
+            render_animated_header()
             st.session_state.intro_shown = True
         
-        # Remove the duplicate render_animated_header() call here
+        # Rest of your existing code...
+        api_client = get_api_client()
         
-        # Your existing Streamlit content below
-        st.write("---")
-        st.header("Dashboard Overview")
+        st.markdown("---")
+        st.subheader("Dashboard Metrics")
         
-        # Add your existing app components here
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -703,56 +1284,33 @@ def main():
         with col3:
             st.metric("Completed Analysis", "89%", "4%")
 
-        # Remove the duplicate title since we have the animated header
-        # st.title("🌿 LARS - Laboratory Analytics & Risk System")  # Comment this out
         st.markdown("---")
         
-        if 'page_nav' in st.session_state:
-            st.session_state.current_page = st.session_state.page_nav
-            del st.session_state.page_nav
-        
-        # Sidebar
+        # Your existing sidebar and page routing code...
         render_sidebar(api_client)
+
+        page = st.session_state.get('current_page', '🏠 Home')
         
-        # Get selected page
-        page = st.session_state.get('current_page', '💬 AI Assistant')
+        # Dictionary-based router for page navigation
+        pages = {
+            "🏠 Home": show_home_page,
+            "🔮 Predictions": show_predictions_page,
+            "💬 AI Assistant": show_chat_page,
+            "📊 Statistical Insights": show_statistical_insights_page,
+            "📈 ANOVA Analysis": show_anova_analysis_page,
+            "🎯 Advanced Insights": show_advanced_insights_page,
+            "🚀 Time Series Forecasting": show_timeseries_page,
+        }
         
-        # Debug: Show current page
-        # st.sidebar.write(f"DEBUG: Current page = {page}")  # Uncomment for debugging
-        
-        # Route to pages
-        try:
-            if page == "🏠 Home":
-                show_home_page(api_client)
-            elif page == "🔮 Predictions":
-                show_predictions_page(api_client)
-            elif page == "💬 AI Assistant":
-                show_chat_page(api_client)
-            elif page == "📊 Statistical Insights":
-                show_statistical_insights_page(api_client)
-            elif page == "📈 ANOVA Analysis":
-                show_anova_analysis_page(api_client)
-            elif page == "🎯 Advanced Insights":
-                show_advanced_insights_page(api_client)
-            elif page == "🚀 Time Series Forecasting":
-                show_timeseries_page(api_client)
-            else:
-                st.error(f"Unknown page: {page}")
-                st.info("Available pages: Home, AI Assistant, Predictions, Statistical Insights, ANOVA Analysis, Advanced Insights")
-        
-        except Exception as page_error:
-            st.error(f"❌ Error loading page: {str(page_error)}")
-            st.exception(page_error)
-            
-            # Show fallback
-            st.markdown("---")
-            st.markdown("### 🏠 Welcome")
-            st.info("There was an error loading the selected page. Please select another page from the sidebar.")
-    
+        page_function = pages.get(page)
+        if page_function:
+            page_function(api_client)
+        else:
+            st.error(f"Unknown page: {page}")
+
     except Exception as e:
-        st.error(f"❌ Critical Error: {str(e)}")
+        st.error(f"An error occurred in the main application: {e}")
         st.exception(e)
-        st.info("Please check the terminal for detailed error messages.")
 # ============================================================================
 # SIDEBAR
 # ============================================================================
@@ -903,52 +1461,66 @@ def show_timeseries_page(api_client):
 
 def show_home_page(api_client):
     """Home page with overview"""
-    
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.markdown("""
-        ## Welcome to Your Predictive Analytics Dashboard! 
-        
-        This application provides:
-        
-        - 📊 **Statistical Insights** - Mann-Kendall trends, ANOVA analysis
-        - 📈 **ANOVA Analysis** - Compare readings by seasons/vegetables
-        - 🔮 **Enhanced Risk Assessment** - Monte Carlo + Bayesian analysis
-        - 💬 **AI Assistant** - Natural language queries
-        - 📈 **Real-time Dashboards** - Executive, Laboratory views
-        - 🚀 **Time Series Forecasting** - Interactive pesticide predictions
-        
-        ### 🚀 Getting Started:
-        1. Check API connection in sidebar
-        2. Index your data by year
-        3. Start analyzing!
-        """)
+        <div style="
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            border-left: 5px solid #4caf50;
+            text-align: center;
+            transition: all 0.3s ease;
+        " onmouseover="this.style.transform='translateY(-10px)'; this.style.boxShadow='0 10px 30px rgba(76,175,80,0.3)'"
+           onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.1)'">
+            <div style="font-size: 40px; margin-bottom: 10px;">📊</div>
+            <h3 style="color: #2e7d32; margin: 10px 0;">1,234</h3>
+            <p style="color: #666; font-size: 14px;">Total Samples</p>
+            <p style="color: #4caf50; font-weight: 600;">↑ 12% this month</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
-        st.markdown("### 🚀 Quick Actions")
-        
-        # ✅ Use unique keys for buttons and set state differently
-        if st.button("📊 Statistical Insights", use_container_width=True, type="primary", key="home_btn_insights"):
-            st.session_state.page_nav = "📊 Statistical Insights"
-            st.rerun()
+        st.markdown("""
+        <div style="
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            border-left: 5px solid #ff9800;
+            text-align: center;
+            transition: all 0.3s ease;
+        " onmouseover="this.style.transform='translateY(-10px)'; this.style.boxShadow='0 10px 30px rgba(255,152,0,0.3)'"
+           onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.1)'">
+            <div style="font-size: 40px; margin-bottom: 10px;">⚠️</div>
+            <h3 style="color: #f57c00; margin: 10px 0;">Medium</h3>
+            <p style="color: #666; font-size: 14px;">Risk Level</p>
+            <p style="color: #f57c00; font-weight: 600;">↓ 3% improvement</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div style="
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            border-left: 5px solid #2196f3;
+            text-align: center;
+            transition: all 0.3s ease;
+        " onmouseover="this.style.transform='translateY(-10px)'; this.style.boxShadow='0 10px 30px rgba(33,150,243,0.3)'"
+           onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='0 4px 15px rgba(0,0,0,0.1)'">
+            <div style="font-size: 40px; margin-bottom: 10px;">✅</div>
+            <h3 style="color: #1976d2; margin: 10px 0;">89%</h3>
+            <p style="color: #666; font-size: 14px;">Completed Analysis</p>
+            <p style="color: #2196f3; font-weight: 600;">↑ 4% progress</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-        if st.button("📈 ANOVA Analysis", use_container_width=True, type="primary", key="home_btn_anova"):
-            st.session_state.page_nav = "📈 ANOVA Analysis"
-            st.rerun()
-            
-        if st.button("🚀 Time Series Forecasting", use_container_width=True, type="primary", key="home_btn_timeseries"):
-            st.session_state.page_nav = "🚀 Time Series Forecasting"
-            st.rerun()
-
-        if st.button("💬 AI Assistant", use_container_width=True, type="secondary", key="home_btn_assistant"):
-            st.session_state.page_nav = "💬 AI Assistant"
-            st.rerun()
-        
-        if st.button("🔮 Predictions", use_container_width=True, key="home_btn_predictions"):
-            st.session_state.page_nav = "🔮 Predictions"
-            st.rerun()
-
+    
 # ============================================================================
 # PAGE: STATISTICAL INSIGHTS
 # ============================================================================
@@ -1359,7 +1931,8 @@ def render_chat_sidebar(api_client):
         
         # Project Configuration
         st.markdown("## 🏢 Project Configuration")
-        
+        # if "project_id" not in st.session_state:
+        #     st.session_state.project_id = "default_project" 
         project_id = st.text_input(
             "Project ID",
             value=st.session_state.project_id,
