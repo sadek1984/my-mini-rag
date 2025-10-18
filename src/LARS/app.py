@@ -1947,6 +1947,42 @@ def render_chat_sidebar(api_client):
         
         st.markdown("---")
         
+        # ==================== ISO DOCUMENT UPLOAD ====================
+        st.markdown("## 📄 ISO Document Upload")
+        
+        uploaded_file = st.file_uploader(
+            "Upload ISO Document",
+            type=['pdf', 'docx', 'xlsx'],
+            help="Upload Quality Manual, Procedures, Work Instructions, or Forms"
+        )
+        
+        doc_type = st.selectbox(
+            "Document Type",
+            [
+                "Quality Manual",
+                "Procedure", 
+                "Work Instruction",
+                "Form/Record",
+                "Unknown"
+            ]
+        )
+        
+        if uploaded_file is not None:
+            # Show what will be uploaded
+            st.caption(f"Will upload to project: {st.session_state.project_id}")
+            
+            if st.button("📤 Upload ISO Document", use_container_width=True, type="primary"):
+                # Pass the project ID from session state
+                upload_iso_document_ui(
+                    api_client, 
+                    uploaded_file, 
+                    doc_type, 
+                    st.session_state.project_id  # ✅ Use actual project ID
+                )
+
+
+        st.markdown("---")
+        
         # Data Context
         st.markdown("## 📅 Data Context")
         
@@ -1983,6 +2019,92 @@ def render_chat_sidebar(api_client):
             for year in sorted(st.session_state.indexed_years):
                 st.markdown(f"- {year}")
 
+                # ==================== SETTINGS ====================
+        st.markdown("## ⚙️ Settings")
+        
+        risk_mode = st.radio(
+            "Risk Assessment Mode",
+            options=["🤖 Auto-detect", "✅ Always On", "❌ Always Off"],
+            index=0,
+            help="Auto-detect: Enables when you ask about safety/risk\nAlways On: Include for every query\nAlways Off: Never include"
+        )
+        
+        st.session_state.risk_mode = risk_mode
+
+
+def upload_iso_document_ui(api_client, uploaded_file, doc_type: str, project_id: str):
+    """Handle ISO document upload from Streamlit UI"""
+    
+    with st.spinner(f"📤 Uploading {uploaded_file.name}..."):
+        try:
+            # Prepare the file for upload
+            files = {
+                'file': (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)
+            }
+            
+            data = {
+                'document_type': doc_type
+            }
+            
+            # Use the provided project_id
+            url = f"{api_client.base_url}/api/v1/iso/upload/{project_id}"
+
+            st.info(f"🔗 Uploading to: {url}")  # Debug info
+            
+            response = requests.post(
+                url,
+                files=files,
+                data=data,
+                timeout=120
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            # Display success
+            st.success(f"✅ Successfully uploaded: {uploaded_file.name}")
+            
+            # Show details in expander
+            with st.expander("📋 Upload Details"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write(f"**Project ID:** {project_id}")
+                    st.write(f"**Document ID:** {result.get('document_id', 'N/A')}")
+                    st.write(f"**Document Type:** {result.get('document_type', 'N/A')}")
+                    st.write(f"**Chunks Indexed:** {result.get('chunks_indexed', 0)}")
+                
+                with col2:
+                    iso_clauses = result.get('iso_clauses', [])
+                    if iso_clauses:
+                        st.write("**ISO Clauses Found:**")
+                        for clause in iso_clauses[:5]:
+                            st.write(f"- {clause}")
+                
+                ref_docs = result.get('referenced_documents', [])
+                if ref_docs:
+                    st.write(f"**Referenced Documents:** {', '.join(ref_docs)}")
+                
+                sections = result.get('main_sections', [])
+                if sections:
+                    st.write("**Main Sections:**")
+                    for section in sections[:3]:
+                        st.write(f"- {section}")
+            
+            st.session_state.chat_messages.append({
+                "role": "assistant",
+                "content": f"✅ ISO document '{uploaded_file.name}' has been uploaded and indexed for project {project_id}. You can now ask questions about it!"
+            })
+            
+        except requests.exceptions.HTTPError as e:
+            st.error(f"❌ Upload failed: {e}")
+            if hasattr(e.response, 'text'):
+                with st.expander("Error Details"):
+                    st.text(e.response.text)
+        except Exception as e:
+            st.error(f"❌ Unexpected error: {str(e)}")
+
+
 def index_year_data(api_client, year: str, do_reset: bool = False):
     """Index data for a specific year"""
     action = "Resetting and re-indexing" if do_reset else "Indexing"
@@ -1997,8 +2119,12 @@ def index_year_data(api_client, year: str, do_reset: bool = False):
                 st.success(f"✅ {year} indexed: {count} documents")
             else:
                 st.error(f"⚠️ No documents found for {year}")
+                st.json(result)
         else:
             st.error(f"❌ Failed to index {year}")
+            if result:
+                st.json(result)
+
 
 def display_chat_messages():
     """Display all chat messages"""
@@ -2021,40 +2147,179 @@ def handle_chat_input(api_client):
         with st.chat_message("assistant"):
             process_query(api_client, prompt)
 
+# def process_query(api_client, query: str):
+#     """Process user query"""
+    
+#     with st.spinner("🔍 Analyzing query..."):
+        
+#         # Extract year from query
+#         query_year = extract_year_from_text(query)
+        
+#         if not query_year:
+#             query_year = st.session_state.selected_year
+#             st.info(f"⚙️ Using default year: {query_year}")
+#         else:
+#             st.success(f"✅ Using year from query: {query_year}")
+        
+#         if query_year not in st.session_state.indexed_years:
+#             response = f"⚠️ Data for {query_year} is not indexed yet. Please index it first."
+#             st.warning(response)
+#             st.session_state.chat_messages.append({
+#                 "role": "assistant",
+#                 "content": response
+#             })
+#             return
+        
+#         # Detect if risk assessment needed
+#         risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume']
+#         include_risk = any(kw in query.lower() for kw in risk_keywords)
+        
+#         if include_risk:
+#             st.success("🎯 Risk assessment enabled")
+        
+#         result = api_client.local_answer(query=query, year=query_year, include_risk=include_risk)
+        
+#         if result:
+#             display_query_results(result, query_year, include_risk)
+
 def process_query(api_client, query: str):
-    """Process user query"""
+    """Process user query - now checks for ISO queries too"""
     
     with st.spinner("🔍 Analyzing query..."):
         
-        # Extract year from query
-        query_year = extract_year_from_text(query)
+        # Enhanced ISO keyword detection
+        iso_keywords = [
+            # ISO standards
+            'iso', '17025', 'clause', 'requirement', 'accreditation',
+            # Lab equipment and procedures
+            'gc', 'gc-ms', 'gcms', 'hplc', 'column', 'instrument', 'equipment',
+            'calibration', 'maintenance', 'validation', 'verification',
+            # Documents
+            'procedure', 'manual', 'quality manual', 'work instruction', 
+            'form', 'record', 'document', 'policy',
+            # Lab terms
+            'method', 'protocol', 'sop', 'standard operating',
+            'laboratory', 'lab', 'sample handling', 'traceability',
+            # Arabic terms
+            'معايرة', 'إجراء', 'دليل الجودة', 'متطلب', 'اعتماد',
+            'مختبر', 'جهاز', 'معدات'
+        ]
         
-        if not query_year:
-            query_year = st.session_state.selected_year
-            st.info(f"⚙️ Using default year: {query_year}")
+        # Pesticide-specific keywords (more specific)
+        pesticide_keywords = [
+            'pesticide', 'bifenthrin', 'pyridaben', 'mبيد',
+            'tomato', 'pepper', 'cucumber', 'طماطم', 'فلفل', 'خيار',
+            'exceeding', 'limit', 'violation', 'غير مطابق', 'مطابق',
+            'sample code', 'reading', 'ppm', 'ppb'
+        ]
+        
+        query_lower = query.lower()
+        
+        # Count keyword matches
+        iso_score = sum(1 for kw in iso_keywords if kw in query_lower)
+        pesticide_score = sum(1 for kw in pesticide_keywords if kw in query_lower)
+        
+        # Check for year in query (strong indicator of pesticide query)
+        has_year = any(year in query for year in AVAILABLE_YEARS)
+        
+        # Decision logic
+        if iso_score > pesticide_score:
+            is_iso_query = True
+        elif pesticide_score > iso_score:
+            is_iso_query = False
+        elif has_year:
+            is_iso_query = False  # Year mentioned = pesticide query
         else:
-            st.success(f"✅ Using year from query: {query_year}")
+            is_iso_query = True  # Default to ISO if ambiguous
         
-        if query_year not in st.session_state.indexed_years:
-            response = f"⚠️ Data for {query_year} is not indexed yet. Please index it first."
-            st.warning(response)
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": response
-            })
-            return
-        
-        # Detect if risk assessment needed
-        risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume']
-        include_risk = any(kw in query.lower() for kw in risk_keywords)
-        
-        if include_risk:
-            st.success("🎯 Risk assessment enabled")
-        
-        result = api_client.local_answer(query=query, year=query_year, include_risk=include_risk)
-        
-        if result:
+        if is_iso_query:
+            st.info("🔍 Detected ISO 17025 query - searching ISO documents...")
+            process_iso_query(api_client, query)
+        else:
+            st.info("🔍 Detected pesticide query - searching pesticide data...")
+            # Original pesticide query logic
+            query_year = extract_year_from_text(query)
+            
+            if not query_year:
+                query_year = st.session_state.selected_year
+                st.info(f"⚙️ Using default year: {query_year}")
+            else:
+                st.success(f"✅ Using year from query: {query_year}")
+            
+            if query_year not in st.session_state.indexed_years:
+                response = f"⚠️ Data for {query_year} is not indexed yet. Please index it first."
+                st.warning(response)
+                st.session_state.chat_messages.append({
+                    "role": "assistant",
+                    "content": response
+                })
+                return
+            
+            risk_mode = st.session_state.get('risk_mode', '🤖 Auto-detect')
+            
+            if risk_mode == "✅ Always On":
+                include_risk = True
+            elif risk_mode == "❌ Always Off":
+                include_risk = False
+            else:  # Auto-detect
+                risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume']
+                include_risk = any(kw in query.lower() for kw in risk_keywords)
+            
+            if include_risk:
+                st.success("🎯 Risk assessment enabled")
+            
+            result = api_client.local_answer(query=query, year=query_year, include_risk=include_risk)
             display_query_results(result, query_year, include_risk)
+
+def process_iso_query(api_client, query: str):
+    """Process ISO document query"""
+    
+    project_id = st.session_state.project_id  # ✅ Use actual project ID, not year
+    
+    try:
+        url = f"{api_client.base_url}/api/v1/iso/query/{project_id}"
+
+        
+        response = requests.post(
+            url,
+            json={"text": query},
+            timeout=120
+        )
+        
+        response.raise_for_status()
+        result = response.json()
+        
+        # Display answer
+        st.markdown(result.get('answer', 'No answer found'))
+        
+        # Display sources
+        sources = result.get('sources', [])
+        if sources:
+            st.markdown("---")
+            st.markdown("### 📚 Sources")
+            
+            for idx, source in enumerate(sources, 1):
+                with st.expander(f"📄 Source {idx}: {source.get('file', 'Unknown')}"):
+                    st.write(f"**Type:** {source.get('type', 'Unknown')}")
+                    st.write(f"**Document ID:** {source.get('doc_id', 'Unknown')}")
+                    
+                    clauses = source.get('clauses', [])
+                    if clauses:
+                        st.write(f"**Related ISO Clauses:** {', '.join(clauses)}")
+        
+        st.session_state.chat_messages.append({
+            "role": "assistant",
+            "content": result.get('answer', 'No answer found')
+        })
+        
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            st.error(f"📄 No ISO documents found for project {project_id}. Please upload ISO documents first!")
+        else:
+            st.error(f"❌ Query failed: {e}")
+    except Exception as e:
+        st.error(f"❌ Unexpected error: {str(e)}")
+
 
 def display_query_results(result: Dict, year: str, include_risk: bool):
     """Display query results in a structured format"""
