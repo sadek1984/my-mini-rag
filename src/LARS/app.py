@@ -1804,6 +1804,313 @@ import numpy as np
 # READY-TO-USE CHAT PAGE FUNCTION
 # ============================================================================
 
+# def show_chat_page(api_client):
+#     """
+#     Fixed chat page that works with simple query system
+#     Just copy-paste this to replace your existing show_chat_page function
+    
+#     Args:
+#         api_client: Your existing API client (or None)
+#     """
+    
+#     st.header("💬 AI Assistant 🌱")
+#     st.caption("Powered by Gemini - Ask questions in natural language")
+    
+#     # ========================================================================
+#     # STEP 1: Get DataFrame (adjust based on your app)
+#     # ========================================================================
+    
+#     try:
+#         # Try multiple ways to get the dataframe
+#         if api_client and hasattr(api_client, 'get_data'):
+#             df = api_client.get_data()
+#         elif api_client and hasattr(api_client, 'df'):
+#             df = api_client.df
+#         elif 'current_data' in st.session_state:
+#             df = st.session_state.current_data
+#         elif 'df' in st.session_state:
+#             df = st.session_state.df
+#         else:
+#             st.warning("⚠️ No data loaded. Please load data first.")
+#             st.info("💡 Go to the data loading page or upload your Excel file.")
+#             return
+    
+#     except Exception as e:
+#         st.error(f"Error loading data: {e}")
+#         return
+    
+#     # ========================================================================
+#     # STEP 2: Initialize Gemini
+#     # ========================================================================
+    
+#     api_key = os.environ.get('GEMINI_API_KEY')
+    
+#     if not api_key:
+#         st.error("⚠️ GEMINI_API_KEY not set")
+#         st.info("""
+#         **How to fix:**
+#         1. Get your API key from: https://makersuite.google.com/app/apikey
+#         2. Set it in your code: `os.environ['GEMINI_API_KEY'] = "your-key"`
+#         3. Or set as environment variable: `export GEMINI_API_KEY="your-key"`
+#         """)
+#         return
+    
+#     # Configure Gemini
+#     genai.configure(api_key=api_key)
+#     model = genai.GenerativeModel('gemini-2.0-flash-exp')
+    
+#     # ========================================================================
+#     # STEP 3: Show Instructions
+#     # ========================================================================
+    
+#     st.info("""
+#     **🌱 How to use:**
+#     1. Type your question about the pesticide data
+#     2. Press Enter or click "Ask"
+#     3. View the AI-generated code and results
+    
+#     **Example Questions:**
+#     - "What are the top 5 vegetables with highest violation rates?"
+#     - "Show me compliance trends by year"
+#     - "Which pesticides have the most violations?"
+#     - "Calculate average exceedance ratio by vegetable"
+#     - "Find vegetables with more than 10 violations"
+#     """)
+    
+#     # ========================================================================
+#     # STEP 4: Get User Input (THIS IS THE KEY PART!)
+#     # ========================================================================
+    
+#     # Method 1: Chat input (modern Streamlit way)
+#     chat_question = st.chat_input("Ask a question about the data...")
+    
+#     # Method 2: Text area + button (alternative)
+#     st.markdown("---")
+#     col1, col2 = st.columns([4, 1])
+    
+#     with col1:
+#         text_question = st.text_area(
+#             "Or type your question here:",
+#             height=100,
+#             placeholder="Example: What are the top 10 vegetables by violation count?"
+#         )
+    
+#     with col2:
+#         st.write("")  # Spacing
+#         st.write("")  # Spacing
+#         ask_button = st.button("🚀 Ask", type="primary", use_container_width=True)
+    
+#     # Determine which input to use
+#     user_question = chat_question or (text_question if ask_button else None)
+    
+#     # ========================================================================
+#     # STEP 5: Process Question
+#     # ========================================================================
+    
+#     if user_question:
+        
+#         with st.spinner("🔄 Generating query and analyzing data..."):
+            
+#             try:
+#                 # Create prompt for Gemini
+#                 prompt = f"""Generate pandas code to answer this question about pesticide testing data.
+
+# Dataset information:
+# - Columns: {list(df.columns)}
+# - Shape: {df.shape}
+# - Sample data (first 2 rows):
+# {df.head(2).to_dict('records')}
+
+# Question: {user_question}
+
+# Requirements:
+# 1. Write Python code using pandas (imported as 'pd')
+# 2. The DataFrame is available as variable 'df'
+# 3. Store the final result in a variable called 'result'
+# 4. Handle any errors gracefully
+# 5. Return clean, formatted output (DataFrame or simple value)
+# 6. If aggregating, include meaningful column names
+
+# Generate only the Python code, wrapped in ```python``` markers.
+# """
+                
+#                 # Generate code with Gemini
+#                 response = model.generate_content(prompt)
+                
+#                 # Extract code from response
+#                 code_match = re.search(r'```python\n(.*?)```', response.text, re.DOTALL)
+                
+#                 if code_match:
+#                     generated_code = code_match.group(1).strip()
+#                 else:
+#                     # Fallback: try without python specifier
+#                     code_match = re.search(r'```\n(.*?)```', response.text, re.DOTALL)
+#                     if code_match:
+#                         generated_code = code_match.group(1).strip()
+#                     else:
+#                         # Last resort: use entire response
+#                         generated_code = response.text.strip()
+                
+#                 # Execute the generated code
+#                 local_vars = {
+#                     'df': df.copy(),
+#                     'pd': pd,
+#                     'np': np,
+#                     'result': None
+#                 }
+                
+#                 exec(generated_code, {}, local_vars)
+                
+#                 result = local_vars.get('result')
+                
+#                 # ========================================================
+#                 # STEP 6: Display Results
+#                 # ========================================================
+                
+#                 st.success("✅ Query executed successfully!")
+                
+#                 # Show the result
+#                 st.subheader("📊 Result:")
+                
+#                 if isinstance(result, pd.DataFrame):
+#                     st.dataframe(result, use_container_width=True)
+                    
+#                     # Add download button for DataFrames
+#                     csv = result.to_csv(index=False)
+#                     st.download_button(
+#                         label="📥 Download as CSV",
+#                         data=csv,
+#                         file_name="query_result.csv",
+#                         mime="text/csv"
+#                     )
+                
+#                 elif isinstance(result, (pd.Series, list, dict)):
+#                     st.dataframe(pd.DataFrame(result), use_container_width=True)
+                
+#                 else:
+#                     # For simple values
+#                     st.write(result)
+                
+#                 # Show generated code
+#                 with st.expander("👨‍💻 View Generated Code"):
+#                     st.code(generated_code, language='python')
+#                     st.caption("This code was AI-generated and executed on your data")
+                
+#                 # Add to history
+#                 if 'chat_history' not in st.session_state:
+#                     st.session_state.chat_history = []
+                
+#                 st.session_state.chat_history.append({
+#                     'question': user_question,
+#                     'result': result,
+#                     'code': generated_code,
+#                     'timestamp': pd.Timestamp.now()
+#                 })
+            
+#             except Exception as e:
+#                 st.error(f"❌ Error executing query: {str(e)}")
+                
+#                 # Show helpful error information
+#                 with st.expander("🔍 Error Details"):
+#                     st.code(str(e))
+#                     if 'generated_code' in locals():
+#                         st.markdown("**Generated Code:**")
+#                         st.code(generated_code, language='python')
+                
+#                 st.info("""
+#                 **Common issues:**
+#                 - Column names might not match exactly
+#                 - Data type mismatches
+#                 - Try rephrasing your question
+#                 - Check the generated code for syntax errors
+#                 """)
+    
+#     # ========================================================================
+#     # STEP 7: Show Chat History (Optional)
+#     # ========================================================================
+    
+#     if 'chat_history' in st.session_state and st.session_state.chat_history:
+#         st.markdown("---")
+#         st.subheader("📜 Recent Queries")
+        
+#         # Show last 5 queries
+#         for i, item in enumerate(reversed(st.session_state.chat_history[-5:])):
+#             with st.expander(f"Q{i+1}: {item['question'][:60]}..."):
+#                 st.markdown(f"**Question:** {item['question']}")
+#                 st.markdown(f"**Time:** {item['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+                
+#                 if isinstance(item['result'], pd.DataFrame):
+#                     st.dataframe(item['result'].head(10))
+#                 else:
+#                     st.write(item['result'])
+                
+#                 show_code = st.checkbox("👨‍💻 Show generated code", value=True, key=f"show_code_hist_{i}")
+#                 if show_code:
+#                     st.code('code', language='python')
+                        
+#         # Clear history button
+#         if st.button("🗑️ Clear History"):
+#             st.session_state.chat_history = []
+#             st.rerun()
+    
+#     # ========================================================================
+#     # STEP 8: Quick Query Buttons (Optional)
+#     # ========================================================================
+    
+#     st.markdown("---")
+#     st.subheader("⚡ Quick Queries")
+    
+#     col1, col2, col3 = st.columns(3)
+    
+#     with col1:
+#         if st.button("📊 Top Vegetables"):
+#             # Trigger quick query
+#             st.session_state.quick_query = "What are the top 10 vegetables by violation count?"
+#             st.rerun()
+    
+#     with col2:
+#         if st.button("🧪 Top Pesticides"):
+#             st.session_state.quick_query = "What are the top 10 pesticides by violation count?"
+#             st.rerun()
+    
+#     with col3:
+#         if st.button("📈 Yearly Trends"):
+#             st.session_state.quick_query = "Show me compliance rate by year"
+#             st.rerun()
+    
+#     # Handle quick query
+#     if 'quick_query' in st.session_state and st.session_state.quick_query:
+#         user_question = st.session_state.quick_query
+#         st.session_state.quick_query = None
+#         st.rerun()
+
+
+
+# # ============================================================================
+# # TESTING
+# # ============================================================================
+
+# if __name__ == "__main__":
+#     print("""
+#     ╔══════════════════════════════════════════════════════════╗
+#     ║  DROP-IN REPLACEMENT FOR show_chat_page()                ║
+#     ╠══════════════════════════════════════════════════════════╣
+#     ║                                                          ║
+#     ║  ✅ Handles question input internally                   ║
+#     ║  ✅ Works with Gemini AI                                ║
+#     ║  ✅ No 'question' parameter needed                      ║
+#     ║  ✅ Shows generated code                                ║
+#     ║  ✅ Includes chat history                               ║
+#     ║  ✅ Has quick query buttons                             ║
+#     ║  ✅ Download results as CSV                             ║
+#     ║                                                          ║
+#     ║  Just copy this function to your app.py!                ║
+#     ║                                                          ║
+#     ╚══════════════════════════════════════════════════════════╝
+#     """)
+
+
+
 def show_chat_page(api_client):
     """
     Fixed chat page that works with simple query system
@@ -1819,6 +2126,7 @@ def show_chat_page(api_client):
     # ========================================================================
     # STEP 1: Get DataFrame (adjust based on your app)
     # ========================================================================
+    
     
     try:
         # Try multiple ways to get the dataframe
@@ -2108,6 +2416,10 @@ if __name__ == "__main__":
     ║                                                          ║
     ╚══════════════════════════════════════════════════════════╝
     """)
+
+
+
+
 
 def render_chat_sidebar(api_client):
     """Render chat-specific sidebar controls"""
