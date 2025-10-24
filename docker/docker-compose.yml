@@ -6,9 +6,11 @@ services:
     container_name: fastapi
     ports:
       - "8000:8000"
+    environment:
+      - CHROMA_TELEMETRY_ENABLED=false
     volumes:
       - fastapi_data:/app/assets
-      - ./chroma_data:/app/chroma_db
+      - ./chroma_data:/app/chroma_db:rw
       - /Users/a12/mini-rag/src/data:/app/data
       - ./single_dataset_system:/app/single_dataset_system  # 👈 Add this line for models
     networks:
@@ -18,6 +20,8 @@ services:
       - postgres  # Changed from pgvector to postgres
     env_file:
       - ./env/.env.app
+    
+
 
   # Nginx Service
   nginx:
