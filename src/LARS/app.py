@@ -2137,16 +2137,19 @@ def show_chat_page(api_client):
                 ["Quality Manual", "Procedure", "Work Instruction", "Form"]
             )
             
-            if uploaded_file and st.button("📥 Process"):
-                if hasattr(api_client, 'nlp_controller'):
-                    # Save and index file
-                    os.makedirs("iso_documents", exist_ok=True)
-                    path = f"iso_documents/{uploaded_file.name}"
-                    with open(path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    api_client.nlp_controller.add_document(path, doc_type)
-                    st.success(f"✅ Indexed: {uploaded_file.name}")
-        
+        if uploaded_file is not None:
+        # Show what will be uploaded
+            st.caption(f"Will upload to project: {st.session_state.project_id}")
+            
+            if st.button("📤 Upload ISO Document", use_container_width=True, type="primary"):
+                # Pass the project ID from session state
+                upload_iso_document_ui(
+                    api_client, 
+                    uploaded_file, 
+                    doc_type, 
+                    st.session_state.project_id  # ✅ Use actual project ID
+                )
+            
         # Settings
         st.markdown("---")
         st.markdown("### ⚙️ Settings")

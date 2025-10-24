@@ -8,8 +8,7 @@ services:
       - "8000:8000"
     volumes:
       - fastapi_data:/app/assets
-      - ./chroma_data:/app/chroma_db:rw
-      - ./chroma_db:/app/chroma_db  # Add this line
+      - ./chroma_data:/app/chroma_db
       - /Users/a12/mini-rag/src/data:/app/data
       - ./single_dataset_system:/app/single_dataset_system  # 👈 Add this line for models
     networks:
