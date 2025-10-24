@@ -2123,6 +2123,44 @@ def show_chat_page(api_client):
     st.header("💬 AI Assistant 🌱")
     st.caption("Powered by Gemini - Ask questions in natural language")
     
+    # ISO Document Management in Sidebar
+    with st.sidebar:
+        with st.expander("📄 ISO Document Upload"):
+            uploaded_file = st.file_uploader(
+                "Upload ISO Document",
+                type=['pdf', 'docx', 'xlsx'],
+                help="Limit 200MB per file"
+            )
+            
+            doc_type = st.selectbox(
+                "Document Type",
+                ["Quality Manual", "Procedure", "Work Instruction", "Form"]
+            )
+            
+            if uploaded_file and st.button("📥 Process"):
+                if hasattr(api_client, 'nlp_controller'):
+                    # Save and index file
+                    os.makedirs("iso_documents", exist_ok=True)
+                    path = f"iso_documents/{uploaded_file.name}"
+                    with open(path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    api_client.nlp_controller.add_document(path, doc_type)
+                    st.success(f"✅ Indexed: {uploaded_file.name}")
+        
+        # Settings
+        st.markdown("---")
+        st.markdown("### ⚙️ Settings")
+        
+        risk_mode = st.radio(
+            "Risk Assessment Mode",
+            ["🔵 Auto-detect", "✅ Always On", "❌ Always Off"]
+        )
+        
+        # Apply risk mode to detection
+        if risk_mode == "✅ Always On":
+            has_risk = True  # Force risk assessment
+        elif risk_mode == "❌ Always Off":
+            has_risk = False  # Disable risk assessment
     # ========================================================================
     # STEP 1: Get DataFrame (adjust based on your app)
     # ========================================================================
@@ -2216,11 +2254,49 @@ def show_chat_page(api_client):
     # ========================================================================
     
     if user_question:
+    
+        # DETECT QUERY TYPE
+        iso_keywords = ['iso', '17025', 'standard', 'procedure', 'manual', 
+                        'quality', 'calibration', 'validation', 'document', 'sop']
+        risk_keywords = ['risk', 'assessment', 'health', 'safety', 'adi', 'arfd']
         
-        with st.spinner("🔄 Generating query and analyzing data..."):
-            
-            try:
-                # Create prompt for Gemini
+        query_lower = user_question.lower()
+        is_iso = any(kw in query_lower for kw in iso_keywords)
+        has_risk = any(kw in query_lower for kw in risk_keywords)
+        
+        # HANDLE ISO QUERIES WITH RAG
+        if is_iso:
+            with st.spinner("🔍 Searching ISO documents..."):
+                if hasattr(api_client, 'nlp_controller'):
+                    try:
+                        result = api_client.nlp_controller.query(user_question)
+                        st.success("✅ Found ISO information")
+                        st.markdown("### 📋 Answer:")
+                        st.write(result.get('answer', 'No information found'))
+                        
+                        if result.get('sources'):
+                            with st.expander("📚 Sources"):
+                                for src in result['sources']:
+                                    st.write(f"• {src}")
+                    except Exception as e:
+                        st.error(f"ISO search error: {e}")
+                else:
+                    st.info("ISO documents not configured. Falling back to general query.")
+                    is_iso = False  # Fall back to Gemini
+        
+        # HANDLE PESTICIDE QUERIES WITH GEMINI (your existing code)
+        if not is_iso:  # Only run if not an ISO query
+            with st.spinner("🔄 Generating query and analyzing data..."):
+                
+                risk_instruction = ""
+                if has_risk:
+                    risk_instruction = """
+                    
+Also calculate risk assessment:
+- Add 'Risk_Level' column: High (>2x MRL), Medium (1-2x), Low (<1x)
+- Calculate exceedance ratio (Result/MRL) if possible
+- Include health risk indicators
+"""
                 prompt = f"""Generate pandas code to answer this question about pesticide testing data.
 
 Dataset information:
@@ -2230,6 +2306,7 @@ Dataset information:
 {df.head(2).to_dict('records')}
 
 Question: {user_question}
+{risk_instruction}
 
 Requirements:
 1. Write Python code using pandas (imported as 'pd')
@@ -2282,6 +2359,24 @@ Generate only the Python code, wrapped in ```python``` markers.
                 
                 if isinstance(result, pd.DataFrame):
                     st.dataframe(result, use_container_width=True)
+
+                    # Show risk assessment summary if applicable
+                    if has_risk and isinstance(result, pd.DataFrame):
+                        if 'Risk_Level' in result.columns:
+                            with st.expander("⚠️ Risk Assessment Summary"):
+                                risk_counts = result['Risk_Level'].value_counts()
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("🔴 High Risk", risk_counts.get('High', 0))
+                                with col2:
+                                    st.metric("🟡 Medium", risk_counts.get('Medium', 0))
+                                with col3:
+                                    st.metric("🟢 Low", risk_counts.get('Low', 0))
+                                
+                                if 'Exceedance_Ratio' in result.columns:
+                                    max_exc = result['Exceedance_Ratio'].max()
+                                    st.write(f"**Max Exceedance:** {max_exc:.2f}x")
                     
                     # Add download button for DataFrames
                     csv = result.to_csv(index=False)
@@ -2315,7 +2410,6 @@ Generate only the Python code, wrapped in ```python``` markers.
                     'timestamp': pd.Timestamp.now()
                 })
             
-            except Exception as e:
                 st.error(f"❌ Error executing query: {str(e)}")
                 
                 # Show helpful error information
