@@ -1536,64 +1536,23 @@ def show_statistical_insights_page(api_client):
 # ============================================================================
 
 def show_predictions_page(api_client):
-    """Predictions page with enhanced risk assessment"""
+    """Predictions page with enhanced risk assessment only"""
     
-    st.title("🔮 Predictions with Enhanced Risk Assessment")
+    st.title("🎯 Enhanced Risk Assessment")
     
-    tab1, tab2 = st.tabs(["🔮 Single Prediction", "🎯 Enhanced Risk Assessment"])
-    
-    with tab1:
-        show_single_prediction_form(api_client)
-    
-    with tab2:
-        show_enhanced_risk_form(api_client)
+    # Remove the tabs and directly show enhanced risk assessment
+    show_enhanced_risk_form(api_client)
 
-def show_single_prediction_form(api_client):
-    """Single prediction form"""
-    
-    st.markdown("### Basic Prediction")
-    
-    with st.form("prediction_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            vegetable = st.text_input("Vegetable", value="parsley")
-            pesticide = st.text_input("Pesticide Name", value="Quinalphos")
-            pesticide_group = st.selectbox("Pesticide Group", 
-                ["organophosphorus", "pyrethroid", "chitin_synthesis_inhibitor", 
-                 "neonicotinoid", "phenylpyrazoles"])
-            reading = st.number_input("Reading", value=347.0, min_value=0.0)
-        
-        with col2:
-            limits = st.number_input("Limits", value=20.0, min_value=0.0)
-            sample_code = st.text_input("Sample Code", value="TEST_001")
-            collection_date = st.date_input("Collection Date")
-        
-        if st.form_submit_button("🚀 Run Prediction", type="primary"):
-            data = {
-                "vegetable": vegetable,
-                "pesticide_name": pesticide,
-                "pesticide_group": pesticide_group,
-                "reading": reading,
-                "limits": limits,
-                "sample_code": sample_code,
-                "collection_date": str(collection_date)
-            }
-            
-            with st.spinner("Running prediction..."):
-                result = api_client.predict_single(data)
-                
-                if result:
-                    display_prediction_result(result)
 def show_enhanced_risk_form(api_client):
     """Enhanced risk assessment form"""
     
-    st.markdown("### Enhanced Risk Assessment")
+    st.markdown("### Comprehensive Risk Analysis")
     st.write("""
     Uses advanced statistical methods:
     - **Monte Carlo Simulation**: Probabilistic exceedance estimation
     - **Bayesian Analysis**: Prior knowledge from pesticide group
     - **Hazard Modeling**: Vegetable-specific exposure multipliers
+    - **Confidence Intervals**: Statistical uncertainty quantification
     """)
     
     # Create form
@@ -1601,28 +1560,68 @@ def show_enhanced_risk_form(api_client):
         col1, col2 = st.columns(2)
         
         with col1:
-            vegetable = st.text_input("Vegetable", value="parsley")
+            vegetable = st.text_input("Vegetable", value="parsley", help="Name of the vegetable/fruit being tested")
             veg_category = st.selectbox("Vegetable Category",
-                ["leafy_greens", "peppers", "herbs", "root_vegetables", "fruits"])
+                ["leafy_greens", "peppers", "herbs", "root_vegetables", "fruits", "berries", "cruciferous"],
+                help="Category affects exposure multipliers")
             pesticide_group = st.selectbox("Pesticide Group",
                 ["organophosphorus", "pyrethroid", "chitin_synthesis_inhibitor",
-                 "neonicotinoid", "phenylpyrazoles"])
+                 "neonicotinoid", "phenylpyrazoles", "carbamates", "triazoles"],
+                help="Chemical group affects toxicity profile")
         
         with col2:
-            reading = st.number_input("Reading", value=50.0, min_value=0.0, step=0.1)
-            limit = st.number_input("Limit", value=20.0, min_value=0.0, step=0.1)
+            reading = st.number_input("Reading (mg/kg)", value=50.0, min_value=0.0, step=0.1, 
+                                    help="Measured pesticide concentration")
+            limit = st.number_input("Limit (mg/kg)", value=20.0, min_value=0.0, step=0.1,
+                                  help="Maximum residue limit (MRL)")
+            
+            # Real-time compliance check
+            exceedance_ratio = reading / limit if limit > 0 else 0
             is_compliant = reading <= limit
             
-            # Display compliance status
+            # Display compliance status immediately
             if is_compliant:
-                st.success("Compliance: ✅ Compliant")
+                st.success(f"✅ Compliant (Exceedance: {exceedance_ratio:.2f}x)")
             else:
-                st.error("Compliance: ❌ Non-Compliant")
+                st.error(f"❌ Non-Compliant (Exceedance: {exceedance_ratio:.2f}x)")
         
-        # Submit button (INSIDE FORM)
-        submitted = st.form_submit_button("🎯 Assess Risk", type="primary", use_container_width=True)
-    
-    # ✅ EVERYTHING BELOW IS OUTSIDE THE FORM
+        # Additional risk parameters
+        st.markdown("---")
+        st.markdown("#### 🔧 Advanced Parameters")
+        
+        col3, col4 = st.columns(2)
+        
+        with col3:
+            population_type = st.selectbox(
+                "Population Type",
+                ["general", "vulnerable", "children", "pregnant_women"],
+                help="Target population for risk assessment"
+            )
+            confidence_level = st.slider(
+                "Confidence Level (%)",
+                min_value=80,
+                max_value=99,
+                value=95,
+                help="Statistical confidence level for intervals"
+            )
+        
+        with col4:
+            simulation_runs = st.selectbox(
+                "Monte Carlo Simulations",
+                [1000, 5000, 10000, 50000],
+                index=1,
+                help="Number of simulations for probabilistic analysis"
+            )
+            include_uncertainty = st.checkbox(
+                "Include Measurement Uncertainty",
+                value=True,
+                help="Account for analytical measurement errors"
+            )
+        
+        # Submit button
+        submitted = st.form_submit_button("🎯 Run Comprehensive Risk Assessment", 
+                                        type="primary", 
+                                        use_container_width=True)
     
     # Handle form submission
     if submitted:
@@ -1632,19 +1631,22 @@ def show_enhanced_risk_form(api_client):
             "pesticide_group": pesticide_group,
             "reading": reading,
             "limit": limit,
-            "is_compliant": is_compliant
+            "is_compliant": is_compliant,
+            "exceedance_ratio": exceedance_ratio,
+            "population_type": population_type,
+            "confidence_level": confidence_level,
+            "simulation_runs": simulation_runs,
+            "include_uncertainty": include_uncertainty
         }
         
-        with st.spinner("🔄 Performing enhanced risk assessment..."):
+        with st.spinner("🔄 Performing comprehensive risk assessment..."):
             try:
                 result = api_client.assess_risk(risk_data)
                 
-                # ✅ FIX: Check if result exists and has risk_score (not 'success' field)
                 if result and 'risk_score' in result:
                     st.success("✅ Risk assessment completed!")
-                    display_enhanced_risk_result(result)  # Pass result directly, not result['data']
+                    display_enhanced_risk_result(result)
                 elif result and result.get('success'):
-                    # Handle wrapped response format
                     st.success("✅ Risk assessment completed!")
                     display_enhanced_risk_result(result.get('data', {}))
                 elif result:
@@ -1659,135 +1661,149 @@ def show_enhanced_risk_form(api_client):
                 st.error(f"❌ Error: {str(e)}")
                 with st.expander("Error Details"):
                     st.exception(e)
-    
-    # Debug section (OUTSIDE FORM)
-    st.markdown("---")
-    st.markdown("### 🐛 Debug")
-    
-    if st.button("Test API Connection"):
-        with st.spinner("Testing..."):
-            try:
-                # Test health endpoint first
-                health = api_client.health_check()
-                if health:
-                    st.success("✅ API is reachable")
-                    st.json(health)
-                else:
-                    st.error("❌ API not responding")
-                
-                # Test risk endpoint with sample data
-                test_data = {
-                    "vegetable": "parsley",
-                    "vegetable_category": "leafy_greens",
-                    "pesticide_group": "organophosphorus",
-                    "reading": 50.0,
-                    "limit": 20.0,
-                    "is_compliant": False
-                }
-                
-                st.write("Testing risk assessment endpoint...")
-                result = api_client.assess_risk(test_data)
-                
-                if result:
-                    st.success("✅ Risk endpoint working")
-                    st.json(result)
-                else:
-                    st.error("❌ Risk endpoint not responding")
-                    st.warning("Make sure you have the risk_assessment route registered in main.py")
-            
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
-                st.exception(e)
-
-def display_prediction_result(result: Dict):
-    """Display prediction result"""
-    
-    st.success("✅ Prediction completed!")
-    
-    # Check if enhanced risk assessment is available
-    if 'enhanced_risk_assessment' in result and result['enhanced_risk_assessment'].get('enabled'):
-        display_enhanced_risk_result(result['enhanced_risk_assessment'])
-    else:
-        # Display basic results
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            risk_level = result.get('risk_assessment', {}).get('risk_level', 'Unknown')
-            st.metric("Risk Level", risk_level)
-        
-        with col2:
-            exceedance = result.get('sample_info', {}).get('exceedance_ratio', 0)
-            st.metric("Exceedance Ratio", f"{exceedance:.2f}")
-        
-        with col3:
-            compliance = result.get('predictions', {}).get('compliance', {}).get('prediction', 'Unknown')
-            st.metric("Compliance", compliance)
-        
-        with st.expander("📋 Full API Response"):
-            st.json(result)
 
 def display_enhanced_risk_result(risk_result: Dict):
     """Display enhanced risk assessment results"""
     
-    st.markdown("### 🎯 Enhanced Risk Assessment Results")
+    st.markdown("## 📊 Risk Assessment Results")
     
-    # Main metrics
+    # Risk Level Banner
+    risk_level = risk_result.get('risk_level', 'UNKNOWN')
+    risk_score = risk_result.get('risk_score', 0)
+    exceedance_prob = risk_result.get('exceedance_probability', 0) * 100
+    
+    if risk_level == 'CRITICAL':
+        st.error(f"""
+        🔴 **CRITICAL RISK** 
+        
+        **Risk Score:** {risk_score}/5.0 | **Exceedance Probability:** {exceedance_prob:.1f}%
+        
+        ⚠️ **Immediate action required**: Do not distribute. Investigate contamination source immediately.
+        """)
+    elif risk_level == 'HIGH':
+        st.warning(f"""
+        🟠 **HIGH RISK**
+        
+        **Risk Score:** {risk_score}/5.0 | **Exceedance Probability:** {exceedance_prob:.1f}%
+        
+        ℹ️ **Recommendation**: Enhanced monitoring required. Consider retesting before distribution.
+        """)
+    elif risk_level == 'MEDIUM':
+        st.info(f"""
+        🟡 **MEDIUM RISK**
+        
+        **Risk Score:** {risk_score}/5.0 | **Exceedance Probability:** {exceedance_prob:.1f}%
+        
+        📋 **Recommendation**: Standard monitoring. Review sourcing practices.
+        """)
+    else:
+        st.success(f"""
+        🟢 **LOW RISK**
+        
+        **Risk Score:** {risk_score}/5.0 | **Exceedance Probability:** {exceedance_prob:.1f}%
+        
+        ✅ **Status**: Acceptable for distribution with routine monitoring.
+        """)
+    
+    # Key Metrics
+    st.markdown("### 📈 Key Risk Metrics")
+    
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        risk_score = risk_result.get('risk_score', 0)
-        risk_level = risk_result.get('risk_level', 'Unknown')
-        st.metric("Risk Score", f"{risk_score}/5.0", delta=risk_level)
-    
+        bayesian_risk = risk_result.get('bayesian_risk', 0)
+        bayesian_confidence = risk_result.get('bayesian_confidence', (0, 0))
+        st.metric(
+            "Bayesian Risk Score",
+            f"{bayesian_risk:.2f}",
+            delta=f"×{risk_result.get('vegetable_multiplier', 1.0)} exposure"
+        )
+        st.write(f"**95% Credible Interval:** [{bayesian_confidence[0]:.4f}, {bayesian_confidence[1]:.4f}]")
+
     with col2:
-        prob = risk_result.get('exceedance_probability', 0)
-        st.metric("Exceedance Probability", f"{prob*100:.1f}%",
-                 delta="High" if prob > 0.7 else "Moderate" if prob > 0.4 else "Low")
+        critical_threshold = risk_result.get('critical_threshold', 0)
+        st.metric("Critical Threshold", f"{critical_threshold:.1f}")
     
     with col3:
-        bayesian = risk_result.get('bayesian_risk', 0)
-        st.metric("Bayesian Risk", f"{bayesian:.2f}",
-                 delta=f"×{risk_result.get('vegetable_multiplier', 1.0)} exposure")
+        monte_carlo_est = risk_result.get('exceedance_probability', 0)
+        st.metric("Monte Carlo Estimate", f"{monte_carlo_est:.3f}")
     
     with col4:
-        threshold = risk_result.get('critical_threshold', 0)
-        st.metric("Critical Threshold", f"{threshold:.1f}")
+        confidence = risk_result.get('confidence_interval', 95)
+        st.metric("Confidence Level", f"{confidence}%")
     
-    # Risk level banner
-    risk_level = risk_result.get('risk_level', 'Unknown')
-    
-    if risk_level == 'CRITICAL':
-        st.error(f"🔴 CRITICAL RISK: {prob*100:.1f}% probability of exceeding limits")
-        st.warning("⚠️ **Immediate action required**: Do not distribute. Investigate contamination source.")
-    elif risk_level == 'HIGH':
-        st.warning(f"🟠 HIGH RISK: {prob*100:.1f}% probability of exceeding limits")
-        st.info("ℹ️ **Recommendation**: Enhanced monitoring. Consider retesting before distribution.")
-    elif risk_level == 'MEDIUM':
-        st.info(f"🟡 MEDIUM RISK: {prob*100:.1f}% probability of exceeding limits")
-    else:
-        st.success(f"🟢 LOW RISK: {prob*100:.1f}% probability of exceeding limits")
-    
-    # Confidence interval
+    # Confidence Interval
     ci = risk_result.get('confidence_interval', (0, 0))
-    st.write(f"**95% Confidence Interval:** [{ci[0]:.3f}, {ci[1]:.3f}]")
+    st.write(f"**{confidence}% Confidence Interval:** [{ci[0]:.4f}, {ci[1]:.4f}]")
     
-    # Risk components breakdown
-    with st.expander("📊 Risk Components Breakdown"):
+    # Detailed Breakdown
+    with st.expander("🔍 Detailed Risk Components"):
         components = risk_result.get('components', {})
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.write("**Risk Score Components:**")
-            st.write(f"- Base Risk (Exceedance): {components.get('base_risk', 0):.2f}")
-            st.write(f"- Probabilistic Risk (Monte Carlo): {components.get('probabilistic_risk', 0):.2f}")
-            st.write(f"- Bayesian Component: {components.get('bayesian_component', 0):.2f}")
+            st.markdown("#### 📊 Risk Score Components")
+            st.write(f"- **Base Risk (Exceedance):** {components.get('base_risk', 0):.3f}")
+            st.write(f"- **Probabilistic Risk (Monte Carlo):** {components.get('probabilistic_risk', 0):.3f}")
+            st.write(f"- **Bayesian Component:** {components.get('bayesian_component', 0):.3f}")
+            st.write(f"- **Uncertainty Adjustment:** {components.get('uncertainty_adjustment', 0):.3f}")
         
         with col2:
-            st.write("**Modifiers:**")
-            st.write(f"- Vegetable Hazard Multiplier: {risk_result.get('vegetable_multiplier', 1.0)}×")
-            st.write(f"- Critical Threshold: {risk_result.get('critical_threshold', 4.0)}")
-            st.write(f"- Method: {risk_result.get('method', 'N/A')}")
+            st.markdown("#### ⚖️ Risk Modifiers")
+            st.write(f"- **Vegetable Hazard Multiplier:** {risk_result.get('vegetable_multiplier', 1.0)}×")
+            st.write(f"- **Pesticide Group Factor:** {risk_result.get('pesticide_group_factor', 1.0)}×")
+            st.write(f"- **Population Sensitivity:** {risk_result.get('population_sensitivity', 1.0)}×")
+            st.write(f"- **Analytical Method:** {risk_result.get('method', 'LC-MS/MS')}")
+    
+    # Recommendations
+    with st.expander("💡 Actionable Recommendations"):
+        recommendations = risk_result.get('recommendations', [])
+        if recommendations:
+            for i, rec in enumerate(recommendations, 1):
+                st.write(f"{i}. {rec}")
+        else:
+            st.write("1. **Immediate Testing**: Conduct confirmatory analysis")
+            st.write("2. **Source Investigation**: Review supply chain and growing practices")
+            st.write("3. **Enhanced Monitoring**: Increase sampling frequency")
+            st.write("4. **Documentation**: Maintain detailed records for regulatory compliance")
+    
+    # Export Options
+    st.markdown("---")
+    st.markdown("### 📤 Export Results")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # JSON export
+        json_data = json.dumps(risk_result, indent=2, ensure_ascii=False)
+        st.download_button(
+            label="📥 Download JSON Report",
+            data=json_data,
+            file_name=f"risk_assessment_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    
+    with col2:
+        # CSV export for key metrics
+        key_metrics = {
+            'Risk_Level': risk_level,
+            'Risk_Score': risk_score,
+            'Exceedance_Probability': exceedance_prob,
+            'Bayesian_Risk': bayesian_risk,
+            'Critical_Threshold': critical_threshold
+        }
+        csv_data = pd.DataFrame([key_metrics]).to_csv(index=False)
+        st.download_button(
+            label="📥 Download CSV Summary",
+            data=csv_data,
+            file_name=f"risk_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+
 
 # ============================================================================
 # PAGE: AI ASSISTANT (CHAT)
