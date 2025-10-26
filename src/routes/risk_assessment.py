@@ -11,7 +11,7 @@ risk_service = EnhancedRiskAssessment('/app/data/processed_data_output.xlsx')
 
 class RiskAssessmentRequest(BaseModel):
     vegetable: str
-    vegetable_category: str
+    # vegetable_category: str
     pesticide_group: str
     reading: float
     limit: float
@@ -23,7 +23,6 @@ async def assess_risk(request: RiskAssessmentRequest):
     
     result = risk_service.calculate_enhanced_risk_score(
         vegetable=request.vegetable,
-        vegetable_category=request.vegetable_category,
         pesticide_group=request.pesticide_group,
         reading=request.reading,
         limit=request.limit,

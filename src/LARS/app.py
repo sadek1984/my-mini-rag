@@ -1405,131 +1405,253 @@ def show_home_page(api_client):
 # ============================================================================
 
 def show_statistical_insights_page(api_client):
-    """Statistical Insights page with Mann-Kendall and ANOVA"""
+    """Statistical Insights page with chemist-friendly improvements"""
     
-    st.title("📊 Statistical Insights")
+    st.title("📊 Contamination Trends Analysis")
     
     st.write("""
-    Advanced statistical analysis of pesticide contamination patterns:
-    - **Mann-Kendall Test**: Detects temporal trends (increasing/decreasing contamination)
-    - **ANOVA**: Compares readings across seasons and vegetable categories
+    **Analysis of pesticide contamination patterns over time:**
+    - **Trend Detection**: Identifies increasing/decreasing contamination levels
+    - **Seasonal Patterns**: Compares contamination across different seasons  
+    - **Category Comparison**: Analyzes differences between vegetable types
     """)
     
+    # Refresh button
     col1, col2 = st.columns([6, 1])
     with col2:
-        if st.button("🔄 Refresh", key="refresh_insights"):
+        if st.button("🔄 Refresh Analysis", key="refresh_insights"):
             st.rerun()
     
     st.divider()
     
     try:
-        with st.spinner("🔍 Analyzing data..."):
+        with st.spinner("🔍 Analyzing contamination data..."):
             response = api_client.get_statistical_insights()
             
             if not response:
-                st.error("❌ Failed to fetch insights from API")
+                st.error("❌ Unable to analyze data at this time")
                 return
             
-            # Check if insights exist
             if 'insights' not in response or not response['insights']:
                 st.info("""
-                ℹ️ No significant statistical patterns detected. This could mean:
-                - Data is stable (good news!)
-                - Insufficient data for trend detection
-                - Need more time periods for analysis
+                ℹ️ **No concerning patterns detected** - This is positive news!
+                - Contamination levels appear stable
+                - No significant increasing trends observed
+                - Continue routine monitoring as scheduled
                 """)
                 return
             
             insights = response['insights']
             
-            # Summary metrics
-            col1, col2, col3 = st.columns(3)
+            # Chemist-friendly summary metrics
+            st.subheader("📋 Analysis Summary")
+            col1, col2, col3, col4 = st.columns(4)
+            
             with col1:
-                st.metric("Total Insights", response.get('total_insights', 0))
+                total_groups = len([i for i in insights if i.get('type') == 'trend'])
+                st.metric("Pesticides Analyzed", total_groups)
+                
             with col2:
-                high_count = response.get('high_severity_count', 0)
-                st.metric("High Priority", high_count, 
-                         delta="⚠️ Action Required" if high_count > 0 else "✅ All Good")
+                concerning_trends = len([i for i in insights if i.get('severity') == 'high'])
+                st.metric("Concerning Trends", concerning_trends, 
+                         delta="⚠️ Review Needed" if concerning_trends > 0 else "✅ All Stable")
+                
             with col3:
-                st.metric("Analysis Time", datetime.now().strftime("%H:%M:%S"))
+                sufficient_data = len([i for i in insights if i.get('type') == 'trend' and 'Stable' in i.get('message', '')])
+                st.metric("Reliable Analyses", sufficient_data)
+                
+            with col4:
+                low_data = len([i for i in insights if 'Only' in i.get('message', '')])
+                st.metric("Need More Data", low_data, delta="📊 Collect More" if low_data > 0 else None)
             
             st.divider()
             
-            # Display insights by type
-            severity_icons = {
-                'high': '🔴',
-                'medium': '🟡',
-                'low': '🟢'
-            }
-            
-            # Group insights by type
+            # Improved trend analysis section
             trend_insights = [i for i in insights if i.get('type') == 'trend']
-            seasonal_insights = [i for i in insights if i.get('type') == 'seasonal']
-            category_insights = [i for i in insights if i.get('type') == 'category']
-            
-            # Trend Insights
             if trend_insights:
-                st.subheader("📈 Temporal Trends (Mann-Kendall Test)")
-                st.write("Statistical test to detect if contamination is increasing or decreasing over time")
+                st.subheader("📈 Contamination Trends Over Time")
+                st.write("""
+                **Understanding the results:**
+                - ✅ **Stable**: No significant increase/decrease - continue current monitoring
+                - ⚠️ **Increasing**: Potential concern - consider increased monitoring
+                - 📊 **Insufficient Data**: Need more timepoints for reliable analysis
+                """)
                 
-                for insight in trend_insights:
-                    severity = insight.get('severity', 'low')
-                    icon = severity_icons.get(severity, '⚪')
-                    
-                    st.info(f"{icon} {insight.get('message', 'No message')}")
-                    
-                    if severity == 'high':
-                        st.warning("⚠️ **Recommended Action**: Investigate contamination source and review farming practices")
-            
-            # Seasonal Insights
-            if seasonal_insights:
-                st.subheader("🌍 Seasonal Analysis (ANOVA)")
-                st.write("Comparing average readings across different seasons")
+                # Separate insights by type for better organization
+                concerning_trends = [i for i in trend_insights if i.get('severity') == 'high']
+                stable_trends = [i for i in trend_insights if i.get('severity') in ['low', 'medium'] and 'Stable' in i.get('message', '')]
+                insufficient_data = [i for i in trend_insights if 'Only' in i.get('message', '')]
                 
-                for insight in seasonal_insights:
-                    severity = insight.get('severity', 'low')
-                    icon = severity_icons.get(severity, '⚪')
-                    
-                    st.info(f"{icon} {insight.get('message', 'No message')}")
-                    
-                    # Show seasonal data chart if available
-                    if 'season_data' in insight:
-                        st.bar_chart(insight['season_data'])
-                        st.caption("Higher bars indicate seasons with elevated contamination levels")
-            
-            # Category Insights
-            if category_insights:
-                st.subheader("🥬 Vegetable Category Analysis")
-                st.write("Comparing contamination levels across different vegetable types")
+                # Display concerning trends first (most important)
+                if concerning_trends:
+                    st.warning("🚨 **Trends Requiring Attention**")
+                    for insight in concerning_trends:
+                        st.error(f"""
+                        **{insight.get('pesticide_group', 'Unknown')}**
+                        {insight.get('message', '')}
+                        """)
+                        st.caption("🔍 **Recommended Action**: Increase monitoring frequency and investigate potential sources")
+                        st.divider()
                 
-                for insight in category_insights:
-                    severity = insight.get('severity', 'low')
-                    icon = severity_icons.get(severity, '⚪')
-                    
-                    st.info(f"{icon} {insight.get('message', 'No message')}")
-                    
-                    # Show category data chart if available
-                    if 'category_data' in insight:
-                        st.bar_chart(insight['category_data'])
-                        st.caption("Comparison of average contamination by vegetable category")
+                # Stable trends
+                if stable_trends:
+                    st.success("✅ **Stable Contamination Levels**")
+                    for insight in stable_trends:
+                        # Extract months from message for better display
+                        message = insight.get('message', '')
+                        months = message.split('months')[0].split('analyzed')[-1] if 'months' in message else ''
+                        
+                        st.info(f"""
+                        **{insight.get('pesticide_group', 'Unknown')}**
+                        - Status: Stable contamination pattern
+                        - Data: {months} of monitoring
+                        - Action: Continue routine monitoring
+                        """)
+                    st.divider()
+                
+                # Insufficient data
+                if insufficient_data:
+                    st.info("📊 **Additional Data Needed**")
+                    for insight in insufficient_data:
+                        st.write(f"""
+                        **{insight.get('pesticide_group', 'Unknown')}**
+                        - {insight.get('message', 'Insufficient data for analysis')}
+                        - **Action**: Continue data collection for reliable trend analysis
+                        """)
             
-            # Export insights
-            st.divider()
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            # Rest of your existing code for seasonal and category insights...
+            # [Keep your existing seasonal and category analysis code]
             
-            if st.download_button(
-                label="📥 Export Insights (JSON)",
-                data=json.dumps(response, indent=2, ensure_ascii=False),
-                file_name=f"statistical_insights_{timestamp}.json",
-                mime="application/json",
-                use_container_width=True
-            ):
-                st.success("✅ Insights exported successfully!")
-    
     except Exception as e:
-        st.error(f"❌ Error loading insights: {str(e)}")
-        with st.expander("Error Details"):
-            st.exception(e)
+        st.error(f"❌ Error analyzing data: {str(e)}")
+        st.info("💡 **Tip**: Ensure your data covers multiple time periods for trend analysis")
+
+# def show_statistical_insights_page(api_client):
+#     """Statistical Insights page with Mann-Kendall and ANOVA"""
+    
+#     st.title("📊 Statistical Insights")
+    
+#     st.write("""
+#     Advanced statistical analysis of pesticide contamination patterns:
+#     - **Mann-Kendall Test**: Detects temporal trends (increasing/decreasing contamination)
+#     - **ANOVA**: Compares readings across seasons and vegetable categories
+#     """)
+    
+#     col1, col2 = st.columns([6, 1])
+#     with col2:
+#         if st.button("🔄 Refresh", key="refresh_insights"):
+#             st.rerun()
+    
+#     st.divider()
+    
+#     try:
+#         with st.spinner("🔍 Analyzing data..."):
+#             response = api_client.get_statistical_insights()
+            
+#             if not response:
+#                 st.error("❌ Failed to fetch insights from API")
+#                 return
+            
+#             # Check if insights exist
+#             if 'insights' not in response or not response['insights']:
+#                 st.info("""
+#                 ℹ️ No significant statistical patterns detected. This could mean:
+#                 - Data is stable (good news!)
+#                 - Insufficient data for trend detection
+#                 - Need more time periods for analysis
+#                 """)
+#                 return
+            
+#             insights = response['insights']
+            
+#             # Summary metrics
+#             col1, col2, col3 = st.columns(3)
+#             with col1:
+#                 st.metric("Total Insights", response.get('total_insights', 0))
+#             with col2:
+#                 high_count = response.get('high_severity_count', 0)
+#                 st.metric("High Priority", high_count, 
+#                          delta="⚠️ Action Required" if high_count > 0 else "✅ All Good")
+#             with col3:
+#                 st.metric("Analysis Time", datetime.now().strftime("%H:%M:%S"))
+            
+#             st.divider()
+            
+#             # Display insights by type
+#             severity_icons = {
+#                 'high': '🔴',
+#                 'medium': '🟡',
+#                 'low': '🟢'
+#             }
+            
+#             # Group insights by type
+#             trend_insights = [i for i in insights if i.get('type') == 'trend']
+#             seasonal_insights = [i for i in insights if i.get('type') == 'seasonal']
+#             category_insights = [i for i in insights if i.get('type') == 'category']
+            
+#             # Trend Insights
+#             if trend_insights:
+#                 st.subheader("📈 Temporal Trends (Mann-Kendall Test)")
+#                 st.write("Statistical test to detect if contamination is increasing or decreasing over time")
+                
+#                 for insight in trend_insights:
+#                     severity = insight.get('severity', 'low')
+#                     icon = severity_icons.get(severity, '⚪')
+                    
+#                     st.info(f"{icon} {insight.get('message', 'No message')}")
+                    
+#                     if severity == 'high':
+#                         st.warning("⚠️ **Recommended Action**: Investigate contamination source and review farming practices")
+            
+#             # Seasonal Insights
+#             if seasonal_insights:
+#                 st.subheader("🌍 Seasonal Analysis (ANOVA)")
+#                 st.write("Comparing average readings across different seasons")
+                
+#                 for insight in seasonal_insights:
+#                     severity = insight.get('severity', 'low')
+#                     icon = severity_icons.get(severity, '⚪')
+                    
+#                     st.info(f"{icon} {insight.get('message', 'No message')}")
+                    
+#                     # Show seasonal data chart if available
+#                     if 'season_data' in insight:
+#                         st.bar_chart(insight['season_data'])
+#                         st.caption("Higher bars indicate seasons with elevated contamination levels")
+            
+#             # Category Insights
+#             if category_insights:
+#                 st.subheader("🥬 Vegetable Category Analysis")
+#                 st.write("Comparing contamination levels across different vegetable types")
+                
+#                 for insight in category_insights:
+#                     severity = insight.get('severity', 'low')
+#                     icon = severity_icons.get(severity, '⚪')
+                    
+#                     st.info(f"{icon} {insight.get('message', 'No message')}")
+                    
+#                     # Show category data chart if available
+#                     if 'category_data' in insight:
+#                         st.bar_chart(insight['category_data'])
+#                         st.caption("Comparison of average contamination by vegetable category")
+            
+#             # Export insights
+#             st.divider()
+#             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+#             if st.download_button(
+#                 label="📥 Export Insights (JSON)",
+#                 data=json.dumps(response, indent=2, ensure_ascii=False),
+#                 file_name=f"statistical_insights_{timestamp}.json",
+#                 mime="application/json",
+#                 use_container_width=True
+#             ):
+#                 st.success("✅ Insights exported successfully!")
+    
+#     except Exception as e:
+#         st.error(f"❌ Error loading insights: {str(e)}")
+#         with st.expander("Error Details"):
+#             st.exception(e)
 
 # ============================================================================
 # PAGE: PREDICTIONS
@@ -1561,9 +1683,9 @@ def show_enhanced_risk_form(api_client):
         
         with col1:
             vegetable = st.text_input("Vegetable", value="parsley", help="Name of the vegetable/fruit being tested")
-            veg_category = st.selectbox("Vegetable Category",
-                ["leafy_greens", "peppers", "herbs", "root_vegetables", "fruits", "berries", "cruciferous"],
-                help="Category affects exposure multipliers")
+            # veg_category = st.selectbox("Vegetable Category",
+            #     ["leafy_greens", "peppers", "herbs", "root_vegetables", "fruits", "berries", "cruciferous"],
+            #     help="Category affects exposure multipliers")
             pesticide_group = st.selectbox("Pesticide Group",
                 ["organophosphorus", "pyrethroid", "chitin_synthesis_inhibitor",
                  "neonicotinoid", "phenylpyrazoles", "carbamates", "triazoles"],
@@ -1627,7 +1749,7 @@ def show_enhanced_risk_form(api_client):
     if submitted:
         risk_data = {
             "vegetable": vegetable,
-            "vegetable_category": veg_category,
+            # "vegetable_category": veg_category,
             "pesticide_group": pesticide_group,
             "reading": reading,
             "limit": limit,
