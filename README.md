@@ -38,6 +38,12 @@ uvicorn src.main:app --reload --host 0.0.0.0 --port 8001
 ## POSTMAN Collection
 origin  git@github.com:yourusername/repo.git(fetch)
 
+## Difference between branches
+git diff --name-only LARS_predict pre_final
+git diff LARS_predict pre_final -- path/to/suspected_file.py
+git diff LARS_predict..pre_final
+
+
  
 Download the POSTMAN collection from [/assets/mini-rag-app.postman_collection.json](/ assets/mini-rag-app.postman_collection.json)
 # fastapi boilerplate github --> use template from others
@@ -86,8 +92,15 @@ docker compose up --build
 streamlit run src/LARS/app.py
 
 
+streamlit run app_simple.py
+
+what is the gc column specifications
+
+pip install nbformat==4.2.0 
 
 find bifenazate in 2022
+
+find bifenthrin in all samples in 2023
 
 Find bifenazate exceeding limits in 2022
 
