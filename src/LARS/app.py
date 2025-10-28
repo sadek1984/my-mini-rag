@@ -1562,132 +1562,6 @@ def show_statistical_insights_page(api_client):
         st.error(f"❌ Error analyzing data: {str(e)}")
         st.info("💡 **Tip**: Ensure your data covers multiple time periods for trend analysis")
 
-# def show_statistical_insights_page(api_client):
-#     """Statistical Insights page with Mann-Kendall and ANOVA"""
-    
-#     st.title("📊 Statistical Insights")
-    
-#     st.write("""
-#     Advanced statistical analysis of pesticide contamination patterns:
-#     - **Mann-Kendall Test**: Detects temporal trends (increasing/decreasing contamination)
-#     - **ANOVA**: Compares readings across seasons and vegetable categories
-#     """)
-    
-#     col1, col2 = st.columns([6, 1])
-#     with col2:
-#         if st.button("🔄 Refresh", key="refresh_insights"):
-#             st.rerun()
-    
-#     st.divider()
-    
-#     try:
-#         with st.spinner("🔍 Analyzing data..."):
-#             response = api_client.get_statistical_insights()
-            
-#             if not response:
-#                 st.error("❌ Failed to fetch insights from API")
-#                 return
-            
-#             # Check if insights exist
-#             if 'insights' not in response or not response['insights']:
-#                 st.info("""
-#                 ℹ️ No significant statistical patterns detected. This could mean:
-#                 - Data is stable (good news!)
-#                 - Insufficient data for trend detection
-#                 - Need more time periods for analysis
-#                 """)
-#                 return
-            
-#             insights = response['insights']
-            
-#             # Summary metrics
-#             col1, col2, col3 = st.columns(3)
-#             with col1:
-#                 st.metric("Total Insights", response.get('total_insights', 0))
-#             with col2:
-#                 high_count = response.get('high_severity_count', 0)
-#                 st.metric("High Priority", high_count, 
-#                          delta="⚠️ Action Required" if high_count > 0 else "✅ All Good")
-#             with col3:
-#                 st.metric("Analysis Time", datetime.now().strftime("%H:%M:%S"))
-            
-#             st.divider()
-            
-#             # Display insights by type
-#             severity_icons = {
-#                 'high': '🔴',
-#                 'medium': '🟡',
-#                 'low': '🟢'
-#             }
-            
-#             # Group insights by type
-#             trend_insights = [i for i in insights if i.get('type') == 'trend']
-#             seasonal_insights = [i for i in insights if i.get('type') == 'seasonal']
-#             category_insights = [i for i in insights if i.get('type') == 'category']
-            
-#             # Trend Insights
-#             if trend_insights:
-#                 st.subheader("📈 Temporal Trends (Mann-Kendall Test)")
-#                 st.write("Statistical test to detect if contamination is increasing or decreasing over time")
-                
-#                 for insight in trend_insights:
-#                     severity = insight.get('severity', 'low')
-#                     icon = severity_icons.get(severity, '⚪')
-                    
-#                     st.info(f"{icon} {insight.get('message', 'No message')}")
-                    
-#                     if severity == 'high':
-#                         st.warning("⚠️ **Recommended Action**: Investigate contamination source and review farming practices")
-            
-#             # Seasonal Insights
-#             if seasonal_insights:
-#                 st.subheader("🌍 Seasonal Analysis (ANOVA)")
-#                 st.write("Comparing average readings across different seasons")
-                
-#                 for insight in seasonal_insights:
-#                     severity = insight.get('severity', 'low')
-#                     icon = severity_icons.get(severity, '⚪')
-                    
-#                     st.info(f"{icon} {insight.get('message', 'No message')}")
-                    
-#                     # Show seasonal data chart if available
-#                     if 'season_data' in insight:
-#                         st.bar_chart(insight['season_data'])
-#                         st.caption("Higher bars indicate seasons with elevated contamination levels")
-            
-#             # Category Insights
-#             if category_insights:
-#                 st.subheader("🥬 Vegetable Category Analysis")
-#                 st.write("Comparing contamination levels across different vegetable types")
-                
-#                 for insight in category_insights:
-#                     severity = insight.get('severity', 'low')
-#                     icon = severity_icons.get(severity, '⚪')
-                    
-#                     st.info(f"{icon} {insight.get('message', 'No message')}")
-                    
-#                     # Show category data chart if available
-#                     if 'category_data' in insight:
-#                         st.bar_chart(insight['category_data'])
-#                         st.caption("Comparison of average contamination by vegetable category")
-            
-#             # Export insights
-#             st.divider()
-#             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-#             if st.download_button(
-#                 label="📥 Export Insights (JSON)",
-#                 data=json.dumps(response, indent=2, ensure_ascii=False),
-#                 file_name=f"statistical_insights_{timestamp}.json",
-#                 mime="application/json",
-#                 use_container_width=True
-#             ):
-#                 st.success("✅ Insights exported successfully!")
-    
-#     except Exception as e:
-#         st.error(f"❌ Error loading insights: {str(e)}")
-#         with st.expander("Error Details"):
-#             st.exception(e)
 
 # ============================================================================
 # PAGE: PREDICTIONS
@@ -5358,12 +5232,92 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
         "📈 Trend Analysis"
     ])
     
-    # ============================================================================
-    # TAB 1: HIGH-RISK COMBINATIONS
-    # ============================================================================
-    
+    # # ============================================================================
+    # # TAB 1: HIGH-RISK COMBINATIONS
+    # # ============================================================================
+
     with tab1:
         st.header("🔥 High-Risk Vegetable-Pesticide Combinations")
+        
+        # ===== ADD RISK SCORE EXPLANATION DROPDOWN =====
+        with st.expander("🧪 **How Risk Score is Calculated**", expanded=False):
+            st.markdown("""
+            ### Risk Score Methodology
+            
+            The Risk Score helps prioritize testing resources by identifying the most problematic 
+            vegetable-pesticide combinations. It's calculated using three key factors:
+            """)
+            
+            # Three main components
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("""
+                #### 🎯 Violation Rate (50%)
+                **Formula:** `Violations ÷ Total Tests`  
+                **Measures:** How frequently this combination violates limits  
+                **Example:** 20 violations in 23 tests = 87% violation rate
+                """)
+            
+            with col2:
+                st.markdown("""
+                #### 📊 Absolute Violations (30%)
+                **Formula:** `Violations ÷ Max Violations in Dataset`  
+                **Measures:** Relative impact compared to other combinations  
+                **Example:** 20 violations ÷ 20 max violations = 100% impact
+                """)
+            
+            with col3:
+                st.markdown("""
+                #### ⚠️ Severity (20%)
+                **Formula:** `Average Reading ÷ Limit` (capped at 5x)  
+                **Measures:** How severely limits are exceeded  
+                **Example:** Avg 50 mg ÷ Limit 10 mg = 5x severity
+                """)
+            
+            st.markdown("---")
+            
+            # Detailed calculation example
+            st.markdown("""
+            ### 📝 Calculation Example: Cucumber + Bifenthrin
+            
+            | Component | Calculation | Score |
+            |-----------|-------------|-------|
+            | **Violation Rate** | 20 violations ÷ 23 tests = 87% | 0.87 × 0.5 = **0.435** |
+            | **Absolute Violations** | 20 ÷ 20 (max) = 100% | 1.00 × 0.3 = **0.300** |
+            | **Severity** | 50 mg ÷ 10 mg = 5x (capped) | 5.0 × 0.04 = **0.200** |
+            | **Total Risk Score** | Sum of all components | **0.935** |
+            """)
+            
+            # Interpretation guide
+            st.markdown("""
+            ---
+            
+            ### 📈 Risk Score Interpretation Guide
+            
+            | Score Range | Risk Level | Recommended Action |
+            |-------------|------------|-------------------|
+            | 0.8 - 1.0 | 🔴 **Critical** | Immediate investigation required |
+            | 0.6 - 0.8 | 🟠 **High** | Enhanced monitoring needed |
+            | 0.4 - 0.6 | 🟡 **Medium** | Standard monitoring |
+            | 0.0 - 0.4 | 🟢 **Low** | Routine monitoring |
+            
+            **Business Impact:** Focus on combinations with scores above 0.6 for maximum testing efficiency.
+            """)
+            
+            # Why this matters
+            st.markdown("""
+            ---
+            
+            ### 💡 Why This Matters
+            
+            - **Resource Optimization:** Identify the 20% of combinations causing 80% of violations
+            - **Proactive Monitoring:** Focus testing on high-risk combinations before issues occur  
+            - **Data-Driven Decisions:** Make informed choices based on statistical evidence
+            - **Regulatory Compliance:** Ensure you're monitoring the right combinations
+            """)
+        # ===== END OF EXPLANATION DROPDOWN =====
+        
         
         st.info("""
         **Business Value:** Focus your testing resources on combinations that cause 80% of violations.
@@ -5430,60 +5384,44 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
             height=400
         )
         
-        # Pareto Chart
-        st.subheader("📊 Pareto Analysis: Cumulative Violation Coverage")
+        # ===== ADD INTERPRETATION TIP BELOW TABLE =====
+        st.caption("""
+        💡 **Tip:** Combinations with Risk Scores above 0.6 should be prioritized for testing. 
+        Click the "How Risk Score is Calculated" dropdown above for detailed methodology.
+        """)
+        # ===== END TIP =====
+
+        # نضيف رؤى تانية بسيطة
+        st.subheader("💡 Quick Insights from Top Combinations")
         
-        # Prepare data for Pareto chart
-        pareto_data = high_risk.copy()
-        pareto_data = pareto_data.sort_values('Violations', ascending=False)
-        pareto_data['Cumulative_Violations'] = pareto_data['Violations'].cumsum()
-        pareto_data['Cumulative_Percentage'] = (pareto_data['Cumulative_Violations'] / pareto_data['Violations'].sum()) * 100
-        pareto_data['Combination'] = pareto_data['Vegetable'] + ' + ' + pareto_data['Pesticide']
+        col1, col2 = st.columns(2)
         
-        # Create Pareto chart
-        fig_pareto = go.Figure()
+        with col1:
+            # أعلى مبيد مسبب للمشاكل
+            pesticide_issues = high_risk.groupby('Pesticide')['Violations'].sum().nlargest(3)
+            st.metric(
+                "Top Problematic Pesticides",
+                f"{pesticide_issues.index[0]}",
+                delta=f"{pesticide_issues.iloc[0]} violations"
+            )
         
-        # Bar chart for violations
-        fig_pareto.add_trace(go.Bar(
-            x=pareto_data['Combination'],
-            y=pareto_data['Violations'],
-            name='Violations',
-            marker_color='#FF6B6B',
-            yaxis='y'
-        ))
+        with col2:
+            # أعلى خضار مسبب للمشاكل
+            vegetable_issues = high_risk.groupby('Vegetable')['Violations'].sum().nlargest(3)
+            st.metric(
+                "Top Problematic Vegetables", 
+                f"{vegetable_issues.index[0]}",
+                delta=f"{vegetable_issues.iloc[0]} violations"
+            )
         
-        # Line chart for cumulative percentage
-        fig_pareto.add_trace(go.Scatter(
-            x=pareto_data['Combination'],
-            y=pareto_data['Cumulative_Percentage'],
-            name='Cumulative %',
-            mode='lines+markers',
-            marker=dict(size=8, color='#4ECDC4'),
-            line=dict(width=3),
-            yaxis='y2'
-        ))
-        
-        # Add 80% reference line
-        fig_pareto.add_hline(
-            y=80, 
-            line_dash="dash", 
-            line_color="green", 
-            annotation_text="80% Goal",
-            yref='y2'
-        )
-        
-        fig_pareto.update_layout(
-            title='Top 20 High-Risk Combinations (80/20 Rule)',
-            xaxis_title='Vegetable-Pesticide Combination',
-            yaxis=dict(title='Number of Violations', side='left'),
-            yaxis2=dict(title='Cumulative Percentage (%)', side='right', overlaying='y', range=[0, 110]),
-            hovermode='x unified',
-            height=500,
-            xaxis_tickangle=-45
-        )
-        
-        st.plotly_chart(fig_pareto, use_container_width=True)
-    
+        # توصيات سريعة
+        st.success("""
+        **🎯 Immediate Actions:**
+        - **Priority 1:** Increase testing for cucumber + Bifenthrin
+        - **Priority 2:** Monitor all pepper types with Buprofezin  
+        - **Alert:** 100% violation rates need immediate investigation
+        """)
+
     # ============================================================================
     # TAB 2: SEASONAL FORECASTING
     # ============================================================================
