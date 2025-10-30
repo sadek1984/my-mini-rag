@@ -4782,35 +4782,137 @@ def show_anova_analysis_page(api_client):
     
     # ===== RISK ASSESSMENT TABLE =====
     
-    st.subheader("🎯 Seasonal Risk Assessment")
+    # st.subheader("🎯 Seasonal Risk Assessment")
     
-    # Create risk classification table
-    summary = results['summary']
-    risk_categories = []
+    # # Calculate seasonal risk based on multiple factors
+    # seasonal_risk = df_filtered.groupby('season').agg({
+    #     'reading': ['mean', 'median', 'count'],
+    #     'violation_numeric': 'mean',
+    #     'limits': 'mean'
+    # }).round(2)
     
-    for season, row in summary.iterrows():
-        mean_val = row['mean']
-        if mean_val > avg_contamination * 1.2:
-            risk = "🔴 High Risk"
-            action = "Increase monitoring"
-        elif mean_val > avg_contamination:
-            risk = "🟡 Medium Risk"
-            action = "Maintain monitoring"
-        else:
-            risk = "🟢 Low Risk" 
-            action = "Standard monitoring"
+    # seasonal_risk.columns = ['Mean_Reading', 'Median_Reading', 'Sample_Count', 'Violation_Rate', 'Avg_Limit']
+    # seasonal_risk = seasonal_risk.reset_index()
+    
+    # # Add risk scoring
+    # seasonal_risk['Contamination_Risk'] = seasonal_risk['Mean_Reading'] / seasonal_risk['Avg_Limit']
+    # seasonal_risk['Overall_Risk_Score'] = (
+    #     seasonal_risk['Contamination_Risk'] * 0.6 + 
+    #     seasonal_risk['Violation_Rate'] * 0.4
+    # )
+    # seasonal_risk['Risk_Level'] = seasonal_risk['Overall_Risk_Score'].apply(
+    #     lambda x: '🔴 High' if x > 2 else '🟡 Medium' if x > 1 else '🟢 Low'
+    # )
+    
+    # # Display the comprehensive risk assessment
+    # st.dataframe(
+    #     seasonal_risk.style.format({
+    #         'Mean_Reading': '{:.1f}',
+    #         'Violation_Rate': '{:.1%}',
+    #         'Contamination_Risk': '{:.2f}x',
+    #         'Overall_Risk_Score': '{:.2f}'
+    #     }).background_gradient(subset=['Overall_Risk_Score'], cmap='Reds'),
+    #     use_container_width=True
+    # )
+    
+    # # Key insights
+    # highest_risk = seasonal_risk.loc[seasonal_risk['Overall_Risk_Score'].idxmax()]
+    # st.warning(f"""
+    # **Highest Risk Season: {highest_risk['season']}**
+    # - Average contamination: {highest_risk['Mean_Reading']:.1f} ({highest_risk['Contamination_Risk']:.1f}x above limit)
+    # - Violation rate: {highest_risk['Violation_Rate']:.1%}
+    # - Risk level: {highest_risk['Risk_Level']}
+    # """)
+
+    # # Create risk classification table
+    # summary = results['summary']
+    # risk_categories = []
+    
+    # for season, row in summary.iterrows():
+    #     mean_val = row['mean']
+    #     if mean_val > avg_contamination * 1.2:
+    #         risk = "🔴 High Risk"
+    #         action = "Increase monitoring"
+    #     elif mean_val > avg_contamination:
+    #         risk = "🟡 Medium Risk"
+    #         action = "Maintain monitoring"
+    #     else:
+    #         risk = "🟢 Low Risk" 
+    #         action = "Standard monitoring"
         
-        risk_categories.append({
-            analysis_mode: season,
-            'Avg Contamination': f"{mean_val:.1f}",
-            'Risk Level': risk,
-            'Samples': int(row['count']),
-            'Recommended Action': action
-        })
+    #     risk_categories.append({
+    #         analysis_mode: season,
+    #         'Avg Contamination': f"{mean_val:.1f}",
+    #         'Risk Level': risk,
+    #         'Samples': int(row['count']),
+    #         'Recommended Action': action
+    #     })
     
-    risk_df = pd.DataFrame(risk_categories)
-    st.dataframe(risk_df, use_container_width=True)
-    
+    # risk_df = pd.DataFrame(risk_categories)
+    # st.dataframe(risk_df, use_container_width=True)
+    st.subheader("🎯 Seasonal Risk Assessment")
+
+    # Calculate seasonal risk based on multiple factors
+    seasonal_risk = df_filtered.groupby('season').agg({
+        'reading': ['mean', 'median', 'count'],
+        'violation_numeric': 'mean', 
+        'limits': 'mean'
+    }).round(2)
+
+    seasonal_risk.columns = ['Mean_Reading', 'Median_Reading', 'Sample_Count', 'Violation_Rate', 'Avg_Limit']
+    seasonal_risk = seasonal_risk.reset_index()
+
+    # Add risk scoring
+    seasonal_risk['Contamination_Risk'] = seasonal_risk['Mean_Reading'] / seasonal_risk['Avg_Limit']
+    seasonal_risk['Overall_Risk_Score'] = (
+        seasonal_risk['Contamination_Risk'] * 0.6 + 
+        seasonal_risk['Violation_Rate'] * 0.4
+    )
+
+    # Define risk levels
+    def assign_risk_level(score, contamination_ratio):
+        if score > 0.7 or contamination_ratio > 0.5:
+            return '🔴 High'
+        elif score > 0.4 or contamination_ratio > 0.2:
+            return '🟡 Medium'
+        else:
+            return '🟢 Low'
+
+    seasonal_risk['Risk_Level'] = seasonal_risk.apply(
+        lambda x: assign_risk_level(x['Overall_Risk_Score'], x['Contamination_Risk']), 
+        axis=1
+    )
+
+    # Display the comprehensive risk assessment
+    st.dataframe(
+        seasonal_risk.style.format({
+            'Mean_Reading': '{:.1f}',
+            'Violation_Rate': '{:.1%}',
+            'Contamination_Risk': '{:.2f}x',
+            'Overall_Risk_Score': '{:.2f}'
+        }).background_gradient(subset=['Overall_Risk_Score'], cmap='Reds'),
+        use_container_width=True
+    )
+
+    # Key insights
+    highest_risk = seasonal_risk.loc[seasonal_risk['Overall_Risk_Score'].idxmax()]
+    st.warning(f"""
+    **Highest Risk Season: {highest_risk['season']}**
+    - Average contamination: {highest_risk['Mean_Reading']:.1f} ({highest_risk['Contamination_Risk']:.1f}x above limit)
+    - Violation rate: {highest_risk['Violation_Rate']:.1%}
+    - Risk level: {highest_risk['Risk_Level']}
+    """)
+
+    # Simple explanation
+    st.info("""
+    **📊 Risk Assessment Methodology:**
+    - **Overall Risk Score** = (Contamination Ratio × 60%) + (Violation Rate × 40%)
+    - **🔴 High Risk**: Score > 0.7 or contamination >50% above limit  
+    - **🟡 Medium Risk**: Score > 0.4 or contamination >20% above limit
+    - **🟢 Low Risk**: Below above thresholds
+    """)
+
+
     # ===== ACTION RECOMMENDATIONS =====
     
     st.subheader("📋 Recommended Actions")
@@ -5225,9 +5327,8 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
     # CREATE TABS FOR ANALYSIS
     # ============================================================================
     
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🔥 High-Risk Combinations",
-        "📅 Seasonal Forecasting", 
+    tab1, tab3, tab4 = st.tabs([
+        "🔥 High-Risk Combinations", 
         "🗺️ Risk Heatmaps",
         "📈 Trend Analysis"
     ])
@@ -5372,8 +5473,24 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
         display_df['Violation_Rate'] = display_df['Violation_Rate'].astype(float)
         display_df['Risk_Score'] = display_df['Risk_Score'].astype(float)
         
+        # Create a simple priority matrix
+        priority_data = display_df.nlargest(10, 'Violations').copy()
+        
+        # Categorize by risk and impact
+        def get_priority(row):
+            if row['Violation_Rate'] > 0.66 and row['Violations'] > 5:
+                return "🚨 CRITICAL"
+            elif row['Violation_Rate'] > 0.66:
+                return "🔴 High Risk"
+            elif row['Violations'] > 5:
+                return "🟡 High Impact"
+            else:
+                return "🟢 Monitor"
+        
+        priority_data['Priority'] = priority_data.apply(get_priority, axis=1)
+
         st.dataframe(
-            display_df.style.background_gradient(subset=['Risk_Score'], cmap='Reds')
+            priority_data.style.background_gradient(subset=['Risk_Score'], cmap='Reds')
             .format({
                 'Violation_Rate': '{:.1%}',
                 'Risk_Score': '{:.3f}',
@@ -5384,6 +5501,7 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
             height=400
         )
         
+
         # ===== ADD INTERPRETATION TIP BELOW TABLE =====
         st.caption("""
         💡 **Tip:** Combinations with Risk Scores above 0.6 should be prioritized for testing. 
@@ -5422,92 +5540,92 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
         - **Alert:** 100% violation rates need immediate investigation
         """)
 
-    # ============================================================================
-    # TAB 2: SEASONAL FORECASTING
-    # ============================================================================
+    # # ============================================================================
+    # # TAB 2: SEASONAL FORECASTING
+    # # ============================================================================
     
-    with tab2:
-        st.header("📅 Seasonal Risk Forecasting")
+    # with tab2:
+    #     st.header("📅 Seasonal Risk Forecasting")
         
-        # Calculate seasonal violation rates
-        seasonal_stats = df.groupby('season').agg({
-            'violation_numeric': ['sum', 'count', 'mean'],
-            'reading': 'mean',
-            'vegetable_english': 'nunique',
-            'pesticide': 'nunique'
-        }).reset_index()
+    #     # Calculate seasonal violation rates
+    #     seasonal_stats = df.groupby('season').agg({
+    #         'violation_numeric': ['sum', 'count', 'mean'],
+    #         'reading': 'mean',
+    #         'vegetable_english': 'nunique',
+    #         'pesticide': 'nunique'
+    #     }).reset_index()
         
-        seasonal_stats.columns = ['Season', 'Violations', 'Total_Tests', 'Violation_Rate', 
-                                   'Avg_Reading', 'Unique_Vegetables', 'Unique_Pesticides']
+    #     seasonal_stats.columns = ['Season', 'Violations', 'Total_Tests', 'Violation_Rate', 
+    #                                'Avg_Reading', 'Unique_Vegetables', 'Unique_Pesticides']
         
-        seasonal_stats = seasonal_stats.sort_values('Violation_Rate', ascending=False)
+    #     seasonal_stats = seasonal_stats.sort_values('Violation_Rate', ascending=False)
         
-        # Display seasonal metrics
-        st.subheader("🌍 Seasonal Risk Overview")
+    #     # Display seasonal metrics
+    #     st.subheader("🌍 Seasonal Risk Overview")
         
-        cols = st.columns(len(seasonal_stats))
+    #     cols = st.columns(len(seasonal_stats))
         
-        season_colors = {
-            'Winter': '🔵',
-            'Spring': '🟢',
-            'Summer': '🟠',
-            'Fall': '🔴'
-        }
+    #     season_colors = {
+    #         'Winter': '🔵',
+    #         'Spring': '🟢',
+    #         'Summer': '🟠',
+    #         'Fall': '🔴'
+    #     }
         
-        for idx, (col, row) in enumerate(zip(cols, seasonal_stats.itertuples())):
-            with col:
-                icon = season_colors.get(row.Season, '⚪')
-                st.metric(
-                    f"{icon} {row.Season}",
-                    f"{row.Violation_Rate:.1%}",
-                    delta=f"{int(row.Violations)} violations"
-                )
-                st.caption(f"{int(row.Total_Tests)} tests")
+    #     for idx, (col, row) in enumerate(zip(cols, seasonal_stats.itertuples())):
+    #         with col:
+    #             icon = season_colors.get(row.Season, '⚪')
+    #             st.metric(
+    #                 f"{icon} {row.Season}",
+    #                 f"{row.Violation_Rate:.1%}",
+    #                 delta=f"{int(row.Violations)} violations"
+    #             )
+    #             st.caption(f"{int(row.Total_Tests)} tests")
         
-        # Visualization
-        st.subheader("📊 Seasonal Comparison")
+    #     # Visualization
+    #     st.subheader("📊 Seasonal Comparison")
         
-        fig_seasonal = go.Figure()
+    #     fig_seasonal = go.Figure()
         
-        fig_seasonal.add_trace(go.Bar(
-            x=seasonal_stats['Season'],
-            y=seasonal_stats['Violation_Rate'] * 100,
-            marker_color=['#339AF0' if s == 'Winter' else '#51CF66' if s == 'Spring' 
-                         else '#FF922B' if s == 'Summer' else '#FA5252' 
-                         for s in seasonal_stats['Season']],
-            text=seasonal_stats['Violation_Rate'].apply(lambda x: f"{x:.1%}"),
-            textposition='outside',
-            name='Violation Rate'
-        ))
+    #     fig_seasonal.add_trace(go.Bar(
+    #         x=seasonal_stats['Season'],
+    #         y=seasonal_stats['Violation_Rate'] * 100,
+    #         marker_color=['#339AF0' if s == 'Winter' else '#51CF66' if s == 'Spring' 
+    #                      else '#FF922B' if s == 'Summer' else '#FA5252' 
+    #                      for s in seasonal_stats['Season']],
+    #         text=seasonal_stats['Violation_Rate'].apply(lambda x: f"{x:.1%}"),
+    #         textposition='outside',
+    #         name='Violation Rate'
+    #     ))
         
-        fig_seasonal.update_layout(
-            title='Violation Rate by Season',
-            xaxis_title='Season',
-            yaxis_title='Violation Rate (%)',
-            height=400,
-            showlegend=False
-        )
+    #     fig_seasonal.update_layout(
+    #         title='Violation Rate by Season',
+    #         xaxis_title='Season',
+    #         yaxis_title='Violation Rate (%)',
+    #         height=400,
+    #         showlegend=False
+    #     )
         
-        st.plotly_chart(fig_seasonal, use_container_width=True)
+    #     st.plotly_chart(fig_seasonal, use_container_width=True)
         
-        # Display table
-        st.subheader("📋 Detailed Seasonal Statistics")
+    #     # Display table
+    #     st.subheader("📋 Detailed Seasonal Statistics")
         
-        display_seasonal = seasonal_stats[['Season', 'Violations', 'Total_Tests', 'Violation_Rate']].copy()
-        display_seasonal['Season'] = display_seasonal['Season'].astype(str)
-        display_seasonal['Violations'] = display_seasonal['Violations'].astype(float)
-        display_seasonal['Total_Tests'] = display_seasonal['Total_Tests'].astype(float)
-        display_seasonal['Violation_Rate'] = display_seasonal['Violation_Rate'].astype(float)
+    #     display_seasonal = seasonal_stats[['Season', 'Violations', 'Total_Tests', 'Violation_Rate']].copy()
+    #     display_seasonal['Season'] = display_seasonal['Season'].astype(str)
+    #     display_seasonal['Violations'] = display_seasonal['Violations'].astype(float)
+    #     display_seasonal['Total_Tests'] = display_seasonal['Total_Tests'].astype(float)
+    #     display_seasonal['Violation_Rate'] = display_seasonal['Violation_Rate'].astype(float)
         
-        st.dataframe(
-            display_seasonal.style.background_gradient(subset=['Violation_Rate'], cmap='Reds')
-            .format({
-                'Violation_Rate': '{:.1%}',
-                'Violations': '{:.0f}',
-                'Total_Tests': '{:.0f}'
-            }),
-            use_container_width=True
-        )
+    #     st.dataframe(
+    #         display_seasonal.style.background_gradient(subset=['Violation_Rate'], cmap='Reds')
+    #         .format({
+    #             'Violation_Rate': '{:.1%}',
+    #             'Violations': '{:.0f}',
+    #             'Total_Tests': '{:.0f}'
+    #         }),
+    #         use_container_width=True
+    #     )
 
 
     # # ============================================================================
@@ -5528,15 +5646,18 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
         heatmap_data = heatmap_data.dropna()
         heatmap_data['Violations'] = heatmap_data['Violations'].astype(int)
         
-        # Filter by minimum tests
-        min_tests = st.slider("Minimum tests required:", 1, 10, 3)
+        # 🔍 DATA QUALITY FILTER - Minimum Tests Required
+        # This ensures we only analyze combinations with sufficient test samples
+        # to avoid misleading results from small data
+        min_tests = st.slider("Minimum tests required:", 1, 10, 3,
+                            help="Filter out combinations with too few tests for reliable analysis")
         heatmap_filtered = heatmap_data[heatmap_data['Tests'] >= min_tests].copy()
         
         if len(heatmap_filtered) < 3:
             st.warning("⚠️ Not enough data with the current filter. Try reducing minimum tests.")
         else:
             top_combos = heatmap_filtered.nlargest(30, 'Violations').copy()
-            
+                
             # ============================================================================
             # VISUALIZATION 1: BUBBLE CHART
             # ============================================================================
@@ -5603,9 +5724,10 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
             # ============================================================================
             # VISUALIZATION 2: CLEAN TREEMAP WITH LIGHT GREEN COLOR SCHEME
             # ============================================================================
-            
+           
+
             st.subheader("📊 Clean Treemap - Actionable Insights")
-            
+
             try:
                 # Use only top 15 combinations to avoid clutter
                 clean_treemap_data = heatmap_filtered.nlargest(15, 'Violations').copy()
@@ -5616,22 +5738,40 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
                     errors='coerce'
                 )
                 
-                # Create clear labels
+                # ✅ FIX: Create better color distribution for high violation rates
+                min_rate = clean_treemap_data['Violation_Rate'].min()
+                max_rate = clean_treemap_data['Violation_Rate'].max()
+                
+                def get_risk_category(rate):
+                    if rate < 0.5:
+                        return 'Low (<50%)'
+                    elif rate < 0.75:
+                        return 'Medium (50-75%)'
+                    elif rate < 0.9:
+                        return 'High (75-90%)'
+                    else:
+                        return 'Critical (90%+)'
+
+                clean_treemap_data['Risk_Category'] = clean_treemap_data['Violation_Rate'].apply(get_risk_category)
+                
+                # Create clear labels - FIXED: Use proper column name
                 clean_treemap_data['Display_Label'] = clean_treemap_data.apply(
                     lambda row: f"{row['Pesticide']}<br>{row['Violations']} violations<br>{row['Violation_Rate']:.0%} rate", 
                     axis=1
                 )
-                
-                # ✅ UPDATED: Create treemap with LIGHT GREEN color scheme
+
                 fig_clean = px.treemap(
                     clean_treemap_data,
                     path=['Vegetable', 'Display_Label'],
                     values='Violations',
-                    color='Violation_Rate',
-                    # ✅ LIGHT GREEN COLOR SCHEME: Light green to dark green gradient
-                    color_continuous_scale=['#E8F5E8', '#2E8B57', '#1A5D1A'],
-                    range_color=[0, 1],
-                    title='Top 15 Highest-Risk Combinations (Light Green Theme)'
+                    color='Risk_Category',
+                    color_discrete_map={
+                        'Low (<50%)': '#C8E6C9',      # ✅ DARKER: Was #E8F5E8 (very light)
+                        'Medium (50-75%)': '#81C784',  # ✅ DARKER: Was #90EE90  
+                        'High (75-90%)': '#4CAF50',    # ✅ DARKER: Was #32CD32
+                        'Critical (90%+)': '#2E7D32'   # ✅ DARKER: Was #006400
+                    },
+                    title='Top 15 Highest-Risk Combinations (Risk Categories)'
                 )
                 
                 # Clean up the layout
@@ -5640,7 +5780,7 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
                     margin=dict(t=60, l=10, r=10, b=10)
                 )
                 
-                # Enhanced traces
+                # Enhanced traces - FIXED: Remove color reference from hovertemplate for categorical
                 fig_clean.update_traces(
                     textinfo="label",
                     textfont=dict(size=13, color='white'),
@@ -5648,7 +5788,6 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
                     hovertemplate=(
                         '<b>%{label}</b><br>' +
                         'Violations: %{value}<br>' +
-                        'Risk Level: %{color:.1%}<br>' +
                         '<extra></extra>'
                     ),
                     marker=dict(
@@ -5657,197 +5796,22 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
                     )
                 )
                 
-                # ✅ UPDATED: Configure colorbar for green theme
-                fig_clean.update_coloraxes(
-                    colorbar=dict(
-                        title=dict(
-                            text="<b>Risk Level</b>",
-                            side="right"
-                        ),
-                        tickmode='array',
-                        tickvals=[0, 0.33, 0.66, 1.0],
-                        ticktext=[
-                            '🌱 Low (0-33%)',
-                            '🌿 Medium (33-66%)',
-                            '🍃 High (66-85%)',
-                            '🌲 Critical (85%+)'
-                        ],
-                        len=0.75,
-                        thickness=22,
-                        x=1.02
-                    ),
-                    cmin=0,
-                    cmax=1
-                )
-                
                 st.plotly_chart(fig_clean, use_container_width=True)
+                
+                # Show data statistics to help understand the color distribution
+                st.caption(f"📈 Violation rate range in this view: {min_rate:.1%} to {max_rate:.1%}")
+                
+                
                 
             except Exception as e:
                 st.error(f"Treemap visualization failed: {e}")
-                
-                # FALLBACK: Manual color assignment with green theme
-                try:
-                    def get_risk_color(rate):
-                        """Assign green-based colors based on risk level"""
-                        if rate < 0.33:
-                            return '#E8F5E8'  # Very light green
-                        elif rate < 0.66:
-                            return '#90EE90'  # Light green
-                        elif rate < 0.85:
-                            return '#32CD32'  # Medium green
-                        else:
-                            return '#2E8B57'  # Sea green
-                    
-                    # Assign colors manually
-                    clean_treemap_data['Manual_Color'] = clean_treemap_data['Violation_Rate'].apply(get_risk_color)
-                    clean_treemap_data['Risk_Text'] = clean_treemap_data['Violation_Rate'].apply(
-                        lambda x: '🌱 Low' if x < 0.33 else '🌿 Medium' if x < 0.66 else '🍃 High' if x < 0.85 else '🌲 Critical'
-                    )
-                    
-                    # Create treemap with manual colors
-                    fig_fallback = go.Figure()
-                    
-                    # Group by vegetable
-                    for veg in clean_treemap_data['Vegetable'].unique():
-                        veg_data = clean_treemap_data[clean_treemap_data['Vegetable'] == veg]
-                        
-                        # Add each pesticide combination
-                        labels = [veg]
-                        parents = ['']
-                        values = [0]
-                        colors = [get_risk_color(veg_data['Violation_Rate'].mean())]
-                        
-                        for _, row in veg_data.iterrows():
-                            labels.append(f"{row['Pesticide']}<br>{row['Violations']} violations")
-                            parents.append(veg)
-                            values.append(row['Violations'])
-                            colors.append(row['Manual_Color'])
-                        
-                        fig_fallback.add_trace(go.Treemap(
-                            labels=labels,
-                            parents=parents,
-                            values=values,
-                            marker=dict(
-                                colors=colors,
-                                line=dict(width=2.5, color='white'),
-                                cornerradius=4
-                            ),
-                            textfont=dict(size=12, color='white'),
-                            hovertemplate='<b>%{label}</b><br>Violations: %{value}<extra></extra>',
-                            showlegend=False
-                        ))
-                    
-                    fig_fallback.update_layout(
-                        title='Top 15 Risk Combinations - Green Theme',
-                        height=550,
-                        margin=dict(t=60, l=10, r=10, b=10)
-                    )
-                    
-                    st.plotly_chart(fig_fallback, use_container_width=True)
-                    
-                    # Show color legend
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.markdown("🌱 **Low**: 0-33%")
-                    with col2:
-                        st.markdown("🌿 **Medium**: 33-66%")
-                    with col3:
-                        st.markdown("🍃 **High**: 66-85%")
-                    with col4:
-                        st.markdown("🌲 **Critical**: 85%+")
-                        
-                except Exception as e2:
-                    st.error(f"Fallback also failed: {e2}")
-            
-            
-            # ============================================================================
-            # VISUALIZATION 3: PRIORITY MATRIX TABLE
-            # ============================================================================
-            
-            st.subheader("🎯 Priority Matrix - For Immediate Action")
-            
-            # Create a simple priority matrix
-            priority_data = heatmap_filtered.nlargest(10, 'Violations').copy()
-            
-            # Categorize by risk and impact
-            def get_priority(row):
-                if row['Violation_Rate'] > 0.66 and row['Violations'] > 5:
-                    return "🚨 CRITICAL"
-                elif row['Violation_Rate'] > 0.66:
-                    return "🔴 High Risk"
-                elif row['Violations'] > 5:
-                    return "🟡 High Impact"
-                else:
-                    return "🟢 Monitor"
-            
-            priority_data['Priority'] = priority_data.apply(get_priority, axis=1)
-            
-            # Display as a clean table
-            st.dataframe(
-                priority_data[['Vegetable', 'Pesticide', 'Violations', 'Violation_Rate', 'Priority']]
-                .style.format({'Violation_Rate': '{:.1%}'})
-                .background_gradient(subset=['Violations'], cmap='Reds'),
-                use_container_width=True
-            )
-            
-            # ============================================================================
-            # VISUALIZATION 4: RISK MATRIX TABLE
-            # ============================================================================
-            
-            st.subheader("📋 Risk Matrix Table")
-            
-            # Create a pivot table for heatmap
-            pivot_data = top_combos.pivot_table(
-                index='Vegetable', 
-                columns='Pesticide', 
-                values='Violation_Rate',
-                aggfunc='first'
-            ).fillna(0)
-            
-            # Create styled dataframe
-            def style_risk_cell(val):
-                if val <= 0.33:
-                    color = 'background-color: #90EE90'  # Light green
-                elif val <= 0.66:
-                    color = 'background-color: #FFFFCC'  # Light yellow
-                else:
-                    color = 'background-color: #FFB6C1'  # Light red
-                return color
-            
-            styled_df = pivot_data.style.format('{:.1%}').applymap(style_risk_cell)
-            
-            st.dataframe(styled_df, use_container_width=True)
-            
-            st.info("""
-            **🎨 Color Guide:**
-            - **🟢 Green:** Low risk (0-33% violation rate)
-            - **🟡 Yellow:** Medium risk (33-66% violation rate) 
-            - **🔴 Red:** High risk (66-100% violation rate)
-            """)
-            
-            # Optional: Data verification expander
-            with st.expander("📊 Verify Data Quality"):
-                st.write("**Violation Rate Distribution:**")
-                verify_df = clean_treemap_data[['Vegetable', 'Pesticide', 'Violations', 'Violation_Rate']].copy()
-                verify_df['Violation_Rate_Display'] = verify_df['Violation_Rate'].apply(lambda x: f"{x:.1%}")
-                verify_df['Risk_Level'] = clean_treemap_data['Violation_Rate'].apply(
-                    lambda x: '🟢 Low' if x < 0.33 else '🟡 Medium' if x < 0.66 else '🟠 High' if x < 0.85 else '🔴 Critical'
-                )
-                
-                # Display the dataframe
-                display_cols = ['Vegetable', 'Pesticide', 'Violations', 'Violation_Rate_Display', 'Risk_Level']
-                st.dataframe(verify_df[display_cols], use_container_width=True)
+
+
 
     # ============================================================================
     # END OF TAB 3 CODE
     # ============================================================================
 
-    # Notes:
-    # 1. This code should ONLY appear in Tab 3 (Risk Heatmaps)
-    # 2. Remove all duplicate treemap code from other tabs
-    # 3. Make sure heatmap_filtered variable is available in Tab 3 scope
-    # 4. The two duplicate visualizations you showed are now removed
-    # 5. Only clean, essential visualizations remain
 
     # ============================================================================
     # TAB 4: TREND ANALYSIS
@@ -5897,77 +5861,121 @@ reading=30,  limits=50  → reading > limits = FALSE → COMPLIANT
                     )
                     
                     st.plotly_chart(fig_trend, use_container_width=True)
-                
-            # Seasonal trend
-            st.subheader("🌍 Seasonal Contamination Trends")
-
         
-        # Seasonal trend
-        seasonal_trend = df.groupby('season').agg({
-            'violation_numeric': 'mean',
-            'reading': 'mean'
-        }).reset_index()
-        
-        # Order seasons properly
-        season_order = ['Winter', 'Spring', 'Summer', 'Fall']
-        seasonal_trend['season'] = pd.Categorical(seasonal_trend['season'], categories=season_order, ordered=True)
-        seasonal_trend = seasonal_trend.sort_values('season')
-        
-        fig_trend = go.Figure()
-        
-        fig_trend.add_trace(go.Scatter(
-            x=seasonal_trend['season'],
-            y=seasonal_trend['violation_numeric'] * 100,
-            mode='lines+markers',
-            name='Violation Rate (%)',
-            marker=dict(size=12, color='#FF6B6B'),
-            line=dict(width=3)
-        ))
-        
-        fig_trend.update_layout(
-            title='Seasonal Violation Rate Pattern',
-            xaxis_title='Season',
-            yaxis_title='Violation Rate (%)',
-            height=400
-        )
-        
-        st.plotly_chart(fig_trend, use_container_width=True)
-        
-        # Top vegetables by violations
-        st.subheader("🥬 Top 10 Vegetables by Violation Count")
         
         veg_violations = df.groupby('vegetable_english')['violation_numeric'].sum().nlargest(10).reset_index()
         veg_violations.columns = ['Vegetable', 'Total_Violations']
-        
-        fig_veg = px.bar(
-            veg_violations,
-            x='Vegetable',
-            y='Total_Violations',
-            color='Total_Violations',
-            color_continuous_scale='Reds',
-            title='Vegetables with Most Violations'
-        )
-        
-        fig_veg.update_layout(height=400, xaxis_tickangle=-45)
-        st.plotly_chart(fig_veg, use_container_width=True)
-        
-        # Top pesticides by violations
-        st.subheader("🧪 Top 10 Pesticides by Violation Count")
+      
         
         pest_violations = df.groupby('pesticide')['violation_numeric'].sum().nlargest(10).reset_index()
         pest_violations.columns = ['Pesticide', 'Total_Violations']
         
-        fig_pest = px.bar(
-            pest_violations,
-            x='Pesticide',
-            y='Total_Violations',
-            color='Total_Violations',
-            color_continuous_scale='Oranges',
-            title='Pesticides with Most Violations'
-        )
         
-        fig_pest.update_layout(height=400, xaxis_tickangle=-45)
-        st.plotly_chart(fig_pest, use_container_width=True)
+        # ============================================================================
+        # COMBINED COMPARISON VIEW (BONUS)
+        # ============================================================================
+        st.subheader("🔄 Side-by-Side Comparison")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Top 5 Vegetables - Radial/Polar Chart
+            top5_veg = veg_violations.head(5)
+            fig_veg_radar = go.Figure()
+            
+            fig_veg_radar.add_trace(go.Scatterpolar(
+                r=top5_veg['Total_Violations'].tolist() + [top5_veg['Total_Violations'].iloc[0]],
+                theta=top5_veg['Vegetable'].tolist() + [top5_veg['Vegetable'].iloc[0]],
+                fill='toself',
+                fillcolor='rgba(255, 99, 71, 0.3)',
+                line=dict(color='tomato', width=2),
+                name='Vegetables'
+            ))
+            
+            fig_veg_radar.update_layout(
+                polar=dict(
+                    radialaxis=dict(visible=True, range=[0, top5_veg['Total_Violations'].max() * 1.2])
+                ),
+                title='Top 5 Vegetables - Polar View',
+                height=400
+            )
+            st.plotly_chart(fig_veg_radar, use_container_width=True)
+        
+        with col2:
+            # Top 5 Pesticides - Radial/Polar Chart
+            top5_pest = pest_violations.head(5)
+            fig_pest_radar = go.Figure()
+            
+            fig_pest_radar.add_trace(go.Scatterpolar(
+                r=top5_pest['Total_Violations'].tolist() + [top5_pest['Total_Violations'].iloc[0]],
+                theta=top5_pest['Pesticide'].tolist() + [top5_pest['Pesticide'].iloc[0]],
+                fill='toself',
+                fillcolor='rgba(255, 165, 0, 0.3)',
+                line=dict(color='orange', width=2),
+                name='Pesticides'
+            ))
+            
+            fig_pest_radar.update_layout(
+                polar=dict(
+                    radialaxis=dict(visible=True, range=[0, top5_pest['Total_Violations'].max() * 1.2])
+                ),
+                title='Top 5 Pesticides - Polar View',
+                height=400
+            )
+            st.plotly_chart(fig_pest_radar, use_container_width=True)
+
+        # ============================================================================
+        # KEY INSIGHTS & RECOMMENDATIONS
+        # ============================================================================
+        
+        st.subheader("💡 Key Insights & Recommendations")
+        
+        # Calculate key metrics for insights
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Overall trend direction
+            if 'year' in df.columns:
+                current_year = df['year'].max()
+                prev_year = current_year - 1
+                current_violations = df[df['year'] == current_year]['violation_numeric'].mean()
+                prev_violations = df[df['year'] == prev_year]['violation_numeric'].mean()
+                trend_direction = "Improving" if current_violations < prev_violations else "Worsening"
+                trend_pct = abs((current_violations - prev_violations) / prev_violations * 100)
+                st.metric("Overall Trend", trend_direction, f"{trend_pct:.1f}%")
+            else:
+                st.metric("Violation Rate", f"{df['violation_numeric'].mean():.1%}", "")
+        
+        with col2:
+            # Most problematic vegetable
+            worst_veg = veg_violations.iloc[0]['Vegetable']
+            worst_veg_count = veg_violations.iloc[0]['Total_Violations']
+            st.metric("Highest Risk Vegetable", worst_veg, f"{worst_veg_count} violations")
+        
+        with col3:
+            # Most problematic pesticide
+            worst_pest = pest_violations.iloc[0]['Pesticide']
+            worst_pest_count = pest_violations.iloc[0]['Total_Violations']
+            st.metric("Highest Risk Pesticide", worst_pest, f"{worst_pest_count} violations")
+        
+        # Action recommendations
+        st.warning("""
+        **🎯 Recommended Actions:**
+        1. **Immediate Focus**: Target {worst_veg} and {worst_pest} combinations
+        2. **Testing Priority**: Increase sampling frequency for top 3 high-violation vegetables
+        3. **Intervention**: Review application practices for {worst_pest} usage
+        4. **Monitoring**: Track progress monthly to measure intervention effectiveness
+        """.format(worst_veg=worst_veg, worst_pest=worst_pest))
+        
+        # Success stories (if any)
+        if len(veg_violations) > 1:
+            best_veg = veg_violations.iloc[-1]['Vegetable']
+            best_veg_count = veg_violations.iloc[-1]['Total_Violations']
+            
+            st.success(f"""
+            **✅ Success Story**: {best_veg} has the lowest violation count ({best_veg_count}). 
+            Consider studying its cultivation practices for replication in other crops.
+            """)
 
 
 # ============================================================================
