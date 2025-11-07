@@ -52,6 +52,28 @@ def initialize_session_state():
     Call this at the very beginning of main() function.
     """
     
+    # Define available years first
+    global AVAILABLE_YEARS
+    AVAILABLE_YEARS = ['2022', '2023', '2024']  # Make sure this includes 2022
+    
+    # Initialize session state variables
+    if "project_id" not in st.session_state:
+        st.session_state.project_id = "default_project"
+    
+    if "selected_year" not in st.session_state:
+        st.session_state.selected_year = AVAILABLE_YEARS[0]
+    elif st.session_state.selected_year not in AVAILABLE_YEARS:
+        st.session_state.selected_year = AVAILABLE_YEARS[0]  # Reset to valid year
+    
+    if "indexed_years" not in st.session_state:
+        st.session_state.indexed_years = set()
+    
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+    
+    if "risk_mode" not in st.session_state:
+        st.session_state.risk_mode = "🤖 Auto-detect"
+
     # Header display control
     if "intro_shown" not in st.session_state:
         st.session_state.intro_shown = False
@@ -1173,8 +1195,7 @@ def main():
             # st.success(f"✅ Loaded {len(st.session_state.df):,} rows")
             
     initialize_session_state()
-    if 'intro_shown' not in st.session_state:
-        st.session_state.intro_shown = False
+    
 
     try:
         # Show LARS animated header only once
@@ -3232,8 +3253,196 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                     st.code(generated_code, language='python')
 
 
+import streamlit as st
+import pandas as pd
+import requests
+import json
+from datetime import datetime
+from typing import Dict
 
+# Make sure these are defined in your actual code
+AVAILABLE_YEARS = ['2022','2023', '2024']  # Example - adjust as needed
 
+def show_chat_page(api_client):
+    """AI Assistant chat page"""
+    
+    st.title("💬 AI Assistant")
+    
+    render_chat_sidebar(api_client)
+    display_chat_messages()
+    handle_chat_input(api_client)
+
+def handle_chat_input(api_client):
+    """Handle user chat input"""
+    
+    if prompt := st.chat_input("Ask about pesticide data..."):
+        st.session_state.chat_messages.append({
+            "role": "user",
+            "content": prompt
+        })
+        
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        with st.chat_message("assistant"):
+            process_query(api_client, prompt)
+
+def process_query(api_client, query: str):
+    """Process user query - now checks for ISO queries too"""
+    
+    with st.spinner("🔍 Analyzing query..."):
+        
+        # Enhanced ISO keyword detection
+        iso_keywords = [
+            # ISO standards
+            'iso', '17025', 'clause', 'requirement', 'accreditation',
+            # Lab equipment and procedures
+            'gc', 'gc-ms', 'gcms', 'hplc', 'column', 'instrument', 'equipment',
+            'calibration', 'maintenance', 'validation', 'verification',
+            # Documents
+            'procedure', 'manual', 'quality manual', 'work instruction', 
+            'form', 'record', 'document', 'policy',
+            # Lab terms
+            'method', 'protocol', 'sop', 'standard operating',
+            'laboratory', 'lab', 'sample handling', 'traceability',
+            # Arabic terms
+            'معايرة', 'إجراء', 'دليل الجودة', 'متطلب', 'اعتماد',
+            'مختبر', 'جهاز', 'معدات'
+        ]
+        
+        # Pesticide-specific keywords (more specific)
+        pesticide_keywords = [
+            'pesticide', 'bifenthrin', 'pyridaben', 'mبيد',
+            'tomato', 'pepper', 'cucumber', 'طماطم', 'فلفل', 'خيار',
+            'exceeding', 'limit', 'violation', 'غير مطابق', 'مطابق',
+            'sample code', 'reading', 'ppm', 'ppb'
+        ]
+        
+        query_lower = query.lower()
+        
+        # Count keyword matches
+        iso_score = sum(1 for kw in iso_keywords if kw in query_lower)
+        pesticide_score = sum(1 for kw in pesticide_keywords if kw in query_lower)
+        
+        # Check for year in query (strong indicator of pesticide query)
+        has_year = any(year in query for year in AVAILABLE_YEARS)
+        
+        # Decision logic
+        if iso_score > pesticide_score:
+            is_iso_query = True
+        elif pesticide_score > iso_score:
+            is_iso_query = False
+        elif has_year:
+            is_iso_query = False  # Year mentioned = pesticide query
+        else:
+            is_iso_query = True  # Default to ISO if ambiguous
+        
+        if is_iso_query:
+            st.info("🔍 Detected ISO 17025 query - searching ISO documents...")
+            process_iso_query(api_client, query)
+        else:
+            st.info("🔍 Detected pesticide query - searching pesticide data...")
+            # Original pesticide query logic
+            query_year = extract_year_from_text(query)
+            
+            if not query_year:
+                query_year = st.session_state.selected_year
+                st.info(f"⚙️ Using default year: {query_year}")
+            else:
+                st.success(f"✅ Using year from query: {query_year}")
+            
+            # FIX: Check if year is indexed (only for local mode)
+            if hasattr(api_client, 'use_hybrid') and not api_client.use_hybrid:
+                if query_year not in st.session_state.indexed_years:
+                    response = f"⚠️ Data for {query_year} is not indexed yet. Please index it first."
+                    st.warning(response)
+                    st.session_state.chat_messages.append({
+                        "role": "assistant",
+                        "content": response
+                    })
+                    return
+            
+            # Determine risk mode BEFORE API call
+            risk_mode = st.session_state.get('risk_mode', '🤖 Auto-detect')
+            
+            if risk_mode == "✅ Always On":
+                include_risk = True
+            elif risk_mode == "❌ Always Off":
+                include_risk = False
+            else:  # Auto-detect
+                risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume']
+                include_risk = any(kw in query.lower() for kw in risk_keywords)
+            
+            if include_risk:
+                st.success("🎯 Risk assessment enabled")
+            
+            # FIXED API CALL with proper error handling
+            try:
+                # Prepare parameters
+                params = {
+                    'query': query,
+                    'year': query_year,
+                    'include_risk': include_risk
+                }
+                
+                # Add project_id if available and needed
+                if hasattr(api_client, 'project_id'):
+                    params['project_id'] = api_client.project_id
+                
+                # Make the API call
+                result = api_client.local_answer(**params)
+                
+                # FIX: Check if result is None or has error
+                if result is None:
+                    st.error("❌ No response received from API")
+                    return
+                
+                # Check for API errors
+                if isinstance(result, dict) and result.get('error'):
+                    error_msg = result.get('error', 'Unknown error')
+                    st.error(f"❌ API Error: {error_msg}")
+                    
+                    # Provide helpful suggestions
+                    if 'not indexed' in str(error_msg).lower():
+                        st.info("""
+                        **Solutions:**
+                        1. Enable Hybrid System (no indexing needed!) - Set GEMINI_API_KEY
+                        2. Or index the data first using the indexing button in sidebar
+                        3. Or try a different year that's already indexed
+                        """)
+                    return
+                
+                # FIX: Safe result processing
+                if not isinstance(result, dict):
+                    st.error(f"❌ Unexpected response format: {type(result)}")
+                    return
+                
+                # Display results
+                display_query_results(result, query_year, include_risk)
+                
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 422:
+                    st.error("❌ Validation Error: Invalid request parameters")
+                    with st.expander("Error Details"):
+                        st.write(f"URL: {e.response.url}")
+                        st.write(f"Status: {e.response.status_code}")
+                        try:
+                            error_detail = e.response.json()
+                            st.write("Error response:", error_detail)
+                        except:
+                            st.write("Response text:", e.response.text)
+                    
+                    st.info("💡 **Troubleshooting tips:**")
+                    st.info("- Check if the year exists in your database")
+                    st.info("- Verify your API endpoint is correct")
+                    st.info("- Try indexing the data first")
+                    
+                else:
+                    st.error(f"❌ HTTP Error {e.response.status_code}: {e}")
+                    
+            except Exception as e:
+                st.error(f"❌ Unexpected error: {str(e)}")
+                st.info("Try enabling Hybrid System for direct data access (no indexing needed)")
 
 def render_chat_sidebar(api_client):
     """Render chat-specific sidebar controls"""
@@ -3243,8 +3452,10 @@ def render_chat_sidebar(api_client):
         
         # Project Configuration
         st.markdown("## 🏢 Project Configuration")
-        # if "project_id" not in st.session_state:
-        #     st.session_state.project_id = "default_project" 
+        # Initialize project_id if not exists
+        if "project_id" not in st.session_state:
+            st.session_state.project_id = "default_project"
+            
         project_id = st.text_input(
             "Project ID",
             value=st.session_state.project_id,
@@ -3289,21 +3500,37 @@ def render_chat_sidebar(api_client):
                     api_client, 
                     uploaded_file, 
                     doc_type, 
-                    st.session_state.project_id  # ✅ Use actual project ID
+                    st.session_state.project_id
                 )
-
 
         st.markdown("---")
         
-        # Data Context
+        # Data Context - FIXED SECTION
         st.markdown("## 📅 Data Context")
         
+        # Safe initialization of selected_year
+        if "selected_year" not in st.session_state:
+            # Use the first available year if 2022 is not available
+            st.session_state.selected_year = AVAILABLE_YEARS[0] if AVAILABLE_YEARS else '2023'
+        else:
+            # If selected_year is not in available years, reset it
+            if st.session_state.selected_year not in AVAILABLE_YEARS:
+                st.session_state.selected_year = AVAILABLE_YEARS[0] if AVAILABLE_YEARS else '2023'
+            
         st.info(f"**Active Year:** {st.session_state.selected_year}")
+        
+        # Safe selectbox with error handling
+        try:
+            current_index = AVAILABLE_YEARS.index(st.session_state.selected_year)
+        except ValueError:
+            # If current selected_year is not in list, use first available
+            current_index = 0
+            st.session_state.selected_year = AVAILABLE_YEARS[0]
         
         selected_year = st.selectbox(
             "Default Year",
             AVAILABLE_YEARS,
-            index=AVAILABLE_YEARS.index(st.session_state.selected_year)
+            index=current_index
         )
         
         if selected_year != st.session_state.selected_year:
@@ -3314,6 +3541,10 @@ def render_chat_sidebar(api_client):
         # Data Indexing
         st.markdown("## 🗄️ Data Indexing")
         
+        # Initialize indexed_years if not exists
+        if "indexed_years" not in st.session_state:
+            st.session_state.indexed_years = set()
+            
         year_to_index = st.selectbox("Select Year to Index", AVAILABLE_YEARS)
         
         col1, col2 = st.columns(2)
@@ -3331,7 +3562,7 @@ def render_chat_sidebar(api_client):
             for year in sorted(st.session_state.indexed_years):
                 st.markdown(f"- {year}")
 
-                # ==================== SETTINGS ====================
+        # ==================== SETTINGS ====================
         st.markdown("## ⚙️ Settings")
         
         risk_mode = st.radio(
@@ -3342,7 +3573,6 @@ def render_chat_sidebar(api_client):
         )
         
         st.session_state.risk_mode = risk_mode
-
 
 def upload_iso_document_ui(api_client, uploaded_file, doc_type: str, project_id: str):
     """Handle ISO document upload from Streamlit UI"""
@@ -3416,7 +3646,6 @@ def upload_iso_document_ui(api_client, uploaded_file, doc_type: str, project_id:
         except Exception as e:
             st.error(f"❌ Unexpected error: {str(e)}")
 
-
 def index_year_data(api_client, year: str, do_reset: bool = False):
     """Index data for a specific year"""
     action = "Resetting and re-indexing" if do_reset else "Indexing"
@@ -3437,146 +3666,15 @@ def index_year_data(api_client, year: str, do_reset: bool = False):
             if result:
                 st.json(result)
 
-
 def display_chat_messages():
     """Display all chat messages"""
+    # Initialize chat_messages if not exists
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+        
     for message in st.session_state.chat_messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-        
-
-
-def handle_chat_input(api_client):
-    """Handle user chat input"""
-    
-    if prompt := st.chat_input("Ask about pesticide data..."):
-        st.session_state.chat_messages.append({
-            "role": "user",
-            "content": prompt
-        })
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        with st.chat_message("assistant"):
-            process_query(api_client, prompt)
-
-
-
-def process_query(api_client, query: str):
-    """Process user query - now checks for ISO queries too"""
-    
-    with st.spinner("🔍 Analyzing query..."):
-        
-        # Enhanced ISO keyword detection
-        iso_keywords = [
-            # ISO standards
-            'iso', '17025', 'clause', 'requirement', 'accreditation',
-            # Lab equipment and procedures
-            'gc', 'gc-ms', 'gcms', 'hplc', 'column', 'instrument', 'equipment',
-            'calibration', 'maintenance', 'validation', 'verification',
-            # Documents
-            'procedure', 'manual', 'quality manual', 'work instruction', 
-            'form', 'record', 'document', 'policy',
-            # Lab terms
-            'method', 'protocol', 'sop', 'standard operating',
-            'laboratory', 'lab', 'sample handling', 'traceability',
-            # Arabic terms
-            'معايرة', 'إجراء', 'دليل الجودة', 'متطلب', 'اعتماد',
-            'مختبر', 'جهاز', 'معدات'
-        ]
-        
-        # Pesticide-specific keywords (more specific)
-        pesticide_keywords = [
-            'pesticide', 'bifenthrin', 'pyridaben', 'mبيد',
-            'tomato', 'pepper', 'cucumber', 'طماطم', 'فلفل', 'خيار',
-            'exceeding', 'limit', 'violation', 'غير مطابق', 'مطابق',
-            'sample code', 'reading', 'ppm', 'ppb'
-        ]
-        
-        query_lower = query.lower()
-        
-        # Count keyword matches
-        iso_score = sum(1 for kw in iso_keywords if kw in query_lower)
-        pesticide_score = sum(1 for kw in pesticide_keywords if kw in query_lower)
-        
-        # Check for year in query (strong indicator of pesticide query)
-        has_year = any(year in query for year in AVAILABLE_YEARS)
-        
-        # Decision logic
-        if iso_score > pesticide_score:
-            is_iso_query = True
-        elif pesticide_score > iso_score:
-            is_iso_query = False
-        elif has_year:
-            is_iso_query = False  # Year mentioned = pesticide query
-        else:
-            is_iso_query = True  # Default to ISO if ambiguous
-        
-        if is_iso_query:
-            st.info("🔍 Detected ISO 17025 query - searching ISO documents...")
-            process_iso_query(api_client, query)
-        else:
-            st.info("🔍 Detected pesticide query - searching pesticide data...")
-            # Original pesticide query logic
-            query_year = extract_year_from_text(query)
-            
-            if not query_year:
-                query_year = st.session_state.selected_year
-                st.info(f"⚙️ Using default year: {query_year}")
-            else:
-                st.success(f"✅ Using year from query: {query_year}")
-            
-            if query_year not in st.session_state.indexed_years:
-                response = f"⚠️ Data for {query_year} is not indexed yet. Please index it first."
-                st.warning(response)
-                st.session_state.chat_messages.append({
-                    "role": "assistant",
-                    "content": response
-                })
-                return
-            
-            # Query the API
-            try:
-                result = api_client.local_answer(
-                    query=query,
-                    year=query_year,
-                    project_id=1,
-                    n_results=5
-                )
-                
-                # Check if data is indexed
-                if result.get('error') and 'not indexed' in str(result.get('error')).lower():
-                    st.error(f"⚠️ Data for {query_year} is not indexed in RAG system")
-                    st.info("""
-                    **Solutions:**
-                    1. Enable Hybrid System (no indexing needed!) - Set GEMINI_API_KEY
-                    2. Or index the data first using the indexing button in sidebar
-                    3. Or try a different year that's already indexed
-                    """)
-                    return
-                
-                # Display results
-                display_query_results(result, query_year, nclude_risk= include_risk)
-            
-            except Exception as e:
-                st.error(f"Error: {e}")
-                st.info("Try enabling Hybrid System for direct data access (no indexing needed)")
-
-            risk_mode = st.session_state.get('risk_mode', '🤖 Auto-detect')
-            
-            if risk_mode == "✅ Always On":
-                include_risk = True
-            elif risk_mode == "❌ Always Off":
-                include_risk = False
-            else:  # Auto-detect
-                risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume']
-                include_risk = any(kw in query.lower() for kw in risk_keywords)
-            
-            if include_risk:
-                st.success("🎯 Risk assessment enabled")
-            
-            result = api_client.local_answer(query=query, year=query_year, include_risk=include_risk)
 
 def process_iso_query(api_client, query: str):
     """Process ISO document query"""
@@ -3627,7 +3725,6 @@ def process_iso_query(api_client, query: str):
     except Exception as e:
         st.error(f"❌ Unexpected error: {str(e)}")
 
-
 def display_query_results(result: Dict, year: str, include_risk: bool):
     """Display query results in a structured format"""
     
@@ -3652,11 +3749,101 @@ def display_query_results(result: Dict, year: str, include_risk: bool):
         
         st.markdown("### 📋 Individual Results")
         display_individual_results(data_frame)
+
     
-    # Display risk assessment
+    # Display detailed risk assessment
     risk_assessment = result.get('risk_assessment')
-    if risk_assessment:
-        display_risk_assessment_results(risk_assessment)
+    if risk_assessment and include_risk:  # Only show if risk assessment was requested
+        st.markdown("---")
+        st.markdown("## 🎯 Risk Assessment Summary")
+        
+        # Summary metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Samples", risk_assessment.get('total_samples_assessed', 0))
+        with col2:
+            st.metric("Population Type", risk_assessment.get('population_type', 'N/A'))
+        with col3:
+            dist = risk_assessment.get('overall_risk_distribution', {})
+            acceptable = dist.get('acceptable', 0)
+            st.metric("✅ Safe Samples", acceptable)
+        
+        # Individual sample assessments
+        assessment_results = risk_assessment.get('assessment_results', [])
+        if assessment_results:
+            for idx, assessment in enumerate(assessment_results, 1):
+                sample_code = assessment.get('sample_code', 'N/A')
+                pesticide_name = assessment.get('pesticide_name', 'N/A')
+                risk_level = assessment.get('risk_level', 'unknown')
+                risk_percentage = assessment.get('risk_percentage', 0)
+                
+                # Determine status
+                if risk_level == 'acceptable':
+                    status_icon = "✅"
+                    status_text = "Safe"
+                else:
+                    status_icon = "⚠️"
+                    status_text = "Warning"
+                
+                # Main expander for each sample
+                with st.expander(f"{status_icon} Sample {idx}: {sample_code} - {pesticide_name} - {status_text}"):
+                    
+                    # Two columns
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("#### 📊 Sample Information")
+                        st.write(f"**Sample Code:** {assessment.get('sample_code', 'N/A')}")
+                        st.write(f"**Pesticide:** {assessment.get('pesticide_name', 'N/A')}")
+                        st.write(f"**Food Item:** {assessment.get('food_item', 'unknown')}")
+                        st.write(f"**Concentration (ppb):** {assessment.get('concentration_ppb', 0):.2f}")
+                        st.write(f"**Concentration (mg/kg):** {assessment.get('concentration_mg_kg', 0):.3f}")
+                    
+                    with col2:
+                        st.markdown("#### 🔬 Risk Metrics")
+                        st.write(f"**EDI Value:** {assessment.get('edi_value', 0):.6f} mg/kg/day")
+                        st.write(f"**ADI Value:** {assessment.get('adi_value', 0):.2f} mg/kg/day")
+                        st.write(f"**ADI Source:** {assessment.get('adi_source', 'N/A')}")
+                        st.write(f"**Food Intake Source:** {assessment.get('food_intake_source', 'N/A')}")
+                        
+                        # Risk percentage with color
+                        risk_pct = assessment.get('risk_percentage', 0)
+                        if risk_pct < 50:
+                            st.success(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
+                        elif risk_pct < 100:
+                            st.warning(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
+                        else:
+                            st.error(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
+                    
+                    # Status and recommendation
+                    st.markdown("#### 📋 Assessment")
+                    risk_status = assessment.get('risk_status', 'N/A')
+                    recommendation = assessment.get('recommendation', 'N/A')
+                    
+                    if risk_level == 'acceptable':
+                        st.success(f"**Status:** {risk_status}")
+                    else:
+                        st.error(f"**Status:** {risk_status}")
+                    
+                    st.info(f"**Recommendation:** {recommendation}")
+                    
+                    # FIXED: Show calculation details WITHOUT nested expander
+                    calc_details = assessment.get('calculation_details', {})
+                    if calc_details:
+                        st.markdown("---")
+                        st.markdown("#### 🧮 Calculation Details")
+                        
+                        st.markdown("**Formula:**")
+                        st.code(calc_details.get('formula', 'N/A'), language="text")
+                        
+                        st.markdown("**Substitution:**")
+                        st.code(calc_details.get('substitution', 'N/A'), language="text")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"**Population Weight:** {calc_details.get('population_weight', 'N/A')}")
+                        with col2:
+                            st.write(f"**Daily Intake:** {calc_details.get('daily_intake', 'N/A')}")
     
     st.markdown("---")
     display_download_options(result, year, data_frame)
@@ -3689,78 +3876,6 @@ def display_individual_results(data_frame: list):
                 else:
                     st.error(f"**Result:** ⚠️ {result_status}")
 
-def display_risk_assessment_results(risk_assessment: Dict):
-    """Display detailed risk assessment"""
-    
-    st.markdown("---")
-    st.markdown("## 🎯 Risk Assessment Summary")
-    
-    # Summary metrics
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Samples", risk_assessment.get('total_samples_assessed', 0))
-    with col2:
-        st.metric("Population Type", risk_assessment.get('population_type', 'N/A'))
-    with col3:
-        dist = risk_assessment.get('overall_risk_distribution', {})
-        acceptable = dist.get('acceptable', 0)
-        st.metric("✅ Safe Samples", acceptable)
-    
-    # Individual sample assessments
-    assessment_results = risk_assessment.get('assessment_results', [])
-    if assessment_results:
-        for idx, assessment in enumerate(assessment_results, 1):
-            display_sample_assessment(assessment, idx)
-
-def display_sample_assessment(assessment: Dict, idx: int):
-    """Display individual sample assessment"""
-    
-    sample_code = assessment.get('sample_code', 'N/A')
-    pesticide_name = assessment.get('pesticide_name', 'N/A')
-    risk_level = assessment.get('risk_level', 'unknown')
-    
-    # Determine status
-    status_icon = "✅" if risk_level == 'acceptable' else "⚠️"
-    status_text = "Safe" if risk_level == 'acceptable' else "Warning"
-    
-    with st.expander(f"{status_icon} Sample {idx}: {sample_code} - {pesticide_name} - {status_text}"):
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### 📊 Sample Information")
-            st.write(f"**Sample Code:** {assessment.get('sample_code', 'N/A')}")
-            st.write(f"**Pesticide:** {assessment.get('pesticide_name', 'N/A')}")
-            st.write(f"**Food Item:** {assessment.get('food_item', 'unknown')}")
-            st.write(f"**Concentration (ppb):** {assessment.get('concentration_ppb', 0):.2f}")
-            st.write(f"**Concentration (mg/kg):** {assessment.get('concentration_mg_kg', 0):.3f}")
-        
-        with col2:
-            st.markdown("#### 🔬 Risk Metrics")
-            st.write(f"**EDI Value:** {assessment.get('edi_value', 0):.6f} mg/kg/day")
-            st.write(f"**ADI Value:** {assessment.get('adi_value', 0):.2f} mg/kg/day")
-            st.write(f"**ADI Source:** {assessment.get('adi_source', 'N/A')}")
-            
-            risk_pct = assessment.get('risk_percentage', 0)
-            if risk_pct < 50:
-                st.success(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
-            elif risk_pct < 100:
-                st.warning(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
-            else:
-                st.error(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
-        
-        # Status and recommendation
-        st.markdown("#### 📋 Assessment")
-        risk_status = assessment.get('risk_status', 'N/A')
-        recommendation = assessment.get('recommendation', 'N/A')
-        
-        if risk_level == 'acceptable':
-            st.success(f"**Status:** {risk_status}")
-        else:
-            st.error(f"**Status:** {risk_status}")
-        
-        st.info(f"**Recommendation:** {recommendation}")
-
 def display_download_options(result: Dict, year: str, data_frame: list):
     """Display download buttons for results"""
     
@@ -3787,6 +3902,14 @@ def display_download_options(result: Dict, year: str, data_frame: list):
                 mime="text/csv",
                 use_container_width=True
             )
+
+# Add this helper function if missing
+def extract_year_from_text(text: str) -> str:
+    """Extract year from text if present"""
+    for year in AVAILABLE_YEARS:
+        if year in text:
+            return year
+    return ""
 
 
 def show_anova_analysis_page(api_client):
