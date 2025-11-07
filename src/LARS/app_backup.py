@@ -3557,7 +3557,7 @@ def process_query(api_client, query: str):
                     return
                 
                 # Display results
-                display_query_results(result, query_year, False)
+                display_query_results(result, query_year, nclude_risk= include_risk)
             
             except Exception as e:
                 st.error(f"Error: {e}")
