@@ -92,7 +92,7 @@ docker compose up --build
 streamlit run src/LARS/app.py
 
 
-streamlit run app_simple.py
+streamlit run src/LARS/app_backup.py
 
 what is the gc column specifications
 
