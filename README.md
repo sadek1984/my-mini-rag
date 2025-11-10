@@ -94,7 +94,9 @@ streamlit run src/LARS/app.py
 
 streamlit run src/LARS/app_backup.py
 
-what is the gc column specifications
+what are the gc column specifications
+
+what is the Standard Preparation
 
 pip install nbformat==4.2.0 
 
@@ -113,4 +115,7 @@ include_risk_assessment : true
 
 find non compliant samples with bifenthrin in cucumber samples 2023
 Find 'fipronil' in eggplant samples 2022
+
+find top 5 non compliant samples with high readings in 2023
+
 
