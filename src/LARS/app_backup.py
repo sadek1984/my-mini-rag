@@ -996,21 +996,45 @@ def initialize_session_state():
     if 'chat_messages' not in st.session_state:
         st.session_state.chat_messages = [{
             "role": "assistant",
-            "content": """👋 Hello! I'm your pesticide analysis AI assistant.
+            "content": """👋 Hello! I'm your **pesticide analysis AI assistant** — ready to help you explore, assess, and analyze pesticide data with ease.
 
-**What I can help you with:**
-- 📊 Query pesticide data by year
-- 🔍 Find samples exceeding limits
-- 🎯 Perform risk assessments
-- 📈 Analyze trends across years
-- 📊 View statistical insights
+---
 
-**Example queries:**
-- "Find pyridaben exceeding limits in 2023"
-- "Show me tomato samples from 2024"
-- "Assess health risk for carbamates in 2022"
+#### 🧠 **What I can help you with**
+- 📊 Query pesticide data by year  
+- 🔍 Find samples exceeding or below limits  
+- 🎯 Perform detailed **risk assessments**  
+- 📈 Compare **trends across years**  
+- 🧾 Generate summarized **compliance reports**
 
-Ask your question to get started! 🚀"""
+---
+
+#### 💡 **Example Queries**
+
+✅ **Basic queries**
+- “Show all **Buprofezin** samples from **2024**”  
+- “Find **bifenazate** exceeding limits in **2022**”  
+
+⚠️ **Risk & safety checks**
+- “Assess **health risk** for **Buprofezin** in **tomatoes 2023**”  
+- “Find samples with **risk percentage above 100%** in **2024**”  
+- “Include **risk assessment** for **fipronil** in **pepper 2022**”
+
+📉 **Non-compliant & trend analysis**
+- “Find **non-compliant** samples with **bifenthrin** in **cucumbers 2023**”  
+- “Compare **pyridaben** violation trends between **2022 and 2024**”  
+- “Show all **pesticides exceeding 2× limit** in **2022**”  
+
+🌾 **Crop-specific exploration**
+- “Find **Buprofezin** in **eggplant samples 2022**”  
+- “List all **pesticides detected in tomatoes** during **2023**”  
+- “Which **pepper samples** have the **highest pesticide levels** in **2024**?”
+
+---
+
+💬 **Now it’s your turn!**  
+Type your question below and I’ll analyze the data for you 🚀
+"""
         }]
     
     if 'selected_year' not in st.session_state:
@@ -1266,14 +1290,14 @@ def render_sidebar(api_client):
     
     with st.sidebar:
         
-        st.markdown("## 🔗 API Configuration")
+        # st.markdown("## 🔗 API Configuration")
         
-        current_url = st.text_input("API Base URL", value=API_BASE_URL, key="api_url")
+        # current_url = st.text_input("API Base URL", value=API_BASE_URL, key="api_url")
         
-        if current_url != API_BASE_URL:
-            api_client = APIClient(current_url)
+        # if current_url != API_BASE_URL:
+        #     api_client = APIClient(current_url)
         
-        st.markdown("---")
+        # st.markdown("---")
         
         # API Status Check
         if st.button("🔄 Check API Connection", key="health_check", use_container_width=True, type="primary"):
@@ -2622,377 +2646,380 @@ import re
 import numpy as np
 
 
-def show_chat_page(api_client):
-    """
-    Enhanced chat page with both RAG (ISO documents) and Gemini (data analysis) capabilities
-    Includes complete sidebar with upload and risk assessment options
-    """
+# def show_chat_page(api_client):
+#     """
+#     Enhanced chat page with both RAG (ISO documents) and Gemini (data analysis) capabilities
+#     Includes complete sidebar with upload and risk assessment options
+#     """
     
-    st.header("💬 AI Assistant 🌱")
-    st.caption("Powered by Gemini + RAG - Ask about ISO documents or analyze pesticide data")
+#     st.header("💬 AI Assistant 🌱")
+#     st.caption("Powered by Gemini + RAG - Ask about ISO documents or analyze pesticide data")
     
-    # ========================================================================
-    # SIDEBAR COMPONENTS
-    # ========================================================================
+#     # ========================================================================
+#     # SIDEBAR COMPONENTS
+#     # ========================================================================
     
-    with st.sidebar:
-        st.markdown("---")
+#     with st.sidebar:
+#         st.markdown("---")
         
-        # Project Configuration
-        st.markdown("## 🏢 Project Configuration")
+#         # Project Configuration
+#         st.markdown("## 🏢 Project Configuration")
         
-        # Initialize project ID in session state if not exists
-        if 'project_id' not in st.session_state:
-            st.session_state.project_id = "TrhBVe_m5gg2002_E5VVqS"
+#         # Initialize project ID in session state if not exists
+#         if 'project_id' not in st.session_state:
+#             st.session_state.project_id = "TrhBVe_m5gg2002_E5VVqS"
         
-        project_id = st.text_input(
-            "Project ID",
-            value=st.session_state.project_id,
-            help="Enter your project identifier",
-            key="project_id_input"
-        )
+#         project_id = st.text_input(
+#             "Project ID",
+#             value=st.session_state.project_id,
+#             help="Enter your project identifier",
+#             key="project_id_input"
+#         )
         
-        if project_id != st.session_state.project_id:
-            st.session_state.project_id = project_id
+#         if project_id != st.session_state.project_id:
+#             st.session_state.project_id = project_id
         
-        st.info(f"📁 Active Project: `{st.session_state.project_id}`")
+#         st.info(f"📁 Active Project: `{st.session_state.project_id}`")
         
-        st.markdown("---")
+#         st.markdown("---")
         
-        # ISO Document Upload
-        st.markdown("## 📄 ISO Document Upload")
+#         # ISO Document Upload
+#         st.markdown("## 📄 ISO Document Upload")
         
-        uploaded_file = st.file_uploader(
-            "Upload ISO Document",
-            type=['pdf', 'docx', 'xlsx'],
-            help="Upload Quality Manual, Procedures, Work Instructions, or Forms"
-        )
+#         uploaded_file = st.file_uploader(
+#             "Upload ISO Document",
+#             type=['pdf', 'docx', 'xlsx'],
+#             help="Upload Quality Manual, Procedures, Work Instructions, or Forms"
+#         )
         
-        doc_type = st.selectbox(
-            "Document Type",
-            [
-                "Quality Manual",
-                "Procedure", 
-                "Work Instruction",
-                "Form/Record",
-                "Unknown"
-            ]
-        )
+#         doc_type = st.selectbox(
+#             "Document Type",
+#             [
+#                 "Quality Manual",
+#                 "Procedure", 
+#                 "Work Instruction",
+#                 "Form/Record",
+#                 "Unknown"
+#             ]
+#         )
         
-        if uploaded_file is not None:
-            st.caption(f"Will upload to project: {st.session_state.project_id}")
+#         if uploaded_file is not None:
+#             st.caption(f"Will upload to project: {st.session_state.project_id}")
             
-            if st.button("📤 Upload ISO Document", use_container_width=True, type="primary"):
-                upload_iso_document_ui(
-                    api_client, 
-                    uploaded_file, 
-                    doc_type, 
-                    st.session_state.project_id
-                )
+#             if st.button("📤 Upload ISO Document", use_container_width=True, type="primary"):
+#                 upload_iso_document_ui(
+#                     api_client, 
+#                     uploaded_file, 
+#                     doc_type, 
+#                     st.session_state.project_id
+#                 )
         
-        st.markdown("---")
+#         st.markdown("---")
         
-        # Data Context
-        st.markdown("## 📅 Data Context")
+#         # Data Context
+#         st.markdown("## 📅 Data Context")
         
-        # Initialize selected_year if not exists
-        if 'selected_year' not in st.session_state:
-            st.session_state.selected_year = "2022"
+#         # Initialize selected_year if not exists
+#         if 'selected_year' not in st.session_state:
+#             st.session_state.selected_year = "2022"
         
-        st.info(f"**Active Year:** {st.session_state.selected_year}")
+#         st.info(f"**Active Year:** {st.session_state.selected_year}")
         
-        selected_year = st.selectbox(
-            "Default Year",
-            AVAILABLE_YEARS,
-            index=AVAILABLE_YEARS.index(st.session_state.selected_year)
-        )
+#         selected_year = st.selectbox(
+#             "Default Year",
+#             AVAILABLE_YEARS,
+#             index=AVAILABLE_YEARS.index(st.session_state.selected_year)
+#         )
         
-        if selected_year != st.session_state.selected_year:
-            st.session_state.selected_year = selected_year
+#         if selected_year != st.session_state.selected_year:
+#             st.session_state.selected_year = selected_year
         
-        st.markdown("---")
+#         st.markdown("---")
         
-        # Data Indexing
-        st.markdown("## 🗄️ Data Indexing")
+#         # Data Indexing
+#         st.markdown("## 🗄️ Data Indexing")
         
-        year_to_index = st.selectbox("Select Year to Index", AVAILABLE_YEARS)
+#         year_to_index = st.selectbox("Select Year to Index", AVAILABLE_YEARS)
         
-        col1, col2 = st.columns(2)
+#         col1, col2 = st.columns(2)
         
-        with col1:
-            if st.button("📥 Index", use_container_width=True):
-                index_year_data(api_client, year_to_index, do_reset=False)
+#         with col1:
+#             if st.button("📥 Index", use_container_width=True):
+#                 index_year_data(api_client, year_to_index, do_reset=False)
         
-        with col2:
-            if st.button("🗑️ Reset", use_container_width=True):
-                index_year_data(api_client, year_to_index, do_reset=True)
+#         with col2:
+#             if st.button("🗑️ Reset", use_container_width=True):
+#                 index_year_data(api_client, year_to_index, do_reset=True)
         
-        # Initialize indexed_years if not exists
-        if 'indexed_years' not in st.session_state:
-            st.session_state.indexed_years = set()
+#         # Initialize indexed_years if not exists
+#         if 'indexed_years' not in st.session_state:
+#             st.session_state.indexed_years = set()
         
-        if st.session_state.indexed_years:
-            st.markdown("**✅ Indexed Years:**")
-            for year in sorted(st.session_state.indexed_years):
-                st.markdown(f"- {year}")
+#         if st.session_state.indexed_years:
+#             st.markdown("**✅ Indexed Years:**")
+#             for year in sorted(st.session_state.indexed_years):
+#                 st.markdown(f"- {year}")
 
-        st.markdown("---")
+#         st.markdown("---")
         
-        # Risk Assessment Settings
-        st.markdown("## ⚙️ Risk Assessment")
+#         # Risk Assessment Settings
+#         st.markdown("## ⚙️ Risk Assessment")
         
-        risk_mode = st.radio(
-            "Risk Assessment Mode",
-            options=["🤖 Auto-detect", "✅ Always On", "❌ Always Off"],
-            index=0,
-            help="Auto-detect: Enables when you ask about safety/risk\nAlways On: Include for every query\nAlways Off: Never include"
-        )
+#         risk_mode = st.radio(
+#             "Risk Assessment Mode",
+#             options=["🤖 Auto-detect", "✅ Always On", "❌ Always Off"],
+#             index=0,
+#             help="Auto-detect: Enables when you ask about safety/risk\nAlways On: Include for every query\nAlways Off: Never include"
+#         )
         
-        st.session_state.risk_mode = risk_mode
+#         st.session_state.risk_mode = risk_mode
         
-        # Additional risk settings
-        with st.expander("🔧 Advanced Risk Settings"):
-            population_type = st.selectbox(
-                "Population Type",
-                ["adult_average", "adult_high_consumption", "child_average", "child_high_consumption"],
-                index=0,
-                help="Select population for risk calculations"
-            )
-            st.session_state.population_type = population_type
+#         # Additional risk settings
+#         with st.expander("🔧 Advanced Risk Settings"):
+#             population_type = st.selectbox(
+#                 "Population Type",
+#                 ["adult_average", "adult_high_consumption", "child_average", "child_high_consumption"],
+#                 index=0,
+#                 help="Select population for risk calculations"
+#             )
+#             st.session_state.population_type = population_type
             
-            risk_threshold = st.slider(
-                "Risk Threshold (%)",
-                min_value=50,
-                max_value=200,
-                value=100,
-                help="Percentage of ADI considered as risk threshold"
-            )
-            st.session_state.risk_threshold = risk_threshold
+#             risk_threshold = st.slider(
+#                 "Risk Threshold (%)",
+#                 min_value=50,
+#                 max_value=200,
+#                 value=100,
+#                 help="Percentage of ADI considered as risk threshold"
+#             )
+#             st.session_state.risk_threshold = risk_threshold
 
-    # ========================================================================
-    # MAIN CHAT INTERFACE
-    # ========================================================================
+#     # ========================================================================
+#     # MAIN CHAT INTERFACE
+#     # ========================================================================
     
-    # STEP 1: Get DataFrame (for Gemini analysis)
-    try:
-        if api_client and hasattr(api_client, 'get_data'):
-            df = api_client.get_data()
-        elif api_client and hasattr(api_client, 'df'):
-            df = api_client.df
-        elif 'current_data' in st.session_state:
-            df = st.session_state.current_data
-        elif 'df' in st.session_state:
-            df = st.session_state.df
-        else:
-            df = None
-            st.info("💡 No dataset loaded. You can still ask about ISO documents!")
+#     # STEP 1: Get DataFrame (for Gemini analysis)
+#     try:
+#         if api_client and hasattr(api_client, 'get_data'):
+#             df = api_client.get_data()
+#         elif api_client and hasattr(api_client, 'df'):
+#             df = api_client.df
+#         elif 'current_data' in st.session_state:
+#             df = st.session_state.current_data
+#         elif 'df' in st.session_state:
+#             df = st.session_state.df
+#         else:
+#             df = None
+#             st.info("💡 No dataset loaded. You can still ask about ISO documents!")
     
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        df = None
+#     except Exception as e:
+#         st.error(f"Error loading data: {e}")
+#         df = None
 
-    # STEP 2: Initialize Gemini
-    api_key = os.environ.get('GEMINI_API_KEY')
-    gemini_available = bool(api_key)
+#     # STEP 2: Initialize Gemini
+#     api_key = os.environ.get('GEMINI_API_KEY')
+#     gemini_available = bool(api_key)
     
-    if gemini_available:
-        try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        except Exception as e:
-            st.warning(f"⚠️ Gemini configuration issue: {e}")
-            gemini_available = False
-    else:
-        st.info("🔑 Set GEMINI_API_KEY for data analysis features")
+#     if gemini_available:
+#         try:
+#             genai.configure(api_key=api_key)
+#             model = genai.GenerativeModel('gemini-2.0-flash-exp')
+#         except Exception as e:
+#             st.warning(f"⚠️ Gemini configuration issue: {e}")
+#             gemini_available = False
+#     else:
+#         st.info("🔑 Set GEMINI_API_KEY for data analysis features")
 
-    # STEP 3: Show Instructions
-    col1, col2 = st.columns(2)
+#     # STEP 3: Show Instructions
+#     col1, col2 = st.columns(2)
     
-    with col1:
-        st.info("""
-        **📄 ISO Document Queries:**
-        - "Show me calibration procedures"
-        - "What are the GC-MS requirements?"
-        - "Find sample handling procedures"
-        - "Quality manual requirements"
-        """)
+#     with col1:
+#         st.info("""
+#         **📄 ISO Document Queries:**
+#         - "Show me calibration procedures"
+#         - "What are the GC-MS requirements?"
+#         - "Find sample handling procedures"
+#         - "Quality manual requirements"
+#         """)
     
-    with col2:
-        if df is not None and gemini_available:
-            st.info("""
-            **📊 Data Analysis Queries:**
-            - "Top 5 vegetables with violations"
-            - "Compliance trends by year" 
-            - "Pesticides with most exceedances"
-            - "Calculate average readings by crop"
-            """)
-        else:
-            st.info("""
-            **📊 Data Analysis:**
-            Load dataset and set GEMINI_API_KEY
-            to enable data analysis features
-            """)
+#     with col2:
+#         if df is not None and gemini_available:
+#             st.info("""
+#             **📊 Data Analysis Queries:**
+#             - "Top 5 vegetables with violations"
+#             - "Compliance trends by year" 
+#             - "Pesticides with most exceedances"
+#             - "Calculate average readings by crop"
+#             """)
+#         else:
+#             st.info("""
+#             **📊 Data Analysis:**
+#             Load dataset and set GEMINI_API_KEY
+#             to enable data analysis features
+#             """)
 
-    # STEP 4: Dual Input System
-    st.markdown("---")
-    st.subheader("🔍 Ask Detailed Questions")
+#     # STEP 4: Dual Input System
+#     st.markdown("---")
+#     st.subheader("🔍 Ask Detailed Questions")
     
-    col1, col2 = st.columns([4, 1])
+#     col1, col2 = st.columns([4, 1])
     
-    with col1:
-        text_question = st.text_area(
-            "Type your question here:",
-            height=100,
-            placeholder="Example: What are the top 10 vegetables by violation count? Or ask about ISO procedures...",
-            key="text_question"
-        )
+#     with col1:
+#         text_question = st.text_area(
+#             "Type your question here:",
+#             height=100,
+#             placeholder="Example: What are the top 10 vegetables by violation count? Or ask about ISO procedures...",
+#             key="text_question"
+#         )
     
-    with col2:
-        st.write("")  # Spacing
-        st.write("")  # Spacing
-        ask_button = st.button("🚀 Ask", type="primary", use_container_width=True, key="ask_button")
+#     with col2:
+#         st.write("")  # Spacing
+#         st.write("")  # Spacing
+#         ask_button = st.button("🚀 Ask", type="primary", use_container_width=True, key="ask_button")
     
-    # Simple chat input
-    st.markdown("---")
-    st.subheader("💬 Quick Chat")
-    chat_question = st.chat_input("Ask a quick question...")
+#     # Simple chat input
+#     st.markdown("---")
+#     st.subheader("💬 Quick Chat")
+#     chat_question = st.chat_input("Ask a quick question...")
     
-    # Determine which input to use
-    user_question = None
-    if ask_button and text_question:
-        user_question = text_question
-    elif chat_question:
-        user_question = chat_question
+#     # Determine which input to use
+#     user_question = None
+#     if ask_button and text_question:
+#         user_question = text_question
+#     elif chat_question:
+#         user_question = chat_question
 
-    # STEP 5: Process Question
-    if user_question:
-        # Enhanced query type detection
-        iso_keywords = [
-            'iso', '17025', 'clause', 'requirement', 'accreditation',
-            'calibration', 'validation', 'verification', 'maintenance',
-            'procedure', 'manual', 'quality manual', 'work instruction', 
-            'form', 'record', 'document', 'policy', 'sop',
-            'gc', 'gc-ms', 'gcms', 'hplc', 'instrument', 'equipment',
-            'laboratory', 'lab', 'sample handling', 'traceability',
-            'معايرة', 'إجراء', 'دليل الجودة', 'متطلب', 'اعتماد'
-        ]
+#     # STEP 5: Process Question
+#     if user_question:
+#         # Enhanced query type detection
+#         iso_keywords = [
+#             'iso', '17025', 'clause', 'requirement', 'accreditation',
+#             'calibration', 'validation', 'verification', 'maintenance',
+#             'procedure', 'manual', 'quality manual', 'work instruction', 
+#             'form', 'record', 'document', 'policy', 'sop',
+#             'gc', 'gc-ms', 'gcms', 'hplc', 'instrument', 'equipment',
+#             'laboratory', 'lab', 'sample handling', 'traceability',
+#             'معايرة', 'إجراء', 'دليل الجودة', 'متطلب', 'اعتماد'
+#         ]
         
-        data_keywords = [
-            'pesticide', 'vegetable', 'violation', 'compliance', 'exceed',
-            'limit', 'reading', 'sample', 'data', 'analysis', 'trend',
-            'statistic', 'count', 'average', 'maximum', 'minimum',
-            'طماطم', 'فلفل', 'خيار', 'مبيد', 'عينة'
-        ]
+#         data_keywords = [
+#             'pesticide', 'vegetable', 'violation', 'compliance', 'exceed',
+#             'limit', 'reading', 'sample', 'data', 'analysis', 'trend',
+#             'statistic', 'count', 'average', 'maximum', 'minimum',
+#             'طماطم', 'فلفل', 'خيار', 'مبيد', 'عينة'
+#         ]
         
-        query_lower = user_question.lower()
+#         query_lower = user_question.lower()
         
-        iso_score = sum(1 for kw in iso_keywords if kw in query_lower)
-        data_score = sum(1 for kw in data_keywords if kw in query_lower)
+#         iso_score = sum(1 for kw in iso_keywords if kw in query_lower)
+#         data_score = sum(1 for kw in data_keywords if kw in query_lower)
         
-        has_year = any(year in query_lower for year in ['2022', '2023', '2024', '2025'])
-        has_data_terms = any(term in query_lower for term in ['top', 'trend', 'average', 'count', 'sum', 'max', 'min'])
+#         has_year = any(year in query_lower for year in ['2022', '2023', '2024', '2025'])
+#         has_data_terms = any(term in query_lower for term in ['top', 'trend', 'average', 'count', 'sum', 'max', 'min'])
         
-        if iso_score > data_score:
-            query_type = "iso"
-        elif data_score > iso_score or has_year or has_data_terms:
-            query_type = "data"
-        else:
-            query_type = "iso"
+#         if iso_score > data_score:
+#             query_type = "iso"
+#         elif data_score > iso_score or has_year or has_data_terms:
+#             query_type = "data"
+#         else:
+#             query_type = "iso"
         
-        # Display detection info
-        if query_type == "iso":
-            st.info("🔍 Detected ISO/document query - searching uploaded documents...")
-            process_iso_query(api_client, user_question)
-        else:
-            if df is None:
-                st.error("📊 No dataset available for analysis. Please load your Excel file first.")
-                st.info("💡 You can still ask ISO/document questions without a dataset!")
-                return
+#         # Display detection info
+#         if query_type == "iso":
+#             st.info("🔍 Detected ISO/document query - searching uploaded documents...")
+#             process_iso_query(api_client, user_question)
+#         else:
+#             if df is None:
+#                 st.error("📊 No dataset available for analysis. Please load your Excel file first.")
+#                 st.info("💡 You can still ask ISO/document questions without a dataset!")
+#                 return
             
-            if not gemini_available:
-                st.error("🔑 Gemini API key not configured for data analysis.")
-                st.info("💡 Set GEMINI_API_KEY environment variable to enable data analysis.")
-                return
+#             if not gemini_available:
+#                 st.error("🔑 Gemini API key not configured for data analysis.")
+#                 st.info("💡 Set GEMINI_API_KEY environment variable to enable data analysis.")
+#                 return
             
-            st.info("🔍 Detected data analysis query - using AI to analyze your dataset...")
+#             st.info("🔍 Detected data analysis query - using AI to analyze your dataset...")
             
-            # Apply risk assessment settings
-            risk_mode = st.session_state.get('risk_mode', '🤖 Auto-detect')
-            if risk_mode == "✅ Always On":
-                include_risk = True
-            elif risk_mode == "❌ Always Off":
-                include_risk = False
-            else:  # Auto-detect
-                risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume', 'adult', 'child', 'population']
-                include_risk = any(kw in query_lower for kw in risk_keywords)
+#             # Apply risk assessment settings
+#             risk_mode = st.session_state.get('risk_mode', '🤖 Auto-detect')
+#             if risk_mode == "✅ Always On":
+#                 include_risk = True
+#             elif risk_mode == "❌ Always Off":
+#                 include_risk = False
+#             else:  # Auto-detect
+#                 risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume', 'adult', 'child', 'population']
+#                 include_risk = any(kw in query_lower for kw in risk_keywords)
             
-            if include_risk:
-                st.success("🎯 Risk assessment enabled")
+#             if include_risk:
+#                 st.success("🎯 Risk assessment enabled")
             
-            process_data_query(user_question, df, model, include_risk)
+#             process_data_query(user_question, df, model, include_risk)
 
-    # STEP 6: Quick Action Buttons
-    st.markdown("---")
-    st.subheader("⚡ Quick Actions")
+#     # STEP 6: Quick Action Buttons
+#     st.markdown("---")
+#     st.subheader("⚡ Quick Actions")
     
-    col1, col2, col3, col4 = st.columns(4)
+#     col1, col2, col3, col4 = st.columns(4)
     
-    with col1:
-        if st.button("📄 ISO Procedures", use_container_width=True):
-            st.session_state.quick_query = "Show me all calibration procedures"
-            st.rerun()
+#     with col1:
+#         if st.button("📄 ISO Procedures", use_container_width=True):
+#             st.session_state.quick_query = "Show me all calibration procedures"
+#             st.rerun()
     
-    with col2:
-        if st.button("🔬 Lab Equipment", use_container_width=True):
-            st.session_state.quick_query = "What are the GC-MS maintenance requirements?"
-            st.rerun()
+#     with col2:
+#         if st.button("🔬 Lab Equipment", use_container_width=True):
+#             st.session_state.quick_query = "What are the GC-MS maintenance requirements?"
+#             st.rerun()
     
-    with col3:
-        if df is not None and st.button("📊 Top Vegetables", use_container_width=True):
-            st.session_state.quick_query = "What are the top 10 vegetables by violation count?"
-            st.rerun()
+#     with col3:
+#         if df is not None and st.button("📊 Top Vegetables", use_container_width=True):
+#             st.session_state.quick_query = "What are the top 10 vegetables by violation count?"
+#             st.rerun()
     
-    with col4:
-        if df is not None and st.button("🧪 Risk Analysis", use_container_width=True):
-            st.session_state.quick_query = "Show me samples with health risk concerns"
-            st.rerun()
+#     with col4:
+#         if df is not None and st.button("🧪 Risk Analysis", use_container_width=True):
+#             st.session_state.quick_query = "Show me samples with health risk concerns"
+#             st.rerun()
 
-    # Handle quick queries
-    if 'quick_query' in st.session_state and st.session_state.quick_query:
-        user_question = st.session_state.quick_query
-        st.session_state.quick_query = None
-        st.rerun()
+#     # Handle quick queries
+#     if 'quick_query' in st.session_state and st.session_state.quick_query:
+#         user_question = st.session_state.quick_query
+#         st.session_state.quick_query = None
+#         st.rerun()
 
-    # STEP 7: Show Chat History
-    if 'chat_history' in st.session_state and st.session_state.chat_history:
-        st.markdown("---")
-        st.subheader("📜 Recent Queries")
+#     # STEP 7: Show Chat History
+#     if 'chat_history' in st.session_state and st.session_state.chat_history:
+#         st.markdown("---")
+#         st.subheader("📜 Recent Queries")
         
-        for i, item in enumerate(reversed(st.session_state.chat_history[-5:])):
-            # Remove the 'key' parameter from expander
-            with st.expander(f"Q{i+1}: {item['question'][:50]}..."):
-                st.markdown(f"**Question:** {item['question']}")
-                st.markdown(f"**Type:** {item.get('query_type', 'Unknown')}")
-                st.markdown(f"**Time:** {item['timestamp'].strftime('%Y-%m-%d %H:%M')}")
+#         for i, item in enumerate(reversed(st.session_state.chat_history[-5:])):
+#             # Remove the 'key' parameter from expander
+#             with st.expander(f"Q{i+1}: {item['question'][:50]}..."):
+#                 st.markdown(f"**Question:** {item['question']}")
+#                 st.markdown(f"**Type:** {item.get('query_type', 'Unknown')}")
+#                 st.markdown(f"**Time:** {item['timestamp'].strftime('%Y-%m-%d %H:%M')}")
                 
-                # Display results
-                if isinstance(item['result'], pd.DataFrame):
-                    st.dataframe(item['result'].head(5))
-                elif isinstance(item['result'], dict):
-                    st.json(item['result'])
-                else:
-                    st.write(item['result'])
+#                 # Display results
+#                 if isinstance(item['result'], pd.DataFrame):
+#                     st.dataframe(item['result'].head(5))
+#                 elif isinstance(item['result'], dict):
+#                     st.json(item['result'])
+#                 else:
+#                     st.write(item['result'])
                 
-                # Show code in a separate section (NOT nested expander)
-                if item.get('code'):
-                    st.markdown("---")
-                    st.markdown("#### 👨‍💻 Generated Code")
-                    st.code(item['code'], language='python')
+#                 # Show code in a separate section (NOT nested expander)
+#                 if item.get('code'):
+#                     st.markdown("---")
+#                     st.markdown("#### 👨‍💻 Generated Code")
+#                     st.code(item['code'], language='python')
         
-        # Clear history button
-        if st.button("🗑️ Clear History", use_container_width=True):
-            st.session_state.chat_history = []
-            st.rerun()
+#         # Clear history button
+#         if st.button("🗑️ Clear History", use_container_width=True):
+#             st.session_state.chat_history = []
+#             st.rerun()
+
+
+
 # ========================================================================
 # SUPPORTING FUNCTIONS
 # ========================================================================
@@ -3450,23 +3477,23 @@ def render_chat_sidebar(api_client):
     with st.sidebar:
         st.markdown("---")
         
-        # Project Configuration
-        st.markdown("## 🏢 Project Configuration")
-        # Initialize project_id if not exists
-        if "project_id" not in st.session_state:
-            st.session_state.project_id = "default_project"
+        # # Project Configuration
+        # st.markdown("## 🏢 Project Configuration")
+        # # Initialize project_id if not exists
+        # if "project_id" not in st.session_state:
+        #     st.session_state.project_id = "default_project"
             
-        project_id = st.text_input(
-            "Project ID",
-            value=st.session_state.project_id,
-            help="Enter your project identifier",
-            key="project_id_input"
-        )
+        # project_id = st.text_input(
+        #     "Project ID",
+        #     value=st.session_state.project_id,
+        #     help="Enter your project identifier",
+        #     key="project_id_input"
+        # )
         
-        if project_id != st.session_state.project_id:
-            st.session_state.project_id = project_id
+        # if project_id != st.session_state.project_id:
+        #     st.session_state.project_id = project_id
         
-        st.info(f"📁 Active Project: `{st.session_state.project_id}`")
+        # st.info(f"📁 Active Project: `{st.session_state.project_id}`")
         
         st.markdown("---")
         
@@ -3504,63 +3531,66 @@ def render_chat_sidebar(api_client):
                 )
 
         st.markdown("---")
+
+
+        # ==================== DATA CONTEXT & INDEXING ====================
         
-        # Data Context - FIXED SECTION
-        st.markdown("## 📅 Data Context")
+        # # Data Context - FIXED SECTION
+        # st.markdown("## 📅 Data Context")
         
-        # Safe initialization of selected_year
-        if "selected_year" not in st.session_state:
-            # Use the first available year if 2022 is not available
-            st.session_state.selected_year = AVAILABLE_YEARS[0] if AVAILABLE_YEARS else '2023'
-        else:
-            # If selected_year is not in available years, reset it
-            if st.session_state.selected_year not in AVAILABLE_YEARS:
-                st.session_state.selected_year = AVAILABLE_YEARS[0] if AVAILABLE_YEARS else '2023'
+        # # Safe initialization of selected_year
+        # if "selected_year" not in st.session_state:
+        #     # Use the first available year if 2022 is not available
+        #     st.session_state.selected_year = AVAILABLE_YEARS[0] if AVAILABLE_YEARS else '2023'
+        # else:
+        #     # If selected_year is not in available years, reset it
+        #     if st.session_state.selected_year not in AVAILABLE_YEARS:
+        #         st.session_state.selected_year = AVAILABLE_YEARS[0] if AVAILABLE_YEARS else '2023'
             
-        st.info(f"**Active Year:** {st.session_state.selected_year}")
+        # st.info(f"**Active Year:** {st.session_state.selected_year}")
         
-        # Safe selectbox with error handling
-        try:
-            current_index = AVAILABLE_YEARS.index(st.session_state.selected_year)
-        except ValueError:
-            # If current selected_year is not in list, use first available
-            current_index = 0
-            st.session_state.selected_year = AVAILABLE_YEARS[0]
+        # # Safe selectbox with error handling
+        # try:
+        #     current_index = AVAILABLE_YEARS.index(st.session_state.selected_year)
+        # except ValueError:
+        #     # If current selected_year is not in list, use first available
+        #     current_index = 0
+        #     st.session_state.selected_year = AVAILABLE_YEARS[0]
         
-        selected_year = st.selectbox(
-            "Default Year",
-            AVAILABLE_YEARS,
-            index=current_index
-        )
+        # selected_year = st.selectbox(
+        #     "Default Year",
+        #     AVAILABLE_YEARS,
+        #     index=current_index
+        # )
         
-        if selected_year != st.session_state.selected_year:
-            st.session_state.selected_year = selected_year
+        # if selected_year != st.session_state.selected_year:
+        #     st.session_state.selected_year = selected_year
         
-        st.markdown("---")
+        # st.markdown("---")
         
-        # Data Indexing
-        st.markdown("## 🗄️ Data Indexing")
+        # # Data Indexing
+        # st.markdown("## 🗄️ Data Indexing")
         
-        # Initialize indexed_years if not exists
-        if "indexed_years" not in st.session_state:
-            st.session_state.indexed_years = set()
+        # # Initialize indexed_years if not exists
+        # if "indexed_years" not in st.session_state:
+        #     st.session_state.indexed_years = set()
             
-        year_to_index = st.selectbox("Select Year to Index", AVAILABLE_YEARS)
+        # year_to_index = st.selectbox("Select Year to Index", AVAILABLE_YEARS)
         
-        col1, col2 = st.columns(2)
+        # col1, col2 = st.columns(2)
         
-        with col1:
-            if st.button("📥 Index", use_container_width=True):
-                index_year_data(api_client, year_to_index, do_reset=False)
+        # with col1:
+        #     if st.button("📥 Index", use_container_width=True):
+        #         index_year_data(api_client, year_to_index, do_reset=False)
         
-        with col2:
-            if st.button("🗑️ Reset", use_container_width=True):
-                index_year_data(api_client, year_to_index, do_reset=True)
+        # with col2:
+        #     if st.button("🗑️ Reset", use_container_width=True):
+        #         index_year_data(api_client, year_to_index, do_reset=True)
         
-        if st.session_state.indexed_years:
-            st.markdown("**✅ Indexed Years:**")
-            for year in sorted(st.session_state.indexed_years):
-                st.markdown(f"- {year}")
+        # if st.session_state.indexed_years:
+        #     st.markdown("**✅ Indexed Years:**")
+        #     for year in sorted(st.session_state.indexed_years):
+        #         st.markdown(f"- {year}")
 
         # ==================== SETTINGS ====================
         st.markdown("## ⚙️ Settings")

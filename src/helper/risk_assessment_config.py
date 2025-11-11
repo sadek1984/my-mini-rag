@@ -10,7 +10,7 @@ class RiskAssessmentConfig:
     
     # ADI values for pesticides (mg/kg/day) - WHO/FAO values
     PESTICIDE_ADI: Dict[str, float] = {
-        "Buprofezin": 0.02,
+        "Buprofezin": 0.009,
         "Fipronil": 0.0002,
         "Chlorpyrifos": 0.001,
         "Malathion": 0.3,
@@ -20,6 +20,10 @@ class RiskAssessmentConfig:
         "Carbaryl": 0.008,
         "Parathion": 0.004,
         "Dimethoate": 0.002,
+        "bifenthrin": 0.015,
+        "bifenazate": 0.01,
+        "pyridaben": 0.01,
+        "quinalphos": 0.01,
     }
     
     # Daily food consumption in Saudi Arabia (kg/day)
