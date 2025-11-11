@@ -41,8 +41,6 @@ origin  git@github.com:yourusername/repo.git(fetch)
 ## Difference between branches
 git diff --name-only LARS_predict pre_final
 git diff LARS_predict pre_final -- path/to/suspected_file.py
-git diff LARS_predict..pre_final
-
 
  
 Download the POSTMAN collection from [/assets/mini-rag-app.postman_collection.json](/ assets/mini-rag-app.postman_collection.json)
@@ -91,24 +89,19 @@ docker compose up --build
 
 streamlit run src/LARS/app.py
 
-
 streamlit run src/LARS/app_backup.py
 
-what are the gc column specifications
-
-what is the Standard Preparation
-
-pip install nbformat==4.2.0 
+Top 5 vegetables with violations
 
 find bifenazate in 2022
-
-find bifenthrin in all samples in 2023
 
 Find bifenazate exceeding limits in 2022
 
 Find bifenazate more than limits in 2022
 
-http://localhost:8000/api/v1/nlp/local/debug-filter/1?year=2022
+Find Buprofezin more than limits in 2024 include risk
+
+
 
 Find 'Buprofezin' more than 2 times the limit in tomato sample 2022
 include_risk_assessment : true
@@ -118,4 +111,4 @@ Find 'fipronil' in eggplant samples 2022
 
 find top 5 non compliant samples with high readings in 2023
 
-
+what is the Standard Preparation steps?
