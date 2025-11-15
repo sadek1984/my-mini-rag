@@ -10,6 +10,13 @@ class Settings(BaseSettings):
     FILE_MAX_SIZE: int
     FILE_DEFAULT_CHUNK_SIZE: int
 
+    database_url: Optional[str] = None
+    data_source_uri: Optional[str] = None  
+    data_source_user: Optional[str] = None
+    data_source_pass: Optional[str] = None
+    api_base_url: Optional[str] = None
+    api_key: Optional[str] = None
+
     GENERATION_BACKEND: str = "COHERE"
     EMBEDDING_BACKEND: str = "COHERE"  # huggingface, openai, cohere
 

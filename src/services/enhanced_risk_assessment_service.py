@@ -15,7 +15,7 @@ class EnhancedRiskAssessment:
     
     def __init__(self, historical_data_path: str):
         """Initialize with historical data"""
-        self.df = pd.read_excel('/app/data/processed_data_output.xlsx')
+        self.df = pd.read_excel('./data/processed_data_output.xlsx')
         self.df['document_date'] = pd.to_datetime(self.df['document_date'])
         
         self.vegetable_to_category = {

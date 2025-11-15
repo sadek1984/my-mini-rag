@@ -7,7 +7,7 @@ from services.enhanced_risk_assessment_service import EnhancedRiskAssessment
 risk_ass_router = APIRouter()
 
 # Initialize risk assessment service
-risk_service = EnhancedRiskAssessment('/app/data/processed_data_output.xlsx')
+risk_service = EnhancedRiskAssessment('./data/processed_data_output.xlsx')
 
 class RiskAssessmentRequest(BaseModel):
     vegetable: str

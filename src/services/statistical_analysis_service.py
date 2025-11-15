@@ -5,7 +5,7 @@ from scipy.stats import f_oneway
 import pymannkendall as mk
 
 # Load your data
-df = pd.read_excel('/app/data/processed_data_output.xlsx')
+df = pd.read_excel('./data/processed_data_output.xlsx')
 df['document_date'] = pd.to_datetime(df['document_date'])
 
 # ====================
@@ -160,4 +160,6 @@ def generate_statistical_insights(df):
 insights = generate_statistical_insights(df)
 for insight in insights:
     print(f"\n{insight['message']}")
+
+
 
