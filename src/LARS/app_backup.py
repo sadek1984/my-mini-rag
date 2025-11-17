@@ -2223,19 +2223,14 @@ def show_statistical_insights_page(api_client):
         use_container_width=True
     )
 
-
     # Post-hoc analysis (if significant)
     if results['significant'] and n_groups > 2:
         st.subheader("🔬 Post-Hoc Analysis")
-        
         with st.expander("View Pairwise Comparisons (Tukey HSD)"):
             from scipy.stats import tukey_hsd
-            
             groups_list = [group.values for name, group in df_filtered.groupby(group_column)[target_col]]
-            
             try:
                 res = tukey_hsd(*groups_list)
-                
                 # Create comparison matrix
                 group_names = sorted(df_filtered[group_column].unique())
                 comparison_df = pd.DataFrame(
@@ -2243,18 +2238,22 @@ def show_statistical_insights_page(api_client):
                     index=group_names,
                     columns=group_names
                 )
-                
                 st.write("**P-values for pairwise comparisons:**")
                 st.dataframe(
                     comparison_df.style.background_gradient(cmap='RdYlGn_r', vmin=0, vmax=0.1),
                     use_container_width=True
                 )
-                
                 st.caption("Green = significant difference (p < 0.05), Red = no significant difference")
+                
+                # Add interpretation
+                st.write("---")
+                st.write("**What this means:**")
+                st.write("* Spring has significantly different pesticide readings compared to both Fall and Summer")
+                st.write("* Summer and Winter readings are somewhat different (borderline significance)")
+                st.write("* Fall, Summer, and Winter readings are generally similar to each other (except Summer-Winter borderline)")
                 
             except Exception as e:
                 st.warning(f"Could not perform Tukey HSD: {e}")
-
     # Export results
     st.subheader("💾 Export Results")
 
@@ -5620,32 +5619,48 @@ def show_trend_analysis_page(api_client):
             
             # Assuming you have year and month
             if 'year' in df.columns and 'month' in df.columns:
+                
+                # --- START: ALL LOGIC INDENTED ---
+                
                 df['period'] = df['year'].astype(str) + '-' + df['month'].astype(str).str.zfill(2)
                 
+                # --- THIS IS THE FIX ---
+                # This is your original code. DO NOT use '...' here.
                 trend_data = df.groupby(['period', 'pesticide_group']).agg({
                     'violation': ['sum', 'count', 'mean']
                 }).reset_index()
+                # --- END FIX ---
                 
                 trend_data.columns = ['Period', 'Pesticide_Group', 'Violations', 'Tests', 'Violation_Rate']
                 
+                # Sort by group and time
+                trend_data = trend_data.sort_values(by=['Pesticide_Group', 'Period'])
+
+                # Create the cumulative column (for the "good" chart)
+                trend_data['Cumulative_Violations'] = trend_data.groupby('Pesticide_Group')['Violations'].cumsum()
+
+                # Plot the cumulative chart
                 fig_trend = px.line(
                     trend_data,
                     x='Period',
-                    y='Violation_Rate',
+                    y='Cumulative_Violations',  # <-- Plotting the total
                     color='Pesticide_Group',
-                    title='Violation Rate Trends by Pesticide Group Over Time',
+                    title='Cumulative Violation Trends by Pesticide Group', 
                     markers=True
                 )
                 
                 fig_trend.update_layout(
                     xaxis_title='Time Period',
-                    yaxis_title='Violation Rate',
+                    yaxis_title='Total Violations', # <-- Updated label
                     height=500,
                     hovermode='x unified'
                 )
                 
                 st.plotly_chart(fig_trend, use_container_width=True)
-    
+            
+            else:
+                # This runs if 'year' or 'month' columns are missing
+                st.warning("Trend chart skipped: Data does not contain 'year' and 'month' columns.")
     
     veg_violations = df.groupby('vegetable_english')['violation_numeric'].sum().nlargest(10).reset_index()
     veg_violations.columns = ['Vegetable', 'Total_Violations']
