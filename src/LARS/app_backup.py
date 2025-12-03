@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 # Import your existing NLP controller
 import os
+import google.generativeai as genai
 
 os.environ['GEMINI_API_KEY'] = 'AIzaSyBH6QPeFgtZ1B26rt-p2GHaiD55IHEP6s0'  # Add your actual key
 
@@ -1212,7 +1213,7 @@ def render_animated_header():
 def main():
 
     if 'df' not in st.session_state:
-        data_path = '/Users/a12/mini-rag/src/LARS/processed_data_output.xlsx'
+        data_path = os.path.join(os.path.dirname(__file__), 'processed_data_output.xlsx')
         if os.path.exists(data_path):
             st.session_state.df = pd.read_excel(data_path)
             st.session_state.data_loaded = True
@@ -1519,6 +1520,7 @@ def show_statistical_insights_page(api_client):
         try:
             # Try multiple possible paths
             possible_paths = [
+                os.path.join(os.path.dirname(__file__), 'processed_data_output.xlsx'),
                 'data/cleaned_data.csv',
                 '../data/cleaned_data.csv',
                 '../../data/cleaned_data.csv',
@@ -3289,320 +3291,6 @@ from typing import Dict
 # Make sure these are defined in your actual code
 AVAILABLE_YEARS = ['2022','2023', '2024']  # Example - adjust as needed
 
-def show_chat_page(api_client):
-    """AI Assistant chat page"""
-    
-    st.title("💬 AI Assistant")
-    
-    render_chat_sidebar(api_client)
-    display_chat_messages()
-    handle_chat_input(api_client)
-
-def handle_chat_input(api_client):
-    """Handle user chat input"""
-    
-    if prompt := st.chat_input("Ask about pesticide data..."):
-        st.session_state.chat_messages.append({
-            "role": "user",
-            "content": prompt
-        })
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        with st.chat_message("assistant"):
-            process_query(api_client, prompt)
-
-def process_query(api_client, query: str):
-    """Process user query - now checks for ISO queries too"""
-    
-    with st.spinner("🔍 Analyzing query..."):
-        
-        # Enhanced ISO keyword detection
-        iso_keywords = [
-            # ISO standards
-            'iso', '17025', 'clause', 'requirement', 'accreditation',
-            # Lab equipment and procedures
-            'gc', 'gc-ms', 'gcms', 'hplc', 'column', 'instrument', 'equipment',
-            'calibration', 'maintenance', 'validation', 'verification',
-            # Documents
-            'procedure', 'manual', 'quality manual', 'work instruction', 
-            'form', 'record', 'document', 'policy',
-            # Lab terms
-            'method', 'protocol', 'sop', 'standard operating',
-            'laboratory', 'lab', 'sample handling', 'traceability',
-            # Arabic terms
-            'معايرة', 'إجراء', 'دليل الجودة', 'متطلب', 'اعتماد',
-            'مختبر', 'جهاز', 'معدات'
-        ]
-        
-        # Pesticide-specific keywords (more specific)
-        pesticide_keywords = [
-            'pesticide', 'bifenthrin', 'pyridaben', 'mبيد',
-            'tomato', 'pepper', 'cucumber', 'طماطم', 'فلفل', 'خيار',
-            'exceeding', 'limit', 'violation', 'غير مطابق', 'مطابق',
-            'sample code', 'reading', 'ppm', 'ppb'
-        ]
-        
-        query_lower = query.lower()
-        
-        # Count keyword matches
-        iso_score = sum(1 for kw in iso_keywords if kw in query_lower)
-        pesticide_score = sum(1 for kw in pesticide_keywords if kw in query_lower)
-        
-        # Check for year in query (strong indicator of pesticide query)
-        has_year = any(year in query for year in AVAILABLE_YEARS)
-        
-        # Decision logic
-        if iso_score > pesticide_score:
-            is_iso_query = True
-        elif pesticide_score > iso_score:
-            is_iso_query = False
-        elif has_year:
-            is_iso_query = False  # Year mentioned = pesticide query
-        else:
-            is_iso_query = True  # Default to ISO if ambiguous
-        
-        if is_iso_query:
-            st.info("🔍 Detected ISO 17025 query - searching ISO documents...")
-            process_iso_query(api_client, query)
-        else:
-            st.info("🔍 Detected pesticide query - searching pesticide data...")
-            # Original pesticide query logic
-            query_year = extract_year_from_text(query)
-            
-            if not query_year:
-                query_year = st.session_state.selected_year
-                st.info(f"⚙️ Using default year: {query_year}")
-            else:
-                st.success(f"✅ Using year from query: {query_year}")
-            
-            # FIX: Check if year is indexed (only for local mode)
-            if hasattr(api_client, 'use_hybrid') and not api_client.use_hybrid:
-                if query_year not in st.session_state.indexed_years:
-                    response = f"⚠️ Data for {query_year} is not indexed yet. Please index it first."
-                    st.warning(response)
-                    st.session_state.chat_messages.append({
-                        "role": "assistant",
-                        "content": response
-                    })
-                    return
-            
-            # Determine risk mode BEFORE API call
-            risk_mode = st.session_state.get('risk_mode', '🤖 Auto-detect')
-            
-            if risk_mode == "✅ Always On":
-                include_risk = True
-            elif risk_mode == "❌ Always Off":
-                include_risk = False
-            else:  # Auto-detect
-                risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume']
-                include_risk = any(kw in query.lower() for kw in risk_keywords)
-            
-            if include_risk:
-                st.success("🎯 Risk assessment enabled")
-            
-            # FIXED API CALL with proper error handling
-            try:
-                # Prepare parameters
-                params = {
-                    'query': query,
-                    'year': query_year,
-                    'include_risk': include_risk
-                }
-                
-                # Add project_id if available and needed
-                if hasattr(api_client, 'project_id'):
-                    params['project_id'] = api_client.project_id
-                
-                # Make the API call
-                result = api_client.local_answer(**params)
-                
-                # FIX: Check if result is None or has error
-                if result is None:
-                    st.error("❌ No response received from API")
-                    return
-                
-                # Check for API errors
-                if isinstance(result, dict) and result.get('error'):
-                    error_msg = result.get('error', 'Unknown error')
-                    st.error(f"❌ API Error: {error_msg}")
-                    
-                    # Provide helpful suggestions
-                    if 'not indexed' in str(error_msg).lower():
-                        st.info("""
-                        **Solutions:**
-                        1. Enable Hybrid System (no indexing needed!) - Set GEMINI_API_KEY
-                        2. Or index the data first using the indexing button in sidebar
-                        3. Or try a different year that's already indexed
-                        """)
-                    return
-                
-                # FIX: Safe result processing
-                if not isinstance(result, dict):
-                    st.error(f"❌ Unexpected response format: {type(result)}")
-                    return
-                
-                # Display results
-                display_query_results(result, query_year, include_risk)
-                
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 422:
-                    st.error("❌ Validation Error: Invalid request parameters")
-                    with st.expander("Error Details"):
-                        st.write(f"URL: {e.response.url}")
-                        st.write(f"Status: {e.response.status_code}")
-                        try:
-                            error_detail = e.response.json()
-                            st.write("Error response:", error_detail)
-                        except:
-                            st.write("Response text:", e.response.text)
-                    
-                    st.info("💡 **Troubleshooting tips:**")
-                    st.info("- Check if the year exists in your database")
-                    st.info("- Verify your API endpoint is correct")
-                    st.info("- Try indexing the data first")
-                    
-                else:
-                    st.error(f"❌ HTTP Error {e.response.status_code}: {e}")
-                    
-            except Exception as e:
-                st.error(f"❌ Unexpected error: {str(e)}")
-                st.info("Try enabling Hybrid System for direct data access (no indexing needed)")
-
-def render_chat_sidebar(api_client):
-    """Render chat-specific sidebar controls"""
-    
-    with st.sidebar:
-        st.markdown("---")
-        
-        # # Project Configuration
-        # st.markdown("## 🏢 Project Configuration")
-        # # Initialize project_id if not exists
-        # if "project_id" not in st.session_state:
-        #     st.session_state.project_id = "default_project"
-            
-        # project_id = st.text_input(
-        #     "Project ID",
-        #     value=st.session_state.project_id,
-        #     help="Enter your project identifier",
-        #     key="project_id_input"
-        # )
-        
-        # if project_id != st.session_state.project_id:
-        #     st.session_state.project_id = project_id
-        
-        # st.info(f"📁 Active Project: `{st.session_state.project_id}`")
-        
-        st.markdown("---")
-        
-        # ==================== ISO DOCUMENT UPLOAD ====================
-        st.markdown("## 📄 ISO Document Upload")
-        
-        uploaded_file = st.file_uploader(
-            "Upload ISO Document",
-            type=['pdf', 'docx', 'xlsx'],
-            help="Upload Quality Manual, Procedures, Work Instructions, or Forms"
-        )
-        
-        doc_type = st.selectbox(
-            "Document Type",
-            [
-                "Quality Manual",
-                "Procedure", 
-                "Work Instruction",
-                "Form/Record",
-                "Unknown"
-            ]
-        )
-        
-        if uploaded_file is not None:
-            # Show what will be uploaded
-            st.caption(f"Will upload to project: {st.session_state.project_id}")
-            
-            if st.button("📤 Upload ISO Document", use_container_width=True, type="primary"):
-                # Pass the project ID from session state
-                upload_iso_document_ui(
-                    api_client, 
-                    uploaded_file, 
-                    doc_type, 
-                    st.session_state.project_id
-                )
-
-        st.markdown("---")
-
-
-        # ==================== DATA CONTEXT & INDEXING ====================
-        
-        # # Data Context - FIXED SECTION
-        # st.markdown("## 📅 Data Context")
-        
-        # # Safe initialization of selected_year
-        # if "selected_year" not in st.session_state:
-        #     # Use the first available year if 2022 is not available
-        #     st.session_state.selected_year = AVAILABLE_YEARS[0] if AVAILABLE_YEARS else '2023'
-        # else:
-        #     # If selected_year is not in available years, reset it
-        #     if st.session_state.selected_year not in AVAILABLE_YEARS:
-        #         st.session_state.selected_year = AVAILABLE_YEARS[0] if AVAILABLE_YEARS else '2023'
-            
-        # st.info(f"**Active Year:** {st.session_state.selected_year}")
-        
-        # # Safe selectbox with error handling
-        # try:
-        #     current_index = AVAILABLE_YEARS.index(st.session_state.selected_year)
-        # except ValueError:
-        #     # If current selected_year is not in list, use first available
-        #     current_index = 0
-        #     st.session_state.selected_year = AVAILABLE_YEARS[0]
-        
-        # selected_year = st.selectbox(
-        #     "Default Year",
-        #     AVAILABLE_YEARS,
-        #     index=current_index
-        # )
-        
-        # if selected_year != st.session_state.selected_year:
-        #     st.session_state.selected_year = selected_year
-        
-        # st.markdown("---")
-        
-        # # Data Indexing
-        # st.markdown("## 🗄️ Data Indexing")
-        
-        # # Initialize indexed_years if not exists
-        # if "indexed_years" not in st.session_state:
-        #     st.session_state.indexed_years = set()
-            
-        # year_to_index = st.selectbox("Select Year to Index", AVAILABLE_YEARS)
-        
-        # col1, col2 = st.columns(2)
-        
-        # with col1:
-        #     if st.button("📥 Index", use_container_width=True):
-        #         index_year_data(api_client, year_to_index, do_reset=False)
-        
-        # with col2:
-        #     if st.button("🗑️ Reset", use_container_width=True):
-        #         index_year_data(api_client, year_to_index, do_reset=True)
-        
-        # if st.session_state.indexed_years:
-        #     st.markdown("**✅ Indexed Years:**")
-        #     for year in sorted(st.session_state.indexed_years):
-        #         st.markdown(f"- {year}")
-
-        # ==================== SETTINGS ====================
-        st.markdown("## ⚙️ Settings")
-        
-        risk_mode = st.radio(
-            "Risk Assessment Mode",
-            options=["🤖 Auto-detect", "✅ Always On", "❌ Always Off"],
-            index=0,
-            help="Auto-detect: Enables when you ask about safety/risk\nAlways On: Include for every query\nAlways Off: Never include"
-        )
-        
-        st.session_state.risk_mode = risk_mode
-
 def upload_iso_document_ui(api_client, uploaded_file, doc_type: str, project_id: str):
     """Handle ISO document upload from Streamlit UI"""
     
@@ -3662,11 +3350,6 @@ def upload_iso_document_ui(api_client, uploaded_file, doc_type: str, project_id:
                     for section in sections[:3]:
                         st.write(f"- {section}")
             
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": f"✅ ISO document '{uploaded_file.name}' has been uploaded and indexed for project {project_id}. You can now ask questions about it!"
-            })
-            
         except requests.exceptions.HTTPError as e:
             st.error(f"❌ Upload failed: {e}")
             if hasattr(e.response, 'text'):
@@ -3675,270 +3358,399 @@ def upload_iso_document_ui(api_client, uploaded_file, doc_type: str, project_id:
         except Exception as e:
             st.error(f"❌ Unexpected error: {str(e)}")
 
-def index_year_data(api_client, year: str, do_reset: bool = False):
-    """Index data for a specific year"""
-    action = "Resetting and re-indexing" if do_reset else "Indexing"
+def show_chat_page(api_client):
+    """
+    Fixed chat page that works with simple query system
+    Just copy-paste this to replace your existing show_chat_page function
     
-    with st.spinner(f"{action} {year} data..."):
-        result = api_client.local_index(year, do_reset=do_reset)
+    Args:
+        api_client: Your existing API client (or None)
+    """
+    
+    st.header("💬 AI Assistant 🌱")
+    st.caption("Powered by Gemini - Ask questions in natural language")
+    
+    # ISO Document Management in Sidebar
+    with st.sidebar:
+        with st.expander("📄 ISO Document Upload"):
+            uploaded_file = st.file_uploader(
+                "Upload ISO Document",
+                type=['pdf', 'docx', 'xlsx'],
+                help="Limit 200MB per file"
+            )
+            
+            doc_type = st.selectbox(
+                "Document Type",
+                ["Quality Manual", "Procedure", "Work Instruction", "Form"]
+            )
+            
+        if uploaded_file is not None:
+            # Show what will be uploaded
+            st.caption(f"Will upload to project: {st.session_state.project_id}")
+            
+            if st.button("📤 Upload ISO Document", use_container_width=True, type="primary"):
+                # Pass the project ID from session state
+                upload_iso_document_ui(
+                    api_client, 
+                    uploaded_file, 
+                    doc_type, 
+                    st.session_state.project_id  # ✅ Use actual project ID
+                )
+            
+        # Settings
+        st.markdown("---")
+        st.markdown("### ⚙️ Settings")
         
-        if result and result.get('signal') == 'LOCAL_INDEX_SUCCESS':
-            count = result.get('indexed_documents', 0)
-            if count > 0:
-                st.session_state.indexed_years.add(year)
-                st.success(f"✅ {year} indexed: {count} documents")
-            else:
-                st.error(f"⚠️ No documents found for {year}")
-                st.json(result)
+        risk_mode = st.radio(
+            "Risk Assessment Mode",
+            ["🔵 Auto-detect", "✅ Always On", "❌ Always Off"]
+        )
+        
+        # Apply risk mode to detection
+        if risk_mode == "✅ Always On":
+            has_risk = True  # Force risk assessment
+        elif risk_mode == "❌ Always Off":
+            has_risk = False  # Disable risk assessment
         else:
-            st.error(f"❌ Failed to index {year}")
-            if result:
-                st.json(result)
-
-def display_chat_messages():
-    """Display all chat messages"""
-    # Initialize chat_messages if not exists
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []
-        
-    for message in st.session_state.chat_messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-def process_iso_query(api_client, query: str):
-    """Process ISO document query"""
+            has_risk = None # Auto-detect will handle this later
     
-    project_id = st.session_state.project_id  # ✅ Use actual project ID, not year
+    # ========================================================================
+    # STEP 1: Get DataFrame (adjust based on your app)
+    # ========================================================================
     
     try:
-        url = f"{api_client.base_url}/api/v1/iso/query/{project_id}"
-
-        
-        response = requests.post(
-            url,
-            json={"text": query},
-            timeout=120
-        )
-        
-        response.raise_for_status()
-        result = response.json()
-        
-        # Display answer
-        st.markdown(result.get('answer', 'No answer found'))
-        
-        # Display sources
-        sources = result.get('sources', [])
-        if sources:
-            st.markdown("---")
-            st.markdown("### 📚 Sources")
-            
-            for idx, source in enumerate(sources, 1):
-                with st.expander(f"📄 Source {idx}: {source.get('file', 'Unknown')}"):
-                    st.write(f"**Type:** {source.get('type', 'Unknown')}")
-                    st.write(f"**Document ID:** {source.get('doc_id', 'Unknown')}")
-                    
-                    clauses = source.get('clauses', [])
-                    if clauses:
-                        st.write(f"**Related ISO Clauses:** {', '.join(clauses)}")
-        
-        st.session_state.chat_messages.append({
-            "role": "assistant",
-            "content": result.get('answer', 'No answer found')
-        })
-        
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 404:
-            st.error(f"📄 No ISO documents found for project {project_id}. Please upload ISO documents first!")
+        # Try multiple ways to get the dataframe
+        if api_client and hasattr(api_client, 'get_data'):
+            df = api_client.get_data()
+        elif api_client and hasattr(api_client, 'df'):
+            df = api_client.df
+        elif 'current_data' in st.session_state:
+            df = st.session_state.current_data
+        elif 'df' in st.session_state:
+            df = st.session_state.df
         else:
-            st.error(f"❌ Query failed: {e}")
+            st.warning("⚠️ No data loaded. Please load data first.")
+            st.info("💡 Go to the data loading page or upload your Excel file.")
+            return
+    
     except Exception as e:
-        st.error(f"❌ Unexpected error: {str(e)}")
-
-def display_query_results(result: Dict, year: str, include_risk: bool):
-    """Display query results in a structured format"""
+        st.error(f"Error loading data: {e}")
+        return
     
-    # Display main answer
-    answer = result.get('answer', 'No results found')
-    st.markdown(answer)
+    # ========================================================================
+    # STEP 2: Initialize Gemini
+    # ========================================================================
     
-    # Display metrics
-    col1, col2 = st.columns(2)
+    api_key = os.environ.get('GEMINI_API_KEY')
+    
+    if not api_key:
+        st.error("⚠️ GEMINI_API_KEY not set")
+        st.info("""
+        **How to fix:**
+        1. Get your API key from: https://makersuite.google.com/app/apikey
+        2. Set it in your code: `os.environ['GEMINI_API_KEY'] = "your-key"`
+        3. Or set as environment variable: `export GEMINI_API_KEY="your-key"`
+        """)
+        return
+    
+    # Configure Gemini
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.0-flash')
+    
+    # ========================================================================
+    # STEP 3: Show Instructions
+    # ========================================================================
+    
+    st.info("""
+    **🌱 How to use:**
+    1. Type your question about the pesticide data
+    2. Press Enter or click "Ask"
+    3. View the AI-generated code and results
+    
+    **Example Questions:**
+    - "What are the top 5 vegetables with highest violation rates?"
+    - "Show me compliance trends by year"
+    - "Which pesticides have the most violations?"
+    - "Calculate average exceedance ratio by vegetable"
+    - "Find vegetables with more than 10 violations"
+    """)
+    
+    # ========================================================================
+    # STEP 4: Get User Input (THIS IS THE KEY PART!)
+    # ========================================================================
+    
+    # Method 1: Chat input (modern Streamlit way)
+    chat_question = st.chat_input("Ask a question about the data...")
+    
+    # Method 2: Text area + button (alternative)
+    st.markdown("---")
+    col1, col2 = st.columns([4, 1])
+    
     with col1:
-        st.metric("📄 Retrieved Documents", result.get('retrieved_docs_count', 0))
+        text_question = st.text_area(
+            "Or type your question here:",
+            height=100,
+            placeholder="Example: What are the top 10 vegetables by violation count?"
+        )
+    
     with col2:
-        st.metric("📚 Collection Total", result.get('collection_total', 0))
+        st.write("")  # Spacing
+        st.write("")  # Spacing
+        ask_button = st.button("🚀 Ask", type="primary", use_container_width=True)
     
-    # Display data table
-    data_frame = result.get('data_frame', [])
-    if data_frame:
-        st.markdown("---")
-        st.markdown("### 📊 Interactive Data Table")
-        df = pd.DataFrame(data_frame)
-        st.dataframe(df, use_container_width=True, height=300)
-        
-        st.markdown("### 📋 Individual Results")
-        display_individual_results(data_frame)
-
+    # Determine which input to use
+    user_question = chat_question or (text_question if ask_button else None)
     
-    # Display detailed risk assessment
-    risk_assessment = result.get('risk_assessment')
-    if risk_assessment and include_risk:  # Only show if risk assessment was requested
-        st.markdown("---")
-        st.markdown("## 🎯 Risk Assessment Summary")
+    # ========================================================================
+    # STEP 5: Process Question
+    # ========================================================================
+    
+    if user_question:
+        # DETECT QUERY TYPE
+        iso_keywords = ['iso', '17025', 'standard', 'procedure', 'manual', 
+                        'quality', 'calibration', 'validation', 'document', 'sop']
+        risk_keywords = ['risk', 'assessment', 'health', 'safety', 'adi', 'arfd']
         
-        # Summary metrics
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Samples", risk_assessment.get('total_samples_assessed', 0))
-        with col2:
-            st.metric("Population Type", risk_assessment.get('population_type', 'N/A'))
-        with col3:
-            dist = risk_assessment.get('overall_risk_distribution', {})
-            acceptable = dist.get('acceptable', 0)
-            st.metric("✅ Safe Samples", acceptable)
+        query_lower = user_question.lower()
+        is_iso = any(kw in query_lower for kw in iso_keywords)
         
-        # Individual sample assessments
-        assessment_results = risk_assessment.get('assessment_results', [])
-        if assessment_results:
-            for idx, assessment in enumerate(assessment_results, 1):
-                sample_code = assessment.get('sample_code', 'N/A')
-                pesticide_name = assessment.get('pesticide_name', 'N/A')
-                risk_level = assessment.get('risk_level', 'unknown')
-                risk_percentage = assessment.get('risk_percentage', 0)
-                
-                # Determine status
-                if risk_level == 'acceptable':
-                    status_icon = "✅"
-                    status_text = "Safe"
+        # Handle auto-detect risk
+        if has_risk is None:
+            has_risk = any(kw in query_lower for kw in risk_keywords)
+        
+        # HANDLE ISO QUERIES WITH RAG
+        if is_iso:
+            with st.spinner("🔍 Searching ISO documents..."):
+                if hasattr(api_client, 'nlp_controller'):
+                    try:
+                        result = api_client.nlp_controller.query(user_question)
+                        st.success("✅ Found ISO information")
+                        st.markdown("### 📋 Answer:")
+                        st.write(result.get('answer', 'No information found'))
+                        
+                        if result.get('sources'):
+                            with st.expander("📚 Sources"):
+                                for src in result['sources']:
+                                    st.write(f"• {src}")
+                    except Exception as e:
+                        st.error(f"ISO search error: {e}")
                 else:
-                    status_icon = "⚠️"
-                    status_text = "Warning"
+                    st.info("ISO documents not configured. Falling back to general query.")
+                    is_iso = False  # Fall back to Gemini
+        
+        # HANDLE PESTICIDE QUERIES WITH GEMINI (your existing code)
+        if not is_iso:  # Only run if not an ISO query
+            with st.spinner("🔄 Generating query and analyzing data..."):
                 
-                # Main expander for each sample
-                with st.expander(f"{status_icon} Sample {idx}: {sample_code} - {pesticide_name} - {status_text}"):
+                risk_instruction = ""
+                if has_risk:
+                    risk_instruction = """
                     
-                    # Two columns
-                    col1, col2 = st.columns(2)
+Also calculate risk assessment:
+- Add 'Risk_Level' column: High (>2x MRL), Medium (1-2x), Low (<1x)
+- Calculate exceedance ratio (Result/MRL) if possible
+- Include health risk indicators
+"""
+                prompt = f"""Generate pandas code to answer this question about pesticide testing data.
+
+Dataset information:
+- Columns: {list(df.columns)}
+- Shape: {df.shape}
+- Sample data (first 2 rows):
+{df.head(2).to_dict('records')}
+
+Question: {user_question}
+{risk_instruction}
+
+Requirements:
+1. Write Python code using pandas (imported as 'pd')
+2. The DataFrame is available as variable 'df'
+3. Store the final result in a variable called 'result'
+4. Handle any errors gracefully
+5. Return clean, formatted output (DataFrame or simple value)
+6. If aggregating, include meaningful column names
+
+Generate only the Python code, wrapped in ```python``` markers.
+"""
+                
+                try:
+                    # Generate code with Gemini
+                    response = model.generate_content(prompt)
                     
-                    with col1:
-                        st.markdown("#### 📊 Sample Information")
-                        st.write(f"**Sample Code:** {assessment.get('sample_code', 'N/A')}")
-                        st.write(f"**Pesticide:** {assessment.get('pesticide_name', 'N/A')}")
-                        st.write(f"**Food Item:** {assessment.get('food_item', 'unknown')}")
-                        st.write(f"**Concentration (ppb):** {assessment.get('concentration_ppb', 0):.2f}")
-                        st.write(f"**Concentration (mg/kg):** {assessment.get('concentration_mg_kg', 0):.3f}")
+                    # Extract code from response
+                    code_match = re.search(r'```python\n(.*?)```', response.text, re.DOTALL)
                     
-                    with col2:
-                        st.markdown("#### 🔬 Risk Metrics")
-                        st.write(f"**EDI Value:** {assessment.get('edi_value', 0):.6f} mg/kg/day")
-                        st.write(f"**ADI Value:** {assessment.get('adi_value', 0):.2f} mg/kg/day")
-                        st.write(f"**ADI Source:** {assessment.get('adi_source', 'N/A')}")
-                        st.write(f"**Food Intake Source:** {assessment.get('food_intake_source', 'N/A')}")
-                        
-                        # Risk percentage with color
-                        risk_pct = assessment.get('risk_percentage', 0)
-                        if risk_pct < 50:
-                            st.success(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
-                        elif risk_pct < 100:
-                            st.warning(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
-                        else:
-                            st.error(f"**Risk Percentage:** {risk_pct:.2f}% of ADI")
-                    
-                    # Status and recommendation
-                    st.markdown("#### 📋 Assessment")
-                    risk_status = assessment.get('risk_status', 'N/A')
-                    recommendation = assessment.get('recommendation', 'N/A')
-                    
-                    if risk_level == 'acceptable':
-                        st.success(f"**Status:** {risk_status}")
+                    if code_match:
+                        generated_code = code_match.group(1).strip()
                     else:
-                        st.error(f"**Status:** {risk_status}")
+                        # Fallback: try without python specifier
+                        code_match = re.search(r'```\n(.*?)```', response.text, re.DOTALL)
+                        if code_match:
+                            generated_code = code_match.group(1).strip()
+                        else:
+                            # Last resort: use entire response
+                            generated_code = response.text.strip()
                     
-                    st.info(f"**Recommendation:** {recommendation}")
+                    # Execute the generated code
+                    local_vars = {
+                        'df': df.copy(),
+                        'pd': pd,
+                        'np': np,
+                        'result': None
+                    }
                     
-                    # FIXED: Show calculation details WITHOUT nested expander
-                    calc_details = assessment.get('calculation_details', {})
-                    if calc_details:
-                        st.markdown("---")
-                        st.markdown("#### 🧮 Calculation Details")
+                    exec(generated_code, {}, local_vars)
+                    
+                    result = local_vars.get('result')
+                    
+                    # ========================================================
+                    # STEP 6: Display Results
+                    # ========================================================
+                    
+                    st.success("✅ Query executed successfully!")
+                    
+                    # Show the result
+                    st.subheader("📊 Result:")
+                    
+                    if isinstance(result, pd.DataFrame):
+                        st.dataframe(result, use_container_width=True)
+
+                        # Show risk assessment summary if applicable
+                        if has_risk and isinstance(result, pd.DataFrame):
+                            if 'Risk_Level' in result.columns:
+                                with st.expander("⚠️ Risk Assessment Summary"):
+                                    risk_counts = result['Risk_Level'].value_counts()
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("🔴 High Risk", risk_counts.get('High', 0))
+                                    with col2:
+                                        st.metric("🟡 Medium", risk_counts.get('Medium', 0))
+                                    with col3:
+                                        st.metric("🟢 Low", risk_counts.get('Low', 0))
+                                    
+                                    if 'Exceedance_Ratio' in result.columns:
+                                        max_exc = result['Exceedance_Ratio'].max()
+                                        st.write(f"**Max Exceedance:** {max_exc:.2f}x")
                         
-                        st.markdown("**Formula:**")
-                        st.code(calc_details.get('formula', 'N/A'), language="text")
+                        # Add download button for DataFrames
+                        csv = result.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download as CSV",
+                            data=csv,
+                            file_name="query_result.csv",
+                            mime="text/csv"
+                        )
+                    
+                    elif isinstance(result, (pd.Series, list, dict)):
+                        st.dataframe(pd.DataFrame(result), use_container_width=True)
+                    
+                    else:
+                        # For simple values
+                        if isinstance(result, (int, float, np.number)):
+                            st.markdown(f"<div style='font-size: 4rem; font-weight: bold; color: #2E7D32;'>{result}</div>", unsafe_allow_html=True)
+                        else:
+                            st.write(result)
+                    
+                    # Show generated code
+                    with st.expander("👨‍💻 View Generated Code"):
+                        st.code(generated_code, language='python')
+                        st.caption("This code was AI-generated and executed on your data")
+                    
+                    # Add to history
+                    if 'chat_history' not in st.session_state:
+                        st.session_state.chat_history = []
+                    
+                    st.session_state.chat_history.append({
+                        'question': user_question,
+                        'result': result,
+                        'code': generated_code,
+                        'timestamp': pd.Timestamp.now()
+                    })
+                
+                except Exception as e:  # ✅ FIXED: Proper exception handling
+                    st.error(f"❌ Error executing query: {str(e)}")
+                    
+                    # Show helpful error information
+                    with st.expander("🔍 Error Details"):
+                        st.code(str(e))
+                        if 'generated_code' in locals():
+                            st.markdown("**Generated Code:**")
+                            st.code(generated_code, language='python')
+                    
+                    st.info("""
+                    **Common issues:**
+                    - Column names might not match exactly
+                    - Data type mismatches
+                    - Try rephrasing your question
+                    - Check the generated code for syntax errors
+                    """)
+
+
+    # ========================================================================
+    # STEP 7: Show Chat History (Optional)
+    # ========================================================================
+    
+    if 'chat_history' in st.session_state and st.session_state.chat_history:
+        st.markdown("---")
+        st.subheader("📜 Recent Queries")
+        
+        # Show last 5 queries
+        for i, item in enumerate(reversed(st.session_state.chat_history[-5:])):
+            with st.expander(f"Q{i+1}: {item['question'][:60]}..."):
+                st.markdown(f"**Question:** {item['question']}")
+                st.markdown(f"**Time:** {item['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                if isinstance(item['result'], pd.DataFrame):
+                    st.dataframe(item['result'].head(10))
+                else:
+                    st.write(item['result'])
+                
+                show_code = st.checkbox("👨‍💻 Show generated code", value=True, key=f"show_code_hist_{i}")
+                if show_code:
+                    st.code(item['code'], language='python')
                         
-                        st.markdown("**Substitution:**")
-                        st.code(calc_details.get('substitution', 'N/A'), language="text")
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.write(f"**Population Weight:** {calc_details.get('population_weight', 'N/A')}")
-                        with col2:
-                            st.write(f"**Daily Intake:** {calc_details.get('daily_intake', 'N/A')}")
+        # Clear history button
+        if st.button("🗑️ Clear History"):
+            st.session_state.chat_history = []
+            st.rerun()
+    
+    # ========================================================================
+    # STEP 8: Quick Query Buttons (Optional)
+    # ========================================================================
     
     st.markdown("---")
-    display_download_options(result, year, data_frame)
+    st.subheader("⚡ Quick Queries")
     
-    # Store in session
-    st.session_state.chat_messages.append({
-        "role": "assistant",
-        "content": f"✅ Analysis completed for {year}",
-        "data": result
-    })
-
-def display_individual_results(data_frame: list):
-    """Display individual result cards"""
-    for idx, record in enumerate(data_frame, 1):
-        with st.expander(f"📝 Result {idx}: {record.get('Sample Code', 'N/A')} - {record.get('Pesticide Name', 'N/A')}"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write(f"**Sample Code:** {record.get('Sample Code', 'N/A')}")
-                st.write(f"**Sample Name:** {record.get('Sample Name', 'N/A')}")
-                st.write(f"**Pesticide:** {record.get('Pesticide Name', 'N/A')}")
-            
-            with col2:
-                st.write(f"**Reading:** {record.get('Reading Value', 'N/A')}")
-                st.write(f"**Limit:** {record.get('Limit', 'N/A')}")
-                
-                result_status = record.get('Result', 'N/A')
-                if 'مطابق' in str(result_status) or 'Safe' in str(result_status):
-                    st.success(f"**Result:** ✅ {result_status}")
-                else:
-                    st.error(f"**Result:** ⚠️ {result_status}")
-
-def display_download_options(result: Dict, year: str, data_frame: list):
-    """Display download buttons for results"""
-    
-    col1, col2 = st.columns(2)
-    
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.download_button(
-            label="📥 Download JSON",
-            data=json.dumps(result, indent=2, ensure_ascii=False),
-            file_name=f"query_{year}_{timestamp}.json",
-            mime="application/json",
-            use_container_width=True
-        )
+        if st.button("📊 Top Vegetables"):
+            # Trigger quick query
+            st.session_state.quick_query = "What are the top 10 vegetables by violation count?"
+            st.rerun()
     
     with col2:
-        if data_frame:
-            csv_data = pd.DataFrame(data_frame).to_csv(index=False)
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv_data,
-                file_name=f"query_{year}_{timestamp}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        if st.button("🧪 Top Pesticides"):
+            st.session_state.quick_query = "What are the top 10 pesticides by violation count?"
+            st.rerun()
+    
+    with col3:
+        if st.button("📈 Yearly Trends"):
+            st.session_state.quick_query = "Show me compliance rate by year"
+            st.rerun()
+    
+    # Handle quick query
+    if 'quick_query' in st.session_state and st.session_state.quick_query:
+        user_question = st.session_state.quick_query
+        st.session_state.quick_query = None
+        st.rerun()
 
-# Add this helper function if missing
-def extract_year_from_text(text: str) -> str:
-    """Extract year from text if present"""
-    for year in AVAILABLE_YEARS:
-        if year in text:
-            return year
-    return ""
+
+
+
+
+
 
 
 def show_anova_analysis_page(api_client):
@@ -3961,6 +3773,7 @@ def show_anova_analysis_page(api_client):
         try:
             # Try multiple possible paths
             possible_paths = [
+                os.path.join(os.path.dirname(__file__), 'processed_data_output.xlsx'),
                 'data/cleaned_data.csv',
                 '../data/cleaned_data.csv',
                 '../../data/cleaned_data.csv',
@@ -5402,6 +5215,7 @@ def show_trend_analysis_page(api_client):
         try:
             # Try multiple possible paths
             possible_paths = [
+                os.path.join(os.path.dirname(__file__), 'processed_data_output.xlsx'),
                 'data/cleaned_data.csv',
                 '../data/cleaned_data.csv',
                 '../../data/cleaned_data.csv',
