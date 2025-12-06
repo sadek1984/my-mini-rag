@@ -3176,6 +3176,317 @@ def process_iso_query(api_client, query: str):
         except Exception as e:
             st.error(f"❌ Unexpected error: {str(e)}")
 
+# ============================================================================
+# CHART GENERATION FUNCTIONS
+# ============================================================================
+
+def generate_bar_chart(df: pd.DataFrame, query: str):
+    """Generate an interactive bar chart from DataFrame"""
+    try:
+        import plotly.graph_objects as go
+        
+        # Determine x and y columns intelligently
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        text_cols = df.select_dtypes(include=['object']).columns.tolist()
+        
+        if not numeric_cols:
+            st.warning("⚠️ No numeric columns found for visualization")
+            return
+        
+        # Use first text column for x-axis, first numeric for y-axis
+        x_col = text_cols[0] if text_cols else df.columns[0]
+        y_col = numeric_cols[0]
+        
+        # Create bar chart
+        fig = go.Figure(data=[
+            go.Bar(
+                x=df[x_col],
+                y=df[y_col],
+                marker=dict(
+                    color=df[y_col],
+                    colorscale='Viridis',
+                    showscale=True
+                ),
+                text=df[y_col],
+                textposition='outside',
+                texttemplate='%{text:.1f}'
+            )
+        ])
+        
+        fig.update_layout(
+            title=f"Bar Chart: {y_col} by {x_col}",
+            xaxis_title=x_col,
+            yaxis_title=y_col,
+            height=500,
+            showlegend=False,
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error generating bar chart: {e}")
+
+def generate_line_chart(df: pd.DataFrame, query: str):
+    """Generate an interactive line chart from DataFrame"""
+    try:
+        import plotly.graph_objects as go
+        
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        text_cols = df.select_dtypes(include=['object']).columns.tolist()
+        
+        if not numeric_cols:
+            st.warning("⚠️ No numeric columns found for visualization")
+            return
+        
+        x_col = text_cols[0] if text_cols else df.columns[0]
+        y_col = numeric_cols[0]
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=df[x_col],
+            y=df[y_col],
+            mode='lines+markers',
+            line=dict(color='#2e7d32', width=3),
+            marker=dict(size=10, color='#4caf50'),
+            name=y_col
+        ))
+        
+        fig.update_layout(
+            title=f"Line Chart: {y_col} Trend",
+            xaxis_title=x_col,
+            yaxis_title=y_col,
+            height=500,
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error generating line chart: {e}")
+
+def generate_pie_chart(df: pd.DataFrame, query: str):
+    """Generate an interactive pie chart from DataFrame"""
+    try:
+        import plotly.graph_objects as go
+        
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        text_cols = df.select_dtypes(include=['object']).columns.tolist()
+        
+        if not numeric_cols or not text_cols:
+            st.warning("⚠️ Need both text and numeric columns for pie chart")
+            return
+        
+        labels_col = text_cols[0]
+        values_col = numeric_cols[0]
+        
+        # Limit to top 10 for readability
+        df_top = df.nlargest(10, values_col) if len(df) > 10 else df
+        
+        fig = go.Figure(data=[go.Pie(
+            labels=df_top[labels_col],
+            values=df_top[values_col],
+            hole=0.3,
+            textinfo='label+percent',
+            marker=dict(
+                colors=px.colors.sequential.Viridis,
+                line=dict(color='white', width=2)
+            )
+        )])
+        
+        fig.update_layout(
+            title=f"Pie Chart: {values_col} Distribution",
+            height=500,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error generating pie chart: {e}")
+
+def generate_radar_chart(df: pd.DataFrame, query: str):
+    """Generate an interactive radar chart from DataFrame"""
+    try:
+        import plotly.graph_objects as go
+        
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        text_cols = df.select_dtypes(include=['object']).columns.tolist()
+        
+        if not numeric_cols or not text_cols:
+            st.warning("⚠️ Need both text and numeric columns for radar chart")
+            return
+        
+        # Limit to top 10 for readability
+        df_top = df.head(10)
+        
+        categories = df_top[text_cols[0]].tolist()
+        
+        # If we have multiple numeric columns, create multi-series radar
+        if len(numeric_cols) > 1:
+            fig = go.Figure()
+            
+            for col in numeric_cols[:3]:  # Limit to 3 series for clarity
+                # Normalize values to 0-100 scale
+                values = df_top[col].tolist()
+                max_val = max(values) if max(values) > 0 else 1
+                normalized = [(v / max_val) * 100 for v in values]
+                
+                fig.add_trace(go.Scatterpolar(
+                    r=normalized,
+                    theta=categories,
+                    fill='toself',
+                    name=col
+                ))
+        else:
+            # Single series radar
+            values = df_top[numeric_cols[0]].tolist()
+            max_val = max(values) if max(values) > 0 else 1
+            normalized = [(v / max_val) * 100 for v in values]
+            
+            fig = go.Figure(data=go.Scatterpolar(
+                r=normalized,
+                theta=categories,
+                fill='toself',
+                marker=dict(color='#4caf50'),
+                line=dict(color='#2e7d32', width=2)
+            ))
+        
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 100]
+                )
+            ),
+            title="Radar Chart: Comparative Analysis",
+            height=600,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("📊 Values are normalized to 0-100 scale for comparison")
+        
+    except Exception as e:
+        st.error(f"Error generating radar chart: {e}")
+
+def generate_heatmap(df: pd.DataFrame, query: str):
+    """Generate an interactive heatmap from DataFrame"""
+    try:
+        import plotly.graph_objects as go
+        
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if len(numeric_cols) < 2:
+            st.warning("⚠️ Need at least 2 numeric columns for heatmap. Showing correlation heatmap instead.")
+            # Create correlation heatmap
+            if len(numeric_cols) >= 1:
+                corr_matrix = df[numeric_cols].corr()
+                
+                fig = go.Figure(data=go.Heatmap(
+                    z=corr_matrix.values,
+                    x=corr_matrix.columns,
+                    y=corr_matrix.columns,
+                    colorscale='RdYlGn',
+                    zmid=0,
+                    text=corr_matrix.values,
+                    texttemplate='%{text:.2f}',
+                    textfont={"size": 10},
+                    colorbar=dict(title="Correlation")
+                ))
+                
+                fig.update_layout(
+                    title="Correlation Heatmap",
+                    height=500,
+                    xaxis_title="Variables",
+                    yaxis_title="Variables"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            return
+        
+        # Create regular heatmap with all numeric columns
+        text_cols = df.select_dtypes(include=['object']).columns.tolist()
+        row_labels = df[text_cols[0]].tolist() if text_cols else [f"Row {i}" for i in range(len(df))]
+        
+        # Limit rows for readability
+        df_subset = df.head(15)
+        row_labels = row_labels[:15]
+        
+        z_data = df_subset[numeric_cols].values
+        
+        fig = go.Figure(data=go.Heatmap(
+            z=z_data,
+            x=numeric_cols,
+            y=row_labels,
+            colorscale='Viridis',
+            text=z_data,
+            texttemplate='%{text:.1f}',
+            textfont={"size": 9},
+            colorbar=dict(title="Value")
+        ))
+        
+        fig.update_layout(
+            title="Heatmap: Data Values",
+            height=600,
+            xaxis_title="Metrics",
+            yaxis_title="Categories"
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error generating heatmap: {e}")
+
+def generate_scatter_plot(df: pd.DataFrame, query: str):
+    """Generate an interactive scatter plot from DataFrame"""
+    try:
+        import plotly.express as px
+        
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if len(numeric_cols) < 2:
+            st.warning("⚠️ Need at least 2 numeric columns for scatter plot")
+            return
+        
+        x_col = numeric_cols[0]
+        y_col = numeric_cols[1]
+        
+        # Use third numeric column for size if available
+        size_col = numeric_cols[2] if len(numeric_cols) >= 3 else None
+        
+        # Use text column for color if available
+        text_cols = df.select_dtypes(include=['object']).columns.tolist()
+        color_col = text_cols[0] if text_cols else None
+        
+        fig = px.scatter(
+            df,
+            x=x_col,
+            y=y_col,
+            size=size_col,
+            color=color_col,
+            title=f"Scatter Plot: {y_col} vs {x_col}",
+            height=600,
+            hover_data=df.columns.tolist()
+        )
+        
+        fig.update_traces(marker=dict(
+            line=dict(width=1, color='white'),
+            opacity=0.7
+        ))
+        
+        fig.update_layout(
+            xaxis_title=x_col,
+            yaxis_title=y_col,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error generating scatter plot: {e}")
+
 def process_data_query(query: str, df: pd.DataFrame, model, include_risk: bool = False):
     """Process data analysis queries using Gemini with risk assessment option"""
     
@@ -3288,6 +3599,12 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
             
             result = local_vars.get('result')
             
+            # Store results in session state for persistence across button clicks
+            st.session_state.last_query_result = result
+            st.session_state.last_query = query
+            st.session_state.last_generated_code = generated_code
+            st.session_state.last_include_risk = include_risk
+            
             st.success("✅ Analysis completed!")
             st.markdown("### 📊 Results:")
             
@@ -3323,6 +3640,11 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                             st.metric("🟡 Below Limit", "N/A")
                 
                 st.dataframe(result, use_container_width=True)
+                
+                # Note: Chart buttons are now handled by display_stored_results_with_charts()
+                # which is called after this function to persist across button clicks
+                
+                st.markdown("---")
                 
                 # Show risk assessment summary if applicable
                 if include_risk and isinstance(result, pd.DataFrame):
@@ -3386,6 +3708,101 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                 if 'generated_code' in locals():
                     st.markdown("**Generated Code:**")
                     st.code(generated_code, language='python')
+
+
+def display_stored_results_with_charts():
+    """
+    Display stored query results with chart buttons.
+    This function should be called separately to show results that persist across button clicks.
+    """
+    
+    # Check if we have stored results
+    if 'last_query_result' not in st.session_state or st.session_state.last_query_result is None:
+        return
+    
+    result = st.session_state.last_query_result
+    query = st.session_state.get('last_query', '')
+    
+    if not isinstance(result, pd.DataFrame):
+        return
+    
+    st.markdown("---")
+    st.subheader("📊 Last Query Results")
+    st.caption(f"Query: {query[:100]}..." if len(query) > 100 else f"Query: {query}")
+    
+    # Show the result dataframe
+    st.dataframe(result, use_container_width=True)
+    
+    # ========================================================================
+    # CHART GENERATION BUTTONS (PERSISTENT)
+    # ========================================================================
+    
+    st.markdown("---")
+    st.subheader("📊 Visualize Results")
+    st.caption("Choose a chart type to visualize your data")
+    
+    # Initialize session state for selected chart
+    if 'selected_chart' not in st.session_state:
+        st.session_state.selected_chart = None
+    
+    # Create columns for chart buttons
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    
+    with col1:
+        if st.button("📊 Bar", use_container_width=True, key="btn_bar_stored"):
+            st.session_state.selected_chart = "bar"
+    
+    with col2:
+        if st.button("📈 Line", use_container_width=True, key="btn_line_stored"):
+            st.session_state.selected_chart = "line"
+    
+    with col3:
+        if st.button("🥧 Pie", use_container_width=True, key="btn_pie_stored"):
+            st.session_state.selected_chart = "pie"
+    
+    with col4:
+        if st.button("🎯 Radar", use_container_width=True, key="btn_radar_stored"):
+            st.session_state.selected_chart = "radar"
+    
+    with col5:
+        if st.button("🔥 Heat", use_container_width=True, key="btn_heatmap_stored"):
+            st.session_state.selected_chart = "heatmap"
+    
+    with col6:
+        if st.button("💠 Scatter", use_container_width=True, key="btn_scatter_stored"):
+            st.session_state.selected_chart = "scatter"
+    
+    # Display selected chart
+    if st.session_state.selected_chart:
+        st.markdown("---")
+        
+        chart_mapping = {
+            "bar": ("📊 Bar Chart", generate_bar_chart),
+            "line": ("📈 Line Chart", generate_line_chart),
+            "pie": ("🥧 Pie Chart", generate_pie_chart),
+            "radar": ("🎯 Radar Chart", generate_radar_chart),
+            "heatmap": ("🔥 Heatmap", generate_heatmap),
+            "scatter": ("💠 Scatter Plot", generate_scatter_plot)
+        }
+        
+        chart_name, chart_func = chart_mapping[st.session_state.selected_chart]
+        st.subheader(f"Displaying: {chart_name}")
+        chart_func(result, query)
+        
+        # Add clear button
+        if st.button("🗑️ Clear Chart", key="clear_chart_stored"):
+            st.session_state.selected_chart = None
+            st.rerun()
+    
+    # Download button
+    csv = result.to_csv(index=False)
+    st.download_button(
+        label="📥 Download Results as CSV",
+        data=csv,
+        file_name="analysis_results.csv",
+        mime="text/csv",
+        key="download_stored"
+    )
 
 
 import streamlit as st
@@ -3663,6 +4080,12 @@ def show_chat_page(api_client):
             # Use the robust function we defined earlier
             process_data_query(user_question, df, model, include_risk)
 
+    # ========================================================================
+    # STEP 6.5: Display stored results with chart buttons (PERSISTENT)
+    # ========================================================================
+    
+    # Always display stored results - this persists across button clicks
+    display_stored_results_with_charts()
 
     # ========================================================================
     # STEP 7: Show Chat History (Optional)
