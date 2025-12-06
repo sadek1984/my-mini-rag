@@ -3177,6 +3177,347 @@ def process_iso_query(api_client, query: str):
             st.error(f"❌ Unexpected error: {str(e)}")
 
 # ============================================================================
+# DATA ENTRY FORM - Add New Sample to Dataset
+# ============================================================================
+
+def show_data_entry_form():
+    """
+    Display a form to add new pesticide sample data to the dataset.
+    Saves to both session state and the Excel file.
+    """
+    
+    st.markdown("---")
+    st.subheader("📝 Add New Sample Data")
+    st.caption("Enter new pesticide sample information to add to the database")
+    
+    # Get current DataFrame
+    if 'df' not in st.session_state or st.session_state.df is None:
+        st.warning("⚠️ No dataset loaded. Please load data first.")
+        return
+    
+    df = st.session_state.df
+    
+    # Get unique values for dropdowns
+    vegetables = sorted(df['vegetable_arabic'].dropna().unique().tolist()) if 'vegetable_arabic' in df.columns else []
+    pesticides = sorted(df['pesticide'].dropna().unique().tolist()) if 'pesticide' in df.columns else []
+    neighborhoods = sorted(df['الحي'].dropna().unique().tolist()) if 'الحي' in df.columns else []
+    
+    # If no neighborhoods found, try English column
+    if not neighborhoods and 'neighborhood_english' in df.columns:
+        neighborhoods = sorted(df['neighborhood_english'].dropna().unique().tolist())
+    
+    with st.form("data_entry_form", clear_on_submit=True):
+        st.markdown("### 🌱 Sample Information")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Vegetable selection
+            if vegetables:
+                vegetable_arabic = st.selectbox(
+                    "🥬 نوع الخضروات (Vegetable)",
+                    options=["-- Select --"] + vegetables,
+                    help="Select the vegetable type"
+                )
+            else:
+                vegetable_arabic = st.text_input(
+                    "🥬 نوع الخضروات (Vegetable)",
+                    placeholder="e.g., طماطم",
+                    help="Enter the vegetable name in Arabic"
+                )
+            
+            # Pesticide selection
+            if pesticides:
+                pesticide = st.selectbox(
+                    "🧪 المبيد الحشري (Pesticide)",
+                    options=["-- Select --"] + pesticides,
+                    help="Select the pesticide type"
+                )
+            else:
+                pesticide = st.text_input(
+                    "🧪 المبيد الحشري (Pesticide)",
+                    placeholder="e.g., Bifenthrin",
+                    help="Enter the pesticide name"
+                )
+            
+            # Neighborhood selection
+            if neighborhoods:
+                neighborhood = st.selectbox(
+                    "📍 الحي (Neighborhood)",
+                    options=["-- Select --"] + neighborhoods,
+                    help="Select the neighborhood/district"
+                )
+            else:
+                neighborhood = st.text_input(
+                    "📍 الحي (Neighborhood)",
+                    placeholder="e.g., الاسكان",
+                    help="Enter the neighborhood name"
+                )
+        
+        with col2:
+            # Reading value
+            reading = st.number_input(
+                "📊 القراءة (Reading)",
+                min_value=0.0,
+                max_value=10000.0,
+                value=0.0,
+                step=0.01,
+                format="%.4f",
+                help="Measured pesticide concentration (mg/kg)"
+            )
+            
+            # Limits value
+            limits = st.number_input(
+                "⚠️ الحد الأقصى (Limit/MRL)",
+                min_value=0.0,
+                max_value=10000.0,
+                value=0.0,
+                step=0.01,
+                format="%.4f",
+                help="Maximum Residue Limit (mg/kg)"
+            )
+            
+            # Document date
+            document_date = st.date_input(
+                "📅 تاريخ المستند (Document Date)",
+                value=pd.Timestamp.now().date(),
+                help="Date of the sample/document"
+            )
+        
+        # Result (Compliance status) - Arabic only
+        st.markdown("### 📋 Compliance Status")
+        
+        result_options = ["مطابق", "غير مطابق"]
+        result = st.radio(
+            "النتيجة (Result)",
+            options=result_options,
+            horizontal=True,
+            help="Select if the sample is compliant or non-compliant"
+        )
+        
+        # Auto-calculate compliance based on reading vs limits
+        if reading > 0 and limits > 0:
+            auto_result = "غير مطابق" if reading > limits else "مطابق"
+            if auto_result != result:
+                st.info(f"💡 Note: Based on Reading ({reading}) vs Limit ({limits}), system suggests: **{auto_result}**")
+        
+        # Additional notes
+        notes = st.text_area(
+            "📝 ملاحظات (Notes)",
+            placeholder="Any additional notes about this sample...",
+            height=80
+        )
+        
+        # Submit button
+        submitted = st.form_submit_button(
+            "➕ Add Sample to Database",
+            type="primary",
+            use_container_width=True
+        )
+        
+        if submitted:
+            # Validate inputs
+            errors = []
+            
+            if vegetables and vegetable_arabic == "-- Select --":
+                errors.append("Please select a vegetable")
+            elif not vegetable_arabic:
+                errors.append("Please enter a vegetable name")
+            
+            if pesticides and pesticide == "-- Select --":
+                errors.append("Please select a pesticide")
+            elif not pesticide:
+                errors.append("Please enter a pesticide name")
+            
+            if neighborhoods and neighborhood == "-- Select --":
+                errors.append("Please select a neighborhood")
+            elif not neighborhood:
+                errors.append("Please enter a neighborhood")
+            
+            if reading <= 0:
+                errors.append("Reading must be greater than 0")
+            
+            if limits <= 0:
+                errors.append("Limit must be greater than 0")
+            
+            if errors:
+                for error in errors:
+                    st.error(f"❌ {error}")
+                return
+            
+            # ================================================================
+            # CREATE NEW ROW WITH ALL CALCULATED FIELDS
+            # ================================================================
+            
+            # Clean values
+            veg_value = vegetable_arabic if vegetable_arabic != "-- Select --" else ""
+            pest_value = pesticide if pesticide != "-- Select --" else ""
+            neigh_value = neighborhood if neighborhood != "-- Select --" else ""
+            
+            # Calculate derived fields
+            is_compliant = 1 if result == "مطابق" else 0
+            violation = 1 if reading > limits else 0
+            exceedance_ratio = reading / limits if limits > 0 else 0
+            
+            # Log transformations
+            import math
+            log_reading = math.log(reading + 1) if reading > 0 else 0
+            log_limits = math.log(limits + 1) if limits > 0 else 0
+            
+            # Risk score calculation (based on exceedance ratio)
+            if exceedance_ratio <= 0.5:
+                risk_score = 1  # Low risk
+            elif exceedance_ratio <= 1:
+                risk_score = 2  # Medium-low
+            elif exceedance_ratio <= 2:
+                risk_score = 3  # Medium
+            elif exceedance_ratio <= 5:
+                risk_score = 4  # High
+            else:
+                risk_score = 5  # Very high
+            
+            # Date-based calculations
+            doc_timestamp = pd.Timestamp(document_date)
+            year = doc_timestamp.year
+            month = doc_timestamp.month
+            week_of_year = doc_timestamp.isocalendar()[1]
+            
+            # Quarter calculation
+            if month in [1, 2, 3]:
+                quarter = "Q1"
+            elif month in [4, 5, 6]:
+                quarter = "Q2"
+            elif month in [7, 8, 9]:
+                quarter = "Q3"
+            else:
+                quarter = "Q4"
+            
+            # Season calculation (0 = Winter, 1 = Spring, 2 = Summer, 3 = Fall)
+            if month in [12, 1, 2]:
+                season = 0  # Winter
+            elif month in [3, 4, 5]:
+                season = 1  # Spring
+            elif month in [6, 7, 8]:
+                season = 2  # Summer
+            else:
+                season = 3  # Fall
+            
+            # Get vegetable English name from existing data
+            vegetable_english = ""
+            vegetable_category = ""
+            if veg_value:
+                matching = df[df['vegetable_arabic'] == veg_value]
+                if len(matching) > 0:
+                    vegetable_english = matching.iloc[0].get('vegetable_english', '')
+                    vegetable_category = matching.iloc[0].get('vegetable_category', '')
+            
+            # Get neighborhood English name from existing data
+            neighborhood_english = ""
+            if neigh_value:
+                matching = df[df['الحي'] == neigh_value]
+                if len(matching) > 0:
+                    neighborhood_english = matching.iloc[0].get('neighborhood_english', '')
+            
+            # Get pesticide info from existing data
+            pesticide_standardized = pest_value
+            pesticide_group = ""
+            if pest_value:
+                matching = df[df['pesticide'] == pest_value]
+                if len(matching) > 0:
+                    pesticide_standardized = matching.iloc[0].get('pesticide_standardized', pest_value)
+                    pesticide_group = matching.iloc[0].get('pesticide_group', '')
+            
+            # Create new row with ALL columns
+            new_row = {
+                'result': result,  # Arabic only: مطابق or غير مطابق
+                'limits': limits,
+                'reading': reading,
+                'pesticide': pest_value,
+                'vegetable_arabic': veg_value,
+                'document_date': doc_timestamp,
+                'year': year,
+                'month': month,
+                'quarter': quarter,
+                'week_of_year': week_of_year,
+                'source_file': 'manual_entry',
+                'source_year_folder': year,
+                'source_month_folder': doc_timestamp.strftime('%b'),
+                'pesticide_standardized': pesticide_standardized,
+                'pesticide_group': pesticide_group,
+                'vegetable_english': vegetable_english,
+                'is_compliant': is_compliant,
+                'exceedance_ratio': exceedance_ratio,
+                'risk_score': risk_score,
+                'vegetable_category': vegetable_category,
+                'log_reading': log_reading,
+                'log_limits': log_limits,
+                'season': season,
+                'الحي': neigh_value,
+                'neighborhood_english': neighborhood_english,
+                'violation_numeric': violation,
+                'notes': notes if notes else None
+            }
+            
+            try:
+                # Add to session state DataFrame
+                new_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                st.session_state.df = new_df
+                
+                # Save to Excel file
+                data_path = os.path.join(os.path.dirname(__file__), 'processed_data_with_neighborhood.xlsx')
+                
+                if os.path.exists(data_path):
+                    new_df.to_excel(data_path, index=False)
+                    st.success(f"✅ Sample added successfully! Total records: {len(new_df):,}")
+                    
+                    # Show the added row details
+                    with st.expander("📋 View Added Record"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write("**Basic Info:**")
+                            st.write(f"- Vegetable: {veg_value}")
+                            st.write(f"- Pesticide: {pest_value}")
+                            st.write(f"- Neighborhood: {neigh_value}")
+                            st.write(f"- Date: {doc_timestamp.strftime('%Y-%m-%d')}")
+                        with col2:
+                            st.write("**Measurements:**")
+                            st.write(f"- Reading: {reading}")
+                            st.write(f"- Limit: {limits}")
+                            st.write(f"- Result: {result}")
+                            st.write(f"- Risk Score: {risk_score}")
+                        st.write("**Calculated Fields:**")
+                        st.write(f"- Exceedance Ratio: {exceedance_ratio:.4f}")
+                        st.write(f"- Log Reading: {log_reading:.4f}")
+                        st.write(f"- Season: {season} | Quarter: {quarter}")
+                else:
+                    st.warning("⚠️ Sample added to session, but Excel file not found for permanent storage.")
+                    st.info(f"📁 Expected path: {data_path}")
+                
+                # Clear the last query result to refresh data
+                if 'last_query_result' in st.session_state:
+                    st.session_state.last_query_result = None
+                
+            except Exception as e:
+                st.error(f"❌ Error adding sample: {str(e)}")
+                with st.expander("🔍 Error Details"):
+                    st.exception(e)
+
+
+def show_data_entry_sidebar():
+    """Show data entry toggle in sidebar"""
+    
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### ➕ Data Entry")
+        
+        if st.button("📝 Add New Sample", use_container_width=True, key="show_data_entry"):
+            st.session_state.show_data_entry_form = not st.session_state.get('show_data_entry_form', False)
+            st.rerun()
+        
+        if st.session_state.get('show_data_entry_form', False):
+            st.info("📝 Data entry form is open below")
+
+# ============================================================================
 # CHART GENERATION FUNCTIONS
 # ============================================================================
 
@@ -4086,6 +4427,17 @@ def show_chat_page(api_client):
     
     # Always display stored results - this persists across button clicks
     display_stored_results_with_charts()
+
+    # ========================================================================
+    # STEP 6.6: Data Entry Form (when toggled)
+    # ========================================================================
+    
+    # Show data entry button in sidebar
+    show_data_entry_sidebar()
+    
+    # Display data entry form if toggled
+    if st.session_state.get('show_data_entry_form', False):
+        show_data_entry_form()
 
     # ========================================================================
     # STEP 7: Show Chat History (Optional)
