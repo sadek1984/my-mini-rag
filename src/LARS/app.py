@@ -4278,6 +4278,98 @@ def show_chat_page(api_client):
             has_risk = False  # Disable risk assessment
         else:
             has_risk = None # Auto-detect will handle this later
+        
+        # ========================================================================
+        # DATE FILTER SECTION
+        # ========================================================================
+        
+        st.markdown("---")
+        st.markdown("### 📅 Date Filter")
+        
+        # Initialize date filter state
+        if 'date_filter_enabled' not in st.session_state:
+            st.session_state.date_filter_enabled = False
+        if 'date_filter_start' not in st.session_state:
+            st.session_state.date_filter_start = pd.Timestamp('2022-01-01').date()
+        if 'date_filter_end' not in st.session_state:
+            st.session_state.date_filter_end = pd.Timestamp.now().date()
+        
+        # Enable/Disable toggle
+        date_filter_enabled = st.checkbox(
+            "🔘 Enable Date Filter",
+            value=st.session_state.date_filter_enabled,
+            help="When enabled, your queries will be filtered to the selected date range",
+            key="date_filter_checkbox"
+        )
+        st.session_state.date_filter_enabled = date_filter_enabled
+        
+        if date_filter_enabled:
+            from datetime import timedelta
+            today = pd.Timestamp.now().date()
+            
+            # Quick Date Buttons
+            st.markdown("**⚡ Quick Select:**")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button("📅 Today", use_container_width=True, key="qd_today"):
+                    st.session_state.date_filter_start = today
+                    st.session_state.date_filter_end = today
+                
+                if st.button("📆 This Week", use_container_width=True, key="qd_week"):
+                    st.session_state.date_filter_start = today - timedelta(days=today.weekday())
+                    st.session_state.date_filter_end = today
+            
+            with col2:
+                if st.button("🗓️ This Month", use_container_width=True, key="qd_month"):
+                    st.session_state.date_filter_start = today.replace(day=1)
+                    st.session_state.date_filter_end = today
+                
+                if st.button("📊 Last 3 Months", use_container_width=True, key="qd_3months"):
+                    st.session_state.date_filter_start = today - timedelta(days=90)
+                    st.session_state.date_filter_end = today
+            
+            with col3:
+                if st.button("📈 This Year", use_container_width=True, key="qd_year"):
+                    st.session_state.date_filter_start = today.replace(month=1, day=1)
+                    st.session_state.date_filter_end = today
+                
+                if st.button("📚 All Data", use_container_width=True, key="qd_all"):
+                    st.session_state.date_filter_start = pd.Timestamp('2022-01-01').date()
+                    st.session_state.date_filter_end = today
+            
+            # Show current filter with formatting
+            st.markdown("---")
+            start_str = st.session_state.date_filter_start.strftime("%Y-%m-%d")
+            end_str = st.session_state.date_filter_end.strftime("%Y-%m-%d")
+            st.success(f"📅 **{start_str}** → **{end_str}**")
+            
+            # Custom date input using text input (more reliable)
+            with st.expander("📆 Custom Date Range"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    custom_start = st.text_input(
+                        "Start (YYYY-MM-DD)", 
+                        value=start_str,
+                        key="custom_start_input"
+                    )
+                with col2:
+                    custom_end = st.text_input(
+                        "End (YYYY-MM-DD)", 
+                        value=end_str,
+                        key="custom_end_input"
+                    )
+                
+                if st.button("✅ Apply Custom Range", use_container_width=True, key="apply_custom"):
+                    try:
+                        new_start = pd.Timestamp(custom_start).date()
+                        new_end = pd.Timestamp(custom_end).date()
+                        st.session_state.date_filter_start = new_start
+                        st.session_state.date_filter_end = new_end
+                        st.success(f"✅ Custom range applied: {new_start} → {new_end}")
+                        st.rerun()
+                    except:
+                        st.error("❌ Invalid date format. Use YYYY-MM-DD")
     
     # ========================================================================
     # STEP 1: Get DataFrame (adjust based on your app)
@@ -4417,9 +4509,38 @@ def show_chat_page(api_client):
             
             if include_risk:
                 st.success("🎯 Risk assessment enabled")
+            
+            # ================================================================
+            # APPLY DATE FILTER IF ENABLED
+            # ================================================================
+            
+            df_filtered = df.copy()
+            
+            if st.session_state.get('date_filter_enabled', False):
+                start_date = st.session_state.get('date_filter_start')
+                end_date = st.session_state.get('date_filter_end')
                 
+                if start_date and end_date and 'document_date' in df_filtered.columns:
+                    # Convert to datetime for comparison
+                    df_filtered['document_date'] = pd.to_datetime(df_filtered['document_date'], errors='coerce')
+                    start_ts = pd.Timestamp(start_date)
+                    end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)  # Include full end date
+                    
+                    # Apply date filter
+                    df_filtered = df_filtered[
+                        (df_filtered['document_date'] >= start_ts) & 
+                        (df_filtered['document_date'] <= end_ts)
+                    ]
+                    
+                    # Show filter status
+                    st.info(f"📅 Date filter active: {start_date} → {end_date} ({len(df_filtered):,} records)")
+                    
+                    if len(df_filtered) == 0:
+                        st.warning("⚠️ No data found in the selected date range. Try a different range.")
+                        return
+            
             # Use the robust function we defined earlier
-            process_data_query(user_question, df, model, include_risk)
+            process_data_query(user_question, df_filtered, model, include_risk)
 
     # ========================================================================
     # STEP 6.5: Display stored results with chart buttons (PERSISTENT)
