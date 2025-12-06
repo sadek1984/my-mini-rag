@@ -89,10 +89,8 @@ docker compose down -v
 docker compose up --build
 
 
-streamlit run src/LARS/app_backup.py
-
-
 streamlit run src/LARS/app.py
+
 
 what is the gc column specifications
 
@@ -114,3 +112,15 @@ include_risk_assessment : true
 find non compliant samples with bifenthrin in cucumber samples 2023
 Find 'fipronil' in eggplant samples 2022
 
+what are the count of tomato samples that reading more than limits?
+
+ما هو عدد عينات الخيار التي تحتوي علي عدد ٢ مبيد
+ماهي انواع المبيدات في الطماطم و ما عددها فوق الحد و تحت الحد المسموح
+
+ما هي عينات الكوسه و الباذنجان التي تحتوي علي مبيد bifenthrin from 31/01/2022 to 28/08/2023
+######
+ما هي انواع الخضروات الموجودة في حي الاسكان و ما عددها و ماهي العينات فوق الحد المسموح وتحت الحد المسموح
+
+ما عدد عينات الطماطم التي تحتوي علي مبيد البايفنثرن فوق الحد و تحت الحد المسموح
+
+ماهي المبيدات الموجوده في عينة الباذنجان و ما عدد تكرار المبيدات
