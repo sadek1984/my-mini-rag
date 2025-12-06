@@ -4348,28 +4348,23 @@ def show_chat_page(api_client):
             with st.expander("📆 Custom Date Range"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    custom_start = st.text_input(
-                        "Start (YYYY-MM-DD)", 
-                        value=start_str,
-                        key="custom_start_input"
+                    custom_start = st.date_input(
+                        "Start Date", 
+                        value=st.session_state.date_filter_start,
+                        key="custom_start_date"
                     )
                 with col2:
-                    custom_end = st.text_input(
-                        "End (YYYY-MM-DD)", 
-                        value=end_str,
-                        key="custom_end_input"
+                    custom_end = st.date_input(
+                        "End Date", 
+                        value=st.session_state.date_filter_end,
+                        key="custom_end_date"
                     )
                 
                 if st.button("✅ Apply Custom Range", use_container_width=True, key="apply_custom"):
-                    try:
-                        new_start = pd.Timestamp(custom_start).date()
-                        new_end = pd.Timestamp(custom_end).date()
-                        st.session_state.date_filter_start = new_start
-                        st.session_state.date_filter_end = new_end
-                        st.success(f"✅ Custom range applied: {new_start} → {new_end}")
-                        st.rerun()
-                    except:
-                        st.error("❌ Invalid date format. Use YYYY-MM-DD")
+                    st.session_state.date_filter_start = custom_start
+                    st.session_state.date_filter_end = custom_end
+                    st.success(f"✅ Applied: {custom_start} → {custom_end}")
+                    st.rerun()
     
     # ========================================================================
     # STEP 1: Get DataFrame (adjust based on your app)
