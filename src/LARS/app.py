@@ -30,26 +30,21 @@ try:
     if env_path.exists():
         with open(env_path, 'r') as f:
             for line in f:
-                if line.strip().startswith('DEEPSEEK_API_KEY='):
+                if line.strip().startswith('OPENAI_API_KEY='):
                     key = line.strip().split('=', 1)[1].strip().strip('"').strip("'")
                     if key:
-                        os.environ['DEEPSEEK_API_KEY'] = key
-                        print(f"✅ Loaded DEEPSEEK_API_KEY from {env_path}")
+                        os.environ['OPENAI_API_KEY'] = key
+                        print(f"✅ Loaded OPENAI_API_KEY from {env_path}")
                         break
-                # Fallback check for Gemini key just in case needed elsewhere, but focus is DeepSeek
-                if line.strip().startswith('GEMINI_API_KEY=') and 'GEMINI_API_KEY' not in os.environ:
-                     key = line.strip().split('=', 1)[1].strip().strip('"').strip("'")
-                     if key:
-                         os.environ['GEMINI_API_KEY'] = key
     else:
          print(f"⚠️ .env.app file not found at {env_path}")
 
 except Exception as e:
     print(f"⚠️ Could not load .env file: {e}")
 
-if not os.environ.get('DEEPSEEK_API_KEY'):
+if not os.environ.get('OPENAI_API_KEY'):
     # Don't show error immediately as it might be set via system env vars
-    print("⚠️ DEEPSEEK_API_KEY not found in environment or .env file")
+    print("⚠️ OPENAI_API_KEY not found in environment or .env file")
 
 # Add parent directory to path
 # project_root = Path(__file__).parent.parent  # Go from LARS/ to src/
@@ -3717,73 +3712,88 @@ def generate_radar_chart(df: pd.DataFrame, query: str):
     except Exception as e:
         st.error(f"Error generating radar chart: {e}")
 
-def generate_heatmap(df: pd.DataFrame, query: str):
-    """Generate an interactive heatmap from DataFrame"""
-    try:
-        import plotly.graph_objects as go
+def generate_heatmap(df: pd.DataFrame, query: str = ""):
+    """Generate an interactive general heatmap from DataFrame"""
+    
+    st.subheader("📈 Data Exploration Heatmap")
+    
+    if query:
+        try:
+            df_filtered = df.query(query)
+            if len(df_filtered) == 0:
+                st.warning("Query returned no results. Showing full dataset.")
+                df_filtered = df
+        except:
+            st.error("Invalid query syntax")
+            df_filtered = df
+    else:
+        df_filtered = df
+    
+    # Select columns for heatmap
+    numeric_cols = df_filtered.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = df_filtered.select_dtypes(include=['object']).columns.tolist()
+    
+    if len(numeric_cols) < 1:
+        st.warning("No numeric columns available for heatmap")
+        return
+    
+    # Let user choose what to visualize
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        row_col = st.selectbox(
+            "Select row grouping:",
+            options=categorical_cols,
+            index=0 if categorical_cols else None,
+            help="Group data by this categorical column for rows",
+            key="heatmap_row_col"
+        )
+    
+    with col2:
+        value_col = st.selectbox(
+            "Select value to visualize:",
+            options=numeric_cols,
+            index=0,
+            help="Numeric value to show in heatmap",
+            key="heatmap_value_col"
+        )
+    
+    # Aggregate data
+    if row_col and value_col:
+        agg_data = df_filtered.groupby(row_col)[value_col].mean().sort_values(ascending=False)
         
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        # Get top 20 categories for readability
+        top_categories = agg_data.head(20)
         
-        if len(numeric_cols) < 2:
-            st.warning("⚠️ Need at least 2 numeric columns for heatmap. Showing correlation heatmap instead.")
-            # Create correlation heatmap
-            if len(numeric_cols) >= 1:
-                corr_matrix = df[numeric_cols].corr()
-                
-                fig = go.Figure(data=go.Heatmap(
-                    z=corr_matrix.values,
-                    x=corr_matrix.columns,
-                    y=corr_matrix.columns,
-                    colorscale='RdYlGn',
-                    zmid=0,
-                    text=corr_matrix.values,
-                    texttemplate='%{text:.2f}',
-                    textfont={"size": 10},
-                    colorbar=dict(title="Correlation")
-                ))
-                
-                fig.update_layout(
-                    title="Correlation Heatmap",
-                    height=500,
-                    xaxis_title="Variables",
-                    yaxis_title="Variables"
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            return
-        
-        # Create regular heatmap with all numeric columns
-        text_cols = df.select_dtypes(include=['object']).columns.tolist()
-        row_labels = df[text_cols[0]].tolist() if text_cols else [f"Row {i}" for i in range(len(df))]
-        
-        # Limit rows for readability
-        df_subset = df.head(15)
-        row_labels = row_labels[:15]
-        
-        z_data = df_subset[numeric_cols].values
-        
+        # Create heatmap (single column)
         fig = go.Figure(data=go.Heatmap(
-            z=z_data,
-            x=numeric_cols,
-            y=row_labels,
+            z=[top_categories.values],
+            x=[f"{idx}: {val:.1f}" for idx, val in zip(top_categories.index, top_categories.values)],
+            y=["Value"],
             colorscale='Viridis',
-            text=z_data,
+            text=[top_categories.values],
             texttemplate='%{text:.1f}',
-            textfont={"size": 9},
-            colorbar=dict(title="Value")
+            textfont={"size": 12},
+            colorbar=dict(title=value_col),
+            hovertemplate='<b>Category:</b> %{x}<br>' +
+                         '<b>Avg Value:</b> %{z:.1f}<br>' +
+                         '<extra></extra>'
         ))
         
         fig.update_layout(
-            title="Heatmap: Data Values",
-            height=600,
-            xaxis_title="Metrics",
-            yaxis_title="Categories"
+            title=f"Average {value_col} by {row_col}",
+            height=400,
+            xaxis_tickangle=-45,
+            margin=dict(t=50, b=150)
         )
         
         st.plotly_chart(fig, use_container_width=True)
         
-    except Exception as e:
-        st.error(f"Error generating heatmap: {e}")
+        # Show data table
+        with st.expander("View Data Table"):
+            st.dataframe(top_categories.reset_index().rename(
+                columns={row_col: 'Category', value_col: f'Avg_{value_col}'}
+            ))
 
 def generate_scatter_plot(df: pd.DataFrame, query: str):
     """Generate an interactive scatter plot from DataFrame"""
@@ -3897,17 +3907,34 @@ def generate_map_chart(df: pd.DataFrame, query: str):
             neighborhood_col = 'neighborhood_english'
         
         # If no neighborhood in result, try to use full dataset from session state
+        # BUT filter it based on neighborhoods mentioned in the query
         if neighborhood_col is None:
             if 'df' in st.session_state and st.session_state.df is not None:
                 full_df = st.session_state.df
                 if 'الحي' in full_df.columns:
                     neighborhood_col = 'الحي'
-                    map_df = full_df
-                    st.info("📍 Using full dataset for neighborhood map")
                 elif 'neighborhood_english' in full_df.columns:
                     neighborhood_col = 'neighborhood_english'
-                    map_df = full_df
-                    st.info("📍 Using full dataset for neighborhood map")
+                
+                if neighborhood_col:
+                    # Extract neighborhood names mentioned in the query
+                    mentioned_neighborhoods = []
+                    all_neighborhoods = list(NEIGHBORHOOD_COORDS.keys())
+                    
+                    for neighborhood in all_neighborhoods:
+                        if neighborhood in query:
+                            mentioned_neighborhoods.append(neighborhood)
+                    
+                    # Filter data to only mentioned neighborhoods
+                    if mentioned_neighborhoods:
+                        # Filter full_df to only rows matching mentioned neighborhoods
+                        mask = full_df[neighborhood_col].isin(mentioned_neighborhoods)
+                        map_df = full_df[mask].copy()
+                        st.info(f"📍 Showing map for: {', '.join(mentioned_neighborhoods)}")
+                    else:
+                        # No specific neighborhoods mentioned, use full dataset
+                        map_df = full_df
+                        st.info("📍 Showing full neighborhood map")
         
         if neighborhood_col is None:
             st.warning("⚠️ No neighborhood column found in data or session state")
@@ -3946,35 +3973,73 @@ def generate_map_chart(df: pd.DataFrame, query: str):
                 agg_data.loc[idx, 'lat'] += random.uniform(-0.02, 0.02)
                 agg_data.loc[idx, 'lon'] += random.uniform(-0.02, 0.02)
         
-        # Create map
-        fig = px.scatter_mapbox(
-            agg_data,
+        
+        # Create DENSITY HEATMAP instead of bubbles
+        # Prepare data for density heatmap - expand to individual violation points
+        heatmap_points = []
+        
+        for _, row in agg_data.iterrows():
+            # Create points based on violation count (more violations = more density)
+            violation_weight = max(int(row['violation_count']), 1)
+            sample_weight = max(int(row['sample_count']), 1)
+            
+            # Add slight random offset to create density clusters
+            import random
+            
+            # Create MORE points for better visibility (3 points per violation)
+            for _ in range(violation_weight * 3):
+                # Small random offset (0.005 degrees ≈ 500 meters)
+                lat_offset = random.uniform(-0.008, 0.008)
+                lon_offset = random.uniform(-0.008, 0.008)
+                
+                heatmap_points.append({
+                    'lat': row['lat'] + lat_offset,
+                    'lon': row['lon'] + lon_offset,
+                    'neighborhood': row[neighborhood_col],
+                    'intensity': 10  # Higher intensity value for visibility
+                })
+            
+            # Also add background points for all samples (lower intensity)
+            for _ in range(sample_weight):
+                lat_offset = random.uniform(-0.01, 0.01)
+                lon_offset = random.uniform(-0.01, 0.01)
+                
+                heatmap_points.append({
+                    'lat': row['lat'] + lat_offset,
+                    'lon': row['lon'] + lon_offset,
+                    'neighborhood': row[neighborhood_col],
+                    'intensity': 1  # Lower intensity for background
+                })
+        
+        # Convert to DataFrame
+        heatmap_df = pd.DataFrame(heatmap_points)
+        
+        # Create density heatmap with INCREASED visibility settings
+        fig = px.density_mapbox(
+            heatmap_df,
             lat='lat',
             lon='lon',
-            size='sample_count',
-            color='violation_rate',
-            color_continuous_scale='RdYlGn_r',  # Red for high violations, green for low
-            size_max=40,
-            zoom=11,
+            z='intensity',  # Intensity value
+            radius=30,  # INCREASED: Size of each point's influence (was 15)
             center={'lat': 26.33, 'lon': 43.97},
-            hover_name=neighborhood_col,
-            hover_data={
-                'sample_count': True,
-                'violation_count': True,
-                'violation_rate': ':.1f',
-                'lat': False,
-                'lon': False
-            },
-            title='🗺️ خريطة الأحياء - Neighborhood Map (القصيم، السعودية)',
-            height=600
+            zoom=11,
+            mapbox_style='open-street-map',
+            color_continuous_scale=[
+                [0.0, '#00ff00'],  # Bright green
+                [0.3, '#7fff00'],  # Yellow-green
+                [0.5, '#ffff00'],  # Bright yellow
+                [0.7, '#ff8800'],  # Orange
+                [1.0, '#ff0000']   # Bright red
+            ],
+            title='🗺️ خريطة حرارية للمخالفات - Violation Density Heatmap (القصيم، السعودية)',
+            height=600,
+            opacity=0.9  # INCREASED: More opaque (was 0.6)
         )
         
         fig.update_layout(
-            mapbox_style='open-street-map',
             margin={'r': 0, 't': 50, 'l': 0, 'b': 0},
             coloraxis_colorbar=dict(
-                title='Violation Rate %',
-                ticksuffix='%'
+                title='Violation<br>Density'
             )
         )
         
@@ -3986,8 +4051,169 @@ def generate_map_chart(df: pd.DataFrame, query: str):
             display_df.columns = ['الحي / Neighborhood', 'عدد العينات', 'عدد المخالفات', 'نسبة المخالفات %']
             st.dataframe(display_df.sort_values('عدد العينات', ascending=False), use_container_width=True)
         
-        st.caption("📍 Map shows neighborhoods in Qassim Region, Saudi Arabia")
-        st.caption("🔴 Red = High violation rate | 🟢 Green = Low violation rate | Size = Sample count")
+        st.caption("📍 Map shows neighborhood data in Qassim Region - Circle size = samples, Color = violations")
+        st.caption("🔴 Red = Many violations | 🟡 Yellow = Medium | 🟢 Green = Few violations")
+        
+        # ============================================================================
+        # ENHANCED HEATMAPS - ONLY FOR MAP CHART  
+        # ============================================================================
+        
+        st.markdown("---")
+        st.header("🔥 Advanced Heatmap Analysis")
+        
+        # Check if we have enough data for heatmap
+        if 'vegetable_english' in map_df.columns or 'pesticide_standardized' in map_df.columns:
+            
+            # Prepare data for heatmaps
+            pest_col = 'pesticide_standardized' if 'pesticide_standardized' in map_df.columns else 'pesticide'
+            
+            heatmap_data = map_df.groupby(['vegetable_english', pest_col]).agg({
+                'is_compliant': lambda x: (x == 0).sum() if 'is_compliant' in map_df.columns else 0,
+                'reading': 'count'
+            }).reset_index()
+            
+            heatmap_data.columns = ['Vegetable', 'Pesticide', 'Violations', 'Tests']
+            heatmap_data['Violation_Rate'] = heatmap_data['Violations'] / heatmap_data['Tests']
+            
+            # Filter combinations with minimum tests
+            min_tests = st.slider("Minimum tests for heatmap:", 1, 10, 3, 
+                                 help="Filter combinations with too few tests",
+                                 key="heatmap_min_tests")
+            heatmap_filtered = heatmap_data[heatmap_data['Tests'] >= min_tests].copy()
+            
+            if len(heatmap_filtered) >= 3:
+                
+                # ============================================================================
+                # HEATMAP 1: 2D MATRIX
+                # ============================================================================
+                st.subheader("🔥 Pesticide-Vegetable Violation Heatmap")
+                
+                # Pivot data for heatmap
+                pivot_data = heatmap_filtered.pivot_table(
+                    index='Vegetable',
+                    columns='Pesticide',
+                    values='Violation_Rate',
+                    aggfunc='mean',
+                    fill_value=0
+                )
+                
+                # Get top vegetables and pesticides
+                top_veg = heatmap_filtered.groupby('Vegetable')['Violations'].sum().nlargest(12).index.tolist()
+                top_pest = heatmap_filtered.groupby('Pesticide')['Violations'].sum().nlargest(12).index.tolist()
+                
+                # Filter pivot
+                filtered_pivot = pivot_data.loc[
+                    pivot_data.index.isin(top_veg),
+                    pivot_data.columns.isin(top_pest)
+                ]
+                
+                # Create matrix heatmap
+                fig_matrix = go.Figure(data=go.Heatmap(
+                    z=filtered_pivot.values,
+                    x=filtered_pivot.columns,
+                    y=filtered_pivot.index,
+                    colorscale='RdYlGn_r',
+                    text=filtered_pivot.values,
+                    texttemplate='%{text:.0%}',
+                    textfont={"size": 9},
+                    colorbar=dict(title="Violation Rate", tickformat=".0%"),
+                    hovertemplate='<b>Vegetable:</b> %{y}<br><b>Pesticide:</b> %{x}<br><b>Rate:</b> %{z:.1%}<extra></extra>'
+                ))
+                
+                fig_matrix.update_layout(
+                    title=f"Violation Rates Matrix (Top 12 each)",
+                    height=500,
+                    xaxis_title="Pesticide",
+                    yaxis_title="Vegetable",
+                    xaxis_tickangle=-45
+                )
+                
+                st.plotly_chart(fig_matrix, use_container_width=True)
+                
+                # ============================================================================
+                # HEATMAP 2: ENHANCED BUBBLE CHART
+                # ============================================================================
+                st.subheader("⚫ Risk Bubble Chart")
+                
+                top_combos = heatmap_filtered.nlargest(25, 'Violations').copy()
+                
+                # Bubble sizes based on tests
+                if top_combos['Tests'].max() > top_combos['Tests'].min():
+                    bubble_sizes = 15 + (top_combos['Tests'] - top_combos['Tests'].min()) / \
+                                  (top_combos['Tests'].max() - top_combos['Tests'].min()) * 35
+                else:
+                    bubble_sizes = pd.Series([25] * len(top_combos))
+                
+                # Create bubble chart
+                fig_bubble = go.Figure()
+                
+                for risk_level, color, rate_range in [
+                    ('Low', 'green', (0, 0.2)),
+                    ('Medium', 'orange', (0.2, 0.5)),
+                    ('High', 'red', (0.5, 1.0))
+                ]:
+                    mask = (top_combos['Violation_Rate'] >= rate_range[0]) & \
+                           (top_combos['Violation_Rate'] < rate_range[1] if rate_range[1] < 1 else True)
+                    
+                    if mask.any():
+                        subset = top_combos[mask]
+                        subset_sizes = bubble_sizes[mask]
+                        
+                        fig_bubble.add_trace(go.Scatter(
+                            x=subset['Pesticide'],
+                            y=subset['Vegetable'],
+                            mode='markers',
+                            marker=dict(size=subset_sizes, color=color, line=dict(width=1.5, color='black'), opacity=0.8),
+                            name=f'{risk_level} Risk',
+                            text=[f"<b>{r['Vegetable']} + {r['Pesticide']}</b><br>Tests: {r['Tests']}<br>Violations: {r['Violations']}<br>Rate: {r['Violation_Rate']:.1%}" 
+                                  for _, r in subset.iterrows()],
+                            hovertemplate='%{text}<extra></extra>'
+                        ))
+                
+                fig_bubble.update_layout(
+                    title=f'Top {len(top_combos)} Risk Combinations (size=tests)',
+                    height=550,
+                    xaxis_title='Pesticide',
+                    yaxis_title='Vegetable',
+                    xaxis_tickangle=-45,
+                    showlegend=True
+                )
+                
+                st.plotly_chart(fig_bubble, use_container_width=True)
+                
+                # ============================================================================
+                # HEATMAP 3: CORRELATION HEATMAP
+                # ============================================================================
+                st.subheader("📊 Variable Correlation Heatmap")
+                
+                numeric_cols = map_df.select_dtypes(include=[np.number]).columns.tolist()
+                relevant_cols = [c for c in numeric_cols if c not in ['is_compliant', 'season', 'year']]
+                
+                if len(relevant_cols) >= 3:
+                    corr_matrix = map_df[relevant_cols].corr()
+                    
+                    fig_corr = go.Figure(data=go.Heatmap(
+                        z=corr_matrix.values,
+                        x=corr_matrix.columns,
+                        y=corr_matrix.columns,
+                        colorscale='RdBu',
+                        zmid=0,
+                        text=corr_matrix.values,
+                        texttemplate='%{text:.2f}',
+                        textfont={"size": 10},
+                        colorbar=dict(title="Correlation"),
+                        hovertemplate='<b>X:</b> %{x}<br><b>Y:</b> %{y}<br><b>Correlation:</b> %{z:.2f}<extra></extra>'
+                    ))
+                    
+                    fig_corr.update_layout(
+                        title="Numeric Variable Correlations",
+                        height=450,
+                        xaxis_tickangle=-45
+                    )
+                    
+                    st.plotly_chart(fig_corr, use_container_width=True)
+            else:
+                st.info("Not enough data combinations for heatmap analysis (need at least 3)")
         
     except Exception as e:
         st.error(f"Error generating map chart: {e}")
@@ -4011,73 +4237,117 @@ Also include risk assessment calculations:
 - Show risk summary statistics
 """
             
-            prompt = f"""Generate pandas code to answer this question about the dataset.
+            # First, detect the query type to apply the right analysis approach
+            query_lower = query.lower()
+            
+            # Detect query type
+            is_trend_query = any(kw in query_lower for kw in ['trend', 'by year', 'over time', 'yearly', 'annual', 'year over year', 'from 2', 'to 2'])
+            is_pesticide_query = any(kw in query_lower for kw in ['pesticide', 'which pesticide', 'top pesticide', 'most violations', 'pesticides with'])
+            is_vegetable_arabic_query = any(kw in query for kw in ['الخضروات', 'عدد', 'فوق الحد', 'تحت الحد', 'الحي'])
+            is_compliance_query = any(kw in query_lower for kw in ['compliance', 'compliant', 'non-compliant', 'violation rate'])
+            
+            # Build context-specific instructions
+            if is_trend_query:
+                specific_instructions = """
+**QUERY TYPE DETECTED: TREND/YEARLY ANALYSIS**
+- Group data by 'year' column
+- Calculate counts, rates, or averages per year
+- Result should show trends: year | metric1 | metric2 | ...
+- Sort by year ascending
+- DO NOT use Arabic column names for this query
+- Example columns: 'year', 'total_samples', 'violations', 'compliance_rate'
+"""
+            elif is_pesticide_query:
+                specific_instructions = """
+**QUERY TYPE DETECTED: PESTICIDE ANALYSIS**
+- Group by 'pesticide_standardized' or similar pesticide column
+- Count violations using 'is_compliant' == 0 or 'result' containing 'غير مطابق'
+- Show: pesticide name | total tests | violations | violation_rate
+- Sort by violations or violation_rate descending
+- DO NOT use Arabic column names unless specifically asked
+- Show top 10-20 results
+"""
+            elif is_compliance_query:
+                specific_instructions = """
+**QUERY TYPE DETECTED: COMPLIANCE ANALYSIS**
+- Calculate compliance metrics (compliant vs non-compliant)
+- Use 'is_compliant' column if available (1=compliant, 0=violation)
+- Or check 'result' column for 'مطابق' (compliant) vs 'غير مطابق' (non-compliant)
+- Show rates as percentages
+- Group by the relevant dimension (year, vegetable, pesticide, etc.)
+"""
+            elif is_vegetable_arabic_query:
+                specific_instructions = """
+**QUERY TYPE DETECTED: VEGETABLE STATISTICS (ARABIC FORMAT)**
+- ONLY use this format when user explicitly asks in Arabic or wants Arabic output
+- Group by vegetable (use 'vegetable_arabic' column)
+- Calculate: total samples, above limit, below limit
+- Use Arabic column names: 'عدد العينات', 'فوق الحد', 'تحت الحد'
+- Filter by neighborhood if mentioned in query
+"""
+            else:
+                specific_instructions = """
+**QUERY TYPE: GENERAL ANALYSIS**
+- Analyze the data based on the specific question
+- Use appropriate groupby, aggregation, or filtering
+- Use English column names unless Arabic is specifically requested
+- Return a clear, well-formatted DataFrame
+"""
+            
+            prompt = f"""Generate pandas code to answer this question about the pesticide testing dataset.
+
+**IMPORTANT: READ THE QUESTION CAREFULLY AND ANSWER EXACTLY WHAT IS ASKED!**
 
 Dataset Information:
 - Columns: {list(df.columns)}
 - Shape: {df.shape}
-- First 3 rows:
+- Sample data (first 3 rows):
 {df.head(3).to_string()}
 
-Question: {query}
+User Question: {query}
 {risk_instruction}
 
+{specific_instructions}
+
 **AVAILABLE VARIABLES IN SCOPE:**
-- df: The main DataFrame
+- df: The main DataFrame (already loaded)
 - pd: pandas module
 - np: numpy module  
-- query: The user's question as a string (USE THIS, don't hardcode the question text!)
+- query: The user's question as a string
 
-Requirements:
-1. Use pandas (imported as pd) for all operations
-2. The DataFrame variable is 'df'
-3. Store final result in variable 'result'
-4. Handle missing values appropriately
-5. Return clean, readable output in a TABLE format
-6. Include proper error handling
-7. Add comments for clarity
-8. CRITICAL: When matching Arabic columns (like 'الحي' or 'vegetable_arabic'), check `df.columns` carefully.
-   - If searching for 'الحي' (Neighborhood), try BOTH 'الحي' (with two dots) and 'الحى' (with Alif Maqsura) or check which one exists in `df.columns`.
-   - Use `.str.strip()` to remove whitespace from string columns if needed.
-   - For string matching, consider using `.str.contains()` to be more robust.
-9. SPECIFIC RULE FOR VEGETABLE/NEIGHBORHOOD STATISTICS WITH EXACT LIMIT CALCULATIONS:
-   - Scenario: User asks for vegetable counts, above limit, and below limit (e.g., "ما هي انواع الخضروات... عددها... فوق الحد... تحت الحد")
-   - CRITICAL: You must calculate statistics *PER VEGETABLE* using EXACT calculations
-   - **IMPORTANT: DO NOT CREATE A FUNCTION! Execute the code directly and assign to 'result'**
-   
-   **STEP-BY-STEP LOGIC:**
-   STEP 1 - Create clean copy:
-   - df_temp = df.copy()
-   - Convert reading and limits to numeric with pd.to_numeric(..., errors='coerce')
-   
-   STEP 2 - Calculate violation status:
-   - If 'result' column exists: check for 'غير مطابق' pattern
-   - Otherwise: df_temp['is_above_limit'] = (reading_numeric > limits_numeric).astype(int)
-   
-   STEP 3 - Filter by neighborhood:
-   - Create neighborhood_mapping dict with common Arabic-English pairs
-   - **USE THE 'query' VARIABLE** to check which neighborhood is mentioned (e.g., if 'الاسكان' in query)
-   - Filter subset using 'neighborhood_english' column (preferred) or Arabic column
-   
-   STEP 4 - Group by vegetable:
-   - Use 'vegetable_arabic' if available, else 'vegetable_english'
-   - grouped = subset.groupby(group_column).agg(total_samples=('is_above_limit', 'count'), above_limit=('is_above_limit', 'sum')).reset_index()
-   - grouped['below_limit'] = grouped['total_samples'] - grouped['above_limit']
-   
-   STEP 5 - Format output:
-   - Rename columns to: group_column -> 'vegetable_arabic', total_samples -> 'عدد العينات', above_limit -> 'فوق الحد', below_limit -> 'تحت الحد'
-   - Sort by 'عدد العينات' descending
-   - **ASSIGN TO result: result = grouped.rename(...).sort_values(...)**
-   
-   STEP 6 - Handle empty case:
-   - If no data: result = pd.DataFrame(columns=['vegetable_arabic', 'عدد العينات', 'فوق الحد', 'تحت الحد'])
-   
-   **CRITICAL REMINDERS:**
-   - Execute code DIRECTLY, do NOT wrap in a function
-   - Always end with: result = [your final DataFrame]
-   - The variable 'result' must be assigned in the global scope
-   - Do NOT use 'return' statement
-   - USE the 'query' variable, don't hardcode the question text
+**CRITICAL REQUIREMENTS:**
+1. ANSWER THE EXACT QUESTION - don't provide generic summaries
+2. Store final result in variable 'result'
+3. Execute code DIRECTLY - do NOT wrap in a function
+4. Do NOT use 'return' statement
+5. Handle missing values with .fillna() or dropna()
+
+**KEY COLUMNS TO USE:**
+- 'year' - for yearly analysis
+- 'is_compliant' - 1=compliant, 0=violation
+- 'pesticide_standardized' - pesticide name
+- 'vegetable_english' - vegetable name in English
+- 'reading' - measured value
+- 'limits' - maximum allowed limit
+
+**EXAMPLE CODE PATTERNS:**
+
+For "compliance trends by year":
+```python
+result = df.groupby('year').agg(
+    total_samples=('is_compliant', 'count'),
+    compliant=('is_compliant', 'sum'),
+    violations=('is_compliant', lambda x: (x == 0).sum())
+).reset_index()
+result['compliance_rate'] = (result['compliant'] / result['total_samples'] * 100).round(2)
+result = result.sort_values('year')
+```
+
+For "pesticides with most violations":
+```python
+result = df[df['is_compliant'] == 0].groupby('pesticide_standardized').size().reset_index(name='violations')
+result = result.sort_values('violations', ascending=False).head(15)
+```
 
 Generate ONLY the Python code wrapped in ```python``` markers:"""
 
@@ -4088,9 +4358,9 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                 # Check if it looks like an OpenAI/DeepSeek client
                 if hasattr(model, 'chat') and hasattr(model.chat, 'completions'):
                    response = model.chat.completions.create(
-                       model="deepseek-chat", 
+                       model="gpt-4o-mini", 
                        messages=[
-                           {"role": "system", "content": "You are a Python data analysis expert. You are executing code inside an existing environment where 'df' (pandas DataFrame) is ALREADY defined. DO NOT load data. DO NOT define functions. Write script code directly. Assign final dataframe to 'result' variable. Output ONLY python code."},
+                           {"role": "system", "content": "You are a Python data analysis expert. Output ONLY python code. 'df' (DataFrame) and 'query' (str) are already defined. Do not define functions."},
                            {"role": "user", "content": prompt}
                        ],
                        temperature=0.0
@@ -4116,7 +4386,7 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                 else:
                     generated_code = generated_text.strip()
             
-            local_vars = {
+            exec_globals = {
                 'df': df.copy(),
                 'pd': pd,
                 'np': np,
@@ -4124,9 +4394,9 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                 'result': None
             }
             
-            exec(generated_code, {}, local_vars)
+            exec(generated_code, exec_globals)
             
-            result = local_vars.get('result')
+            result = exec_globals.get('result')
             
             # Store results in session state for persistence across button clicks
             st.session_state.last_query_result = result
@@ -4146,8 +4416,11 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                 Example: `result = df.groupby(...).agg(...)`
                 """)
             elif isinstance(result, pd.DataFrame):
-                # Show statistics for vegetable queries
-                if 'vegetable_arabic' in result.columns and 'عدد العينات' in result.columns:
+                # Smart metrics display based on result type
+                result_cols = set(result.columns)
+                
+                # Type 1: Arabic vegetable statistics format
+                if 'vegetable_arabic' in result_cols and 'عدد العينات' in result_cols:
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         try:
@@ -4157,16 +4430,50 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                             st.metric("🟢 Total Samples", len(result))
                     with col2:
                         try:
-                            above = result['فوق الحد'].sum() if 'فوق الحد' in result.columns else 0
+                            above = result['فوق الحد'].sum() if 'فوق الحد' in result_cols else 0
                             st.metric("🔴 Above Limit", above)
                         except:
                             st.metric("🔴 Above Limit", "N/A")
                     with col3:
                         try:
-                            below = result['تحت الحد'].sum() if 'تحت الحد' in result.columns else 0
+                            below = result['تحت الحد'].sum() if 'تحت الحد' in result_cols else 0
                             st.metric("🟡 Below Limit", below)
                         except:
                             st.metric("🟡 Below Limit", "N/A")
+                
+                # Type 2: Yearly trend data
+                elif 'year' in result_cols and len(result) <= 10:
+                    cols = result_cols - {'year'}
+                    metric_cols = [c for c in cols if pd.api.types.is_numeric_dtype(result[c])]
+                    if metric_cols:
+                        display_cols = metric_cols[:4]  # Show up to 4 metrics
+                        metric_columns = st.columns(len(display_cols))
+                        for i, col_name in enumerate(display_cols):
+                            with metric_columns[i]:
+                                try:
+                                    if 'rate' in col_name.lower() or 'percent' in col_name.lower():
+                                        latest = result[col_name].iloc[-1]
+                                        st.metric(f"📈 Latest {col_name.replace('_', ' ').title()}", f"{latest:.1f}%")
+                                    else:
+                                        total = result[col_name].sum()
+                                        st.metric(f"📊 Total {col_name.replace('_', ' ').title()}", f"{total:,.0f}")
+                                except:
+                                    pass
+                
+                # Type 3: Pesticide/violation analysis
+                elif 'pesticide_standardized' in result_cols or 'pesticide' in str(result_cols).lower():
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("🧪 Pesticides Analyzed", len(result))
+                    with col2:
+                        viol_col = [c for c in result_cols if 'violation' in c.lower()]
+                        if viol_col:
+                            total_violations = result[viol_col[0]].sum()
+                            st.metric("⚠️ Total Violations", f"{total_violations:,.0f}")
+                
+                # Type 4: Generic result - just show row count
+                else:
+                    st.metric("📋 Results Found", len(result))
                 
                 st.dataframe(result, use_container_width=True)
                 
@@ -4274,8 +4581,8 @@ def display_stored_results_with_charts():
     if 'selected_chart' not in st.session_state:
         st.session_state.selected_chart = None
     
-    # Create columns for chart buttons (7 buttons now)
-    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    # Create columns for chart buttons (6 buttons now - removed Heatmap)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
         if st.button("📊 Bar", use_container_width=True, key="btn_bar_stored"):
@@ -4294,14 +4601,10 @@ def display_stored_results_with_charts():
             st.session_state.selected_chart = "radar"
     
     with col5:
-        if st.button("🔥 Heat", use_container_width=True, key="btn_heatmap_stored"):
-            st.session_state.selected_chart = "heatmap"
-    
-    with col6:
         if st.button("💠 Scatter", use_container_width=True, key="btn_scatter_stored"):
             st.session_state.selected_chart = "scatter"
     
-    with col7:
+    with col6:
         if st.button("🗺️ Map", use_container_width=True, key="btn_map_stored"):
             st.session_state.selected_chart = "map"
     
@@ -4314,7 +4617,6 @@ def display_stored_results_with_charts():
             "line": ("📈 Line Chart", generate_line_chart),
             "pie": ("🥧 Pie Chart", generate_pie_chart),
             "radar": ("🎯 Radar Chart", generate_radar_chart),
-            "heatmap": ("🔥 Heatmap", generate_heatmap),
             "scatter": ("💠 Scatter Plot", generate_scatter_plot),
             "map": ("🗺️ Neighborhood Map", generate_map_chart)
         }
@@ -4426,7 +4728,7 @@ def show_chat_page(api_client):
     """
     
     st.header("💬 AI Assistant 🌱")
-    st.caption("Powered by DeepSeek - Ask questions in natural language")
+    st.caption("Powered by GPT-4o-mini - Ask questions in natural language")
     
     # ISO Document Management in Sidebar
     with st.sidebar:
@@ -4586,26 +4888,21 @@ def show_chat_page(api_client):
     # STEP 2: Initialize Gemini
     # ========================================================================
     
-    api_key = os.environ.get('DEEPSEEK_API_KEY')
-    
-    # Fallback to Gemini key if user pasted DeepSeek key there
-    if not api_key and os.environ.get('GEMINI_API_KEY'):
-        api_key = os.environ.get('GEMINI_API_KEY')
+    api_key = os.environ.get('OPENAI_API_KEY')
     
     if not api_key:
-        st.error("⚠️ DEEPSEEK_API_KEY not set")
+        st.error("⚠️ OPENAI_API_KEY not set")
         st.info("""
         **How to fix:**
-        1. Get your API key from DeepSeek
-        2. Set it in your .env.app file as `DEEPSEEK_API_KEY`
+        1. Get your API key from OpenAI
+        2. Set it in your .env.app file as `OPENAI_API_KEY`
         """)
         return
     
-    # Configure DeepSeek via OpenAI client
+    # Configure OpenAI Client
     try:
         model = OpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com"
+            api_key=api_key
         )
     except Exception as e:
         st.error(f"Failed to initialize DeepSeek client: {e}")

@@ -84,7 +84,7 @@ alembic upgrade head
 docker compose exec fastapi ls -la /app/data/2024/Feb/
 # ______________________________________________________
 
-docker compose down -v
+docker compose down 
 
 docker compose up --build
 
@@ -125,4 +125,8 @@ what are the count of tomato samples that reading more than limits?
 
 ماهي المبيدات الموجوده في عينة الباذنجان و ما عدد تكرار المبيدات
 
-ماهي المبيدات في حي الاسكان و الصفراء و الموطأ
+ماهي المبيدات في حي الإسكان و الصفراء و الموطأ
+
+اعرض الاحياء في ترتيب تنازلي من الاكثر الي الاقل مخالفه
+
+Show me violations by neighborhood
