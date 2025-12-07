@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 # Import your existing NLP controller
 import os
-import google.generativeai as genai
+from openai import OpenAI
 
 # Securely load API Key from docker/env/.env.app
 try:
@@ -30,21 +30,26 @@ try:
     if env_path.exists():
         with open(env_path, 'r') as f:
             for line in f:
-                if line.strip().startswith('GEMINI_API_KEY='):
+                if line.strip().startswith('DEEPSEEK_API_KEY='):
                     key = line.strip().split('=', 1)[1].strip().strip('"').strip("'")
                     if key:
-                        os.environ['GEMINI_API_KEY'] = key
-                        print(f"✅ Loaded GEMINI_API_KEY from {env_path}")
+                        os.environ['DEEPSEEK_API_KEY'] = key
+                        print(f"✅ Loaded DEEPSEEK_API_KEY from {env_path}")
                         break
+                # Fallback check for Gemini key just in case needed elsewhere, but focus is DeepSeek
+                if line.strip().startswith('GEMINI_API_KEY=') and 'GEMINI_API_KEY' not in os.environ:
+                     key = line.strip().split('=', 1)[1].strip().strip('"').strip("'")
+                     if key:
+                         os.environ['GEMINI_API_KEY'] = key
     else:
          print(f"⚠️ .env.app file not found at {env_path}")
 
 except Exception as e:
     print(f"⚠️ Could not load .env file: {e}")
 
-if not os.environ.get('GEMINI_API_KEY'):
+if not os.environ.get('DEEPSEEK_API_KEY'):
     # Don't show error immediately as it might be set via system env vars
-    print("⚠️ GEMINI_API_KEY not found in environment or .env file")
+    print("⚠️ DEEPSEEK_API_KEY not found in environment or .env file")
 
 # Add parent directory to path
 # project_root = Path(__file__).parent.parent  # Go from LARS/ to src/
@@ -3828,6 +3833,167 @@ def generate_scatter_plot(df: pd.DataFrame, query: str):
     except Exception as e:
         st.error(f"Error generating scatter plot: {e}")
 
+def generate_map_chart(df: pd.DataFrame, query: str):
+    """Generate an interactive map chart for neighborhoods in القصيم, السعودية"""
+    try:
+        import plotly.express as px
+        import plotly.graph_objects as go
+        
+        # Neighborhood coordinates for Buraydah/Qassim region
+        # Format: {Arabic name: (latitude, longitude), English name: (latitude, longitude)}
+        NEIGHBORHOOD_COORDS = {
+            # Arabic names
+            'الموطأ': (26.3650, 43.9550),
+            'الاسكان': (26.3580, 43.9420),
+            'الأفق': (26.3450, 43.9680),
+            'الافق': (26.3450, 43.9680),
+            'الريان': (26.3200, 43.9600),
+            'النخيل': (26.3400, 43.9800),
+            'الصفراء': (26.3700, 43.9300),
+            'الخليج': (26.3100, 43.9700),
+            'السلام': (26.3500, 43.9400),
+            'الفيصلية': (26.3300, 43.9500),
+            'المنار': (26.3250, 43.9350),
+            'الراشد': (26.3150, 43.9450),
+            'الحمر': (26.3400, 43.9250),
+            'الضاحي': (26.3050, 43.9550),
+            'قرطبة': (26.2950, 43.9650),
+            'الوادي': (26.3550, 43.9700),
+            'المروج': (26.3600, 43.9850),
+            'الجردة': (26.3350, 43.9150),
+            'البصر': (26.3750, 43.9750),
+            'الغدير': (26.2900, 43.9400),
+            'المحمدية': (26.3480, 43.9380),
+            'الربوة': (26.3380, 43.9280),
+            'النزهة': (26.3280, 43.9580),
+            'الورود': (26.3180, 43.9380),
+            'الروضة': (26.3080, 43.9280),
+            'الحزم': (26.2980, 43.9480),
+            'العليا': (26.3880, 43.9480),
+            # English names
+            'Al Mowata': (26.3650, 43.9550),
+            'Al Iskan': (26.3580, 43.9420),
+            'Al Ufuq': (26.3450, 43.9680),
+            'Al Rayyan': (26.3200, 43.9600),
+            'Al Nakhil': (26.3400, 43.9800),
+            'Al Safra': (26.3700, 43.9300),
+            'Al Khaleej': (26.3100, 43.9700),
+            'Al Salam': (26.3500, 43.9400),
+            'Al Faisaliyah': (26.3300, 43.9500),
+            'Al Manar': (26.3250, 43.9350),
+            'Al Rashid': (26.3150, 43.9450),
+        }
+        
+        # DEFAULT: Buraydah city center
+        DEFAULT_COORDS = (26.3300, 43.9750)
+        
+        # Check if we have neighborhood data in the result
+        neighborhood_col = None
+        map_df = df  # Start with the query result
+        
+        if 'الحي' in df.columns:
+            neighborhood_col = 'الحي'
+        elif 'neighborhood_english' in df.columns:
+            neighborhood_col = 'neighborhood_english'
+        
+        # If no neighborhood in result, try to use full dataset from session state
+        if neighborhood_col is None:
+            if 'df' in st.session_state and st.session_state.df is not None:
+                full_df = st.session_state.df
+                if 'الحي' in full_df.columns:
+                    neighborhood_col = 'الحي'
+                    map_df = full_df
+                    st.info("📍 Using full dataset for neighborhood map")
+                elif 'neighborhood_english' in full_df.columns:
+                    neighborhood_col = 'neighborhood_english'
+                    map_df = full_df
+                    st.info("📍 Using full dataset for neighborhood map")
+        
+        if neighborhood_col is None:
+            st.warning("⚠️ No neighborhood column found in data or session state")
+            st.info("💡 Try asking a question that includes neighborhood data, or use this map with the full dataset.")
+            return
+        
+        # Use map_df instead of df from here
+        
+        # Aggregate data by neighborhood
+        agg_data = map_df.groupby(neighborhood_col).agg({
+            neighborhood_col: 'count'
+        }).rename(columns={neighborhood_col: 'sample_count'}).reset_index()
+        
+        # Add violation count if available
+        if 'violation_numeric' in map_df.columns:
+            violations = map_df.groupby(neighborhood_col)['violation_numeric'].sum().reset_index()
+            violations.columns = [neighborhood_col, 'violation_count']
+            agg_data = agg_data.merge(violations, on=neighborhood_col, how='left')
+            agg_data['violation_rate'] = (agg_data['violation_count'] / agg_data['sample_count'] * 100).round(1)
+        else:
+            agg_data['violation_count'] = 0
+            agg_data['violation_rate'] = 0
+        
+        # Add coordinates
+        agg_data['lat'] = agg_data[neighborhood_col].apply(
+            lambda x: NEIGHBORHOOD_COORDS.get(x, DEFAULT_COORDS)[0]
+        )
+        agg_data['lon'] = agg_data[neighborhood_col].apply(
+            lambda x: NEIGHBORHOOD_COORDS.get(x, DEFAULT_COORDS)[1]
+        )
+        
+        # Add small random offset for neighborhoods with same/default coords
+        import random
+        for idx in agg_data.index:
+            if agg_data.loc[idx, 'lat'] == DEFAULT_COORDS[0]:
+                agg_data.loc[idx, 'lat'] += random.uniform(-0.02, 0.02)
+                agg_data.loc[idx, 'lon'] += random.uniform(-0.02, 0.02)
+        
+        # Create map
+        fig = px.scatter_mapbox(
+            agg_data,
+            lat='lat',
+            lon='lon',
+            size='sample_count',
+            color='violation_rate',
+            color_continuous_scale='RdYlGn_r',  # Red for high violations, green for low
+            size_max=40,
+            zoom=11,
+            center={'lat': 26.33, 'lon': 43.97},
+            hover_name=neighborhood_col,
+            hover_data={
+                'sample_count': True,
+                'violation_count': True,
+                'violation_rate': ':.1f',
+                'lat': False,
+                'lon': False
+            },
+            title='🗺️ خريطة الأحياء - Neighborhood Map (القصيم، السعودية)',
+            height=600
+        )
+        
+        fig.update_layout(
+            mapbox_style='open-street-map',
+            margin={'r': 0, 't': 50, 'l': 0, 'b': 0},
+            coloraxis_colorbar=dict(
+                title='Violation Rate %',
+                ticksuffix='%'
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Show data table
+        with st.expander("📊 Neighborhood Statistics"):
+            display_df = agg_data[[neighborhood_col, 'sample_count', 'violation_count', 'violation_rate']].copy()
+            display_df.columns = ['الحي / Neighborhood', 'عدد العينات', 'عدد المخالفات', 'نسبة المخالفات %']
+            st.dataframe(display_df.sort_values('عدد العينات', ascending=False), use_container_width=True)
+        
+        st.caption("📍 Map shows neighborhoods in Qassim Region, Saudi Arabia")
+        st.caption("🔴 Red = High violation rate | 🟢 Green = Low violation rate | Size = Sample count")
+        
+    except Exception as e:
+        st.error(f"Error generating map chart: {e}")
+        with st.expander("🔍 Error Details"):
+            st.exception(e)
+
 def process_data_query(query: str, df: pd.DataFrame, model, include_risk: bool = False):
     """Process data analysis queries using Gemini with risk assessment option"""
     
@@ -3915,18 +4081,40 @@ Requirements:
 
 Generate ONLY the Python code wrapped in ```python``` markers:"""
 
-            response = model.generate_content(prompt)
+            # Generate response using DeepSeek (first priority) or Gemini (fallback)
+            generated_text = ""
             
-            code_match = re.search(r'```python\n(.*?)```', response.text, re.DOTALL)
+            try:
+                # Check if it looks like an OpenAI/DeepSeek client
+                if hasattr(model, 'chat') and hasattr(model.chat, 'completions'):
+                   response = model.chat.completions.create(
+                       model="deepseek-chat", 
+                       messages=[
+                           {"role": "system", "content": "You are a Python data analysis expert. You are executing code inside an existing environment where 'df' (pandas DataFrame) is ALREADY defined. DO NOT load data. DO NOT define functions. Write script code directly. Assign final dataframe to 'result' variable. Output ONLY python code."},
+                           {"role": "user", "content": prompt}
+                       ],
+                       temperature=0.0
+                   )
+                   generated_text = response.choices[0].message.content
+                else:
+                    # Assume Gemini GenerativeModel
+                    response = model.generate_content(prompt)
+                    generated_text = response.text
+            except Exception as gen_error:
+                # If DeepSeek model name fails, try a generic one or fallback
+                st.error(f"Generation failed: {gen_error}")
+                raise gen_error
+
+            code_match = re.search(r'```python\n(.*?)```', generated_text, re.DOTALL)
             
             if code_match:
                 generated_code = code_match.group(1).strip()
             else:
-                code_match = re.search(r'```\n(.*?)```', response.text, re.DOTALL)
+                code_match = re.search(r'```\n(.*?)```', generated_text, re.DOTALL)
                 if code_match:
                     generated_code = code_match.group(1).strip()
                 else:
-                    generated_code = response.text.strip()
+                    generated_code = generated_text.strip()
             
             local_vars = {
                 'df': df.copy(),
@@ -4086,8 +4274,8 @@ def display_stored_results_with_charts():
     if 'selected_chart' not in st.session_state:
         st.session_state.selected_chart = None
     
-    # Create columns for chart buttons
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    # Create columns for chart buttons (7 buttons now)
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
     
     with col1:
         if st.button("📊 Bar", use_container_width=True, key="btn_bar_stored"):
@@ -4113,6 +4301,10 @@ def display_stored_results_with_charts():
         if st.button("💠 Scatter", use_container_width=True, key="btn_scatter_stored"):
             st.session_state.selected_chart = "scatter"
     
+    with col7:
+        if st.button("🗺️ Map", use_container_width=True, key="btn_map_stored"):
+            st.session_state.selected_chart = "map"
+    
     # Display selected chart
     if st.session_state.selected_chart:
         st.markdown("---")
@@ -4123,7 +4315,8 @@ def display_stored_results_with_charts():
             "pie": ("🥧 Pie Chart", generate_pie_chart),
             "radar": ("🎯 Radar Chart", generate_radar_chart),
             "heatmap": ("🔥 Heatmap", generate_heatmap),
-            "scatter": ("💠 Scatter Plot", generate_scatter_plot)
+            "scatter": ("💠 Scatter Plot", generate_scatter_plot),
+            "map": ("🗺️ Neighborhood Map", generate_map_chart)
         }
         
         chart_name, chart_func = chart_mapping[st.session_state.selected_chart]
@@ -4233,7 +4426,7 @@ def show_chat_page(api_client):
     """
     
     st.header("💬 AI Assistant 🌱")
-    st.caption("Powered by Gemini - Ask questions in natural language")
+    st.caption("Powered by DeepSeek - Ask questions in natural language")
     
     # ISO Document Management in Sidebar
     with st.sidebar:
@@ -4393,21 +4586,30 @@ def show_chat_page(api_client):
     # STEP 2: Initialize Gemini
     # ========================================================================
     
-    api_key = os.environ.get('GEMINI_API_KEY')
+    api_key = os.environ.get('DEEPSEEK_API_KEY')
+    
+    # Fallback to Gemini key if user pasted DeepSeek key there
+    if not api_key and os.environ.get('GEMINI_API_KEY'):
+        api_key = os.environ.get('GEMINI_API_KEY')
     
     if not api_key:
-        st.error("⚠️ GEMINI_API_KEY not set")
+        st.error("⚠️ DEEPSEEK_API_KEY not set")
         st.info("""
         **How to fix:**
-        1. Get your API key from: https://makersuite.google.com/app/apikey
-        2. Set it in your code: `os.environ['GEMINI_API_KEY'] = "your-key"`
-        3. Or set as environment variable: `export GEMINI_API_KEY="your-key"`
+        1. Get your API key from DeepSeek
+        2. Set it in your .env.app file as `DEEPSEEK_API_KEY`
         """)
         return
     
-    # Configure Gemini
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    # Configure DeepSeek via OpenAI client
+    try:
+        model = OpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com"
+        )
+    except Exception as e:
+        st.error(f"Failed to initialize DeepSeek client: {e}")
+        return
     
     # ========================================================================
     # STEP 3: Show Instructions
