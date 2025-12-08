@@ -1,4 +1,15 @@
-# mini-rag
+# LARS - Laboratory Analytics & Risk System
+
+> 🔒 **Security Notice**: This system implements **Schema-Only Prompting** for AI queries. No sensitive laboratory data (client names, test results, sample IDs) is sent to external APIs. Only metadata (column names, types, structure) is transmitted. See [Security Documentation](docs/SECURITY_SCHEMA_ONLY_PROMPTING.md) for details.
+
+## Features
+- 📊 **Pesticide Data Analysis** - AI-powered analytics for laboratory test results
+- 🔬 **ISO 17025 Compliance** - Built for accredited laboratories
+- 🤖 **Smart AI Assistant** - Natural language queries in Arabic and English
+- 🔒 **Privacy-First Design** - Schema-only prompting ensures data never leaves your server
+- 📈 **Predictive Analytics** - Trend analysis and risk assessment
+- 🗺️ **Interactive Maps** - Geographic visualization of compliance data
+
 This is a minimal implementation of the RAG model for Excel files retrieval.
 ## Requirements ›
 - Python 3.8 or later

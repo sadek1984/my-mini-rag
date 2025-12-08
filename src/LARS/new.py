@@ -2433,13 +2433,68 @@ Also include risk assessment calculations:
 - Show risk summary statistics
 """
             
+            # 🔒 SCHEMA-ONLY PROMPTING - Privacy Protection
+            # Generate DataFrame metadata WITHOUT exposing actual sensitive data
+            import io
+            
+            # Get column types as markdown table
+            dtypes_markdown = df.dtypes.to_frame('Type').to_markdown()
+            
+            # Get structure info (column names, non-null counts, memory usage)
+            buffer = io.StringIO()
+            df.info(buf=buffer)
+            df_info_str = buffer.getvalue()
+            
+            # Get sample statistics (no actual values, just ranges/stats)
+            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            sample_stats = ""
+            if numeric_cols:
+                stats_df = df[numeric_cols].describe()
+                # Get min, max, mean from the describe output (these are rows, not columns)
+                stats_summary = stats_df.loc[['min', 'max', 'mean']]
+                sample_stats = f"\nNumeric column ranges:\n{stats_summary.to_markdown()}"
+            
+            # 🆕 Add categorical column info (unique counts, NO actual values for sensitive columns)
+            categorical_info = "\n**Categorical Columns Info:**\n"
+            for col in df.select_dtypes(include=['object']).columns:
+                unique_count = df[col].nunique()
+                # Don't expose sensitive data like client names or sample IDs
+                if col in ['client_name', 'sample_id', 'sample_code']:
+                    categorical_info += f"- `{col}`: {unique_count} unique values (sensitive, not shown)\n"
+                else:
+                    categorical_info += f"- `{col}`: {unique_count} unique values\n"
+            
+            # 🆕 Add example value patterns (generic, non-sensitive)
+            value_patterns = """
+**Common Value Patterns (Generic Examples):**
+- `vegetable_english`: English vegetable names (e.g., 'Tomato', 'Cucumber', 'Pepper')
+- `vegetable_arabic`: Arabic vegetable names (e.g., 'طماطم', 'خيار', 'فلفل')
+- `pesticide_standardized`: English pesticide names (use for filtering)
+- `pesticide_arabic`: Arabic pesticide names (translate using pesticide_mapping)
+- `neighborhood_arabic`: Arabic neighborhood names (e.g., 'الإسكان', 'الصفراء', 'الموطأ')
+- `is_compliant`: 1=compliant (below limit), 0=violation (above limit)
+- `result`: Arabic text 'مطابق' (compliant) or 'غير مطابق' (non-compliant)
+"""
+            
             prompt = f"""Generate pandas code to answer this question about the dataset.
 
-Dataset Information:
-- Columns: {list(df.columns)}
-- Shape: {df.shape}
-- First 3 rows:
-{df.head(3).to_string()}
+🔒 Dataset Schema (Metadata Only - No Actual Data Exposed):
+
+**Column Information:**
+{dtypes_markdown}
+
+**DataFrame Structure:**
+{df_info_str}
+{sample_stats}
+{categorical_info}
+{value_patterns}
+
+**Available Columns:** {list(df.columns)}
+**Total Records:** {len(df)} samples
+**Shape:** {df.shape}
+
+⚠️ PRIVACY NOTE: You are receiving ONLY schema information (column names and types).
+DO NOT assume specific values exist. Write generic filtering/aggregation code based on column names only.
 
 Question: {query}
 {risk_instruction}
@@ -2448,12 +2503,42 @@ Requirements:
 1. Use pandas (imported as pd) for all operations
 2. The DataFrame variable is 'df'
 3. Store final result in variable 'result'
-4. Handle missing values appropriately
+4. Handle missing values appropriately (use na=False with .str.contains())
 5. Return clean, readable output
 6. Include proper error handling
 7. Add comments for clarity
+8. For Arabic queries, use Arabic column names in output
+
+**Example Patterns:**
+
+For neighborhood + vegetable analysis:
+```python
+# Filter by neighborhood
+neighborhood_data = df[df['neighborhood_arabic'].str.contains('الإسكان', case=False, na=False)]
+# Group by vegetable
+result = neighborhood_data.groupby('vegetable_arabic').agg(
+    عدد=('vegetable_arabic', 'count'),
+    فوق_الحد=('is_compliant', lambda x: (x == 0).sum()),
+    تحت_الحد=('is_compliant', lambda x: (x == 1).sum())
+).reset_index()
+result.columns = ['الخضار', 'عدد العينات', 'فوق الحد', 'تحت الحد']
+```
+
+For pesticide + vegetable analysis:
+```python
+# Use pesticide_mapping for translation (available in scope)
+pesticide_name = pesticide_mapping.get('البايفنثرن', 'Bifenthrin')
+pesticide_data = df[df['pesticide_standardized'].str.contains(pesticide_name, case=False, na=False)]
+result = pesticide_data.groupby('vegetable_arabic').agg(
+    عدد=('vegetable_arabic', 'count'),
+    تحت_الحد=('is_compliant', lambda x: (x == 1).sum()),
+    فوق_الحد=('is_compliant', lambda x: (x == 0).sum())
+).reset_index()
+result.columns = ['الخضار', 'عدد العينات', 'تحت الحد', 'فوق الحد']
+```
 
 Generate ONLY the Python code wrapped in ```python``` markers:"""
+
 
             response = model.generate_content(prompt)
             

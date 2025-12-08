@@ -3921,15 +3921,70 @@ Also include risk assessment calculations:
 - Return a clear, well-formatted DataFrame
 """
             
+            # 🔒 SCHEMA-ONLY PROMPTING - Privacy Protection
+            # Generate DataFrame metadata WITHOUT exposing actual sensitive data
+            import io
+            
+            # Get column types as markdown table
+            dtypes_markdown = df.dtypes.to_frame('Type').to_markdown()
+            
+            # Get structure info (column names, non-null counts, memory usage)
+            buffer = io.StringIO()
+            df.info(buf=buffer)
+            df_info_str = buffer.getvalue()
+            
+            # Get sample statistics (no actual values, just ranges/stats)
+            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            sample_stats = ""
+            if numeric_cols:
+                stats_df = df[numeric_cols].describe()
+                # Get min, max, mean from the describe output (these are rows, not columns)
+                stats_summary = stats_df.loc[['min', 'max', 'mean']]
+                sample_stats = f"\nNumeric column ranges:\n{stats_summary.to_markdown()}"
+            
+            # 🆕 Add categorical column info (unique counts, NO actual values for sensitive columns)
+            categorical_info = "\n**Categorical Columns Info:**\n"
+            for col in df.select_dtypes(include=['object']).columns:
+                unique_count = df[col].nunique()
+                # Don't expose sensitive data like client names or sample IDs
+                if col in ['client_name', 'sample_id', 'sample_code']:
+                    categorical_info += f"- `{col}`: {unique_count} unique values (sensitive, not shown)\n"
+                else:
+                    categorical_info += f"- `{col}`: {unique_count} unique values\n"
+            
+            # 🆕 Add example value patterns (generic, non-sensitive)
+            value_patterns = """
+**Common Value Patterns (Generic Examples):**
+- `vegetable_english`: English vegetable names (e.g., 'Tomato', 'Cucumber', 'Pepper')
+- `vegetable_arabic`: Arabic vegetable names (e.g., 'طماطم', 'خيار', 'فلفل')
+- `pesticide_standardized`: English pesticide names (use for filtering)
+- `pesticide_arabic`: Arabic pesticide names (translate using pesticide_mapping)
+- `neighborhood_arabic`: Arabic neighborhood names (e.g., 'الإسكان', 'الصفراء', 'الموطأ')
+- `is_compliant`: 1=compliant (below limit), 0=violation (above limit)
+- `result`: Arabic text 'مطابق' (compliant) or 'غير مطابق' (non-compliant)
+"""
+            
             prompt = f"""Generate pandas code to answer this question about the pesticide testing dataset.
 
 **IMPORTANT: READ THE QUESTION CAREFULLY AND ANSWER EXACTLY WHAT IS ASKED!**
 
-Dataset Information:
-- Columns: {list(df.columns)}
-- Shape: {df.shape}
-- Sample data (first 3 rows):
-{df.head(3).to_string()}
+🔒 Dataset Schema (Metadata Only - No Actual Data Exposed):
+
+**Column Information:**
+{dtypes_markdown}
+
+**DataFrame Structure:**
+{df_info_str}
+{sample_stats}
+{categorical_info}
+{value_patterns}
+
+**Available Columns:** {list(df.columns)}
+**Total Records:** {len(df)} samples
+**Shape:** {df.shape}
+
+⚠️ PRIVACY NOTE: You are receiving ONLY schema information (column names and types).
+DO NOT assume specific values exist. Write generic filtering/aggregation code based on column names only.
 
 User Question: {query}
 {risk_instruction}
@@ -4025,7 +4080,46 @@ result = pd.DataFrame({{
 }})
 ```
 
+For "vegetables in neighborhood with compliance stats" (complex Arabic query):
+```python
+# Example: "ما هي انواع الخضروات الموجودة في حي الاسكان و ما عددها و ماهي العينات فوق الحد المسموح وتحت الحد المسموح"
+# Filter by neighborhood (IMPORTANT: use na=False)
+neighborhood_data = df[df['neighborhood_arabic'].str.contains('الإسكان', case=False, na=False)].copy()
+
+# Group by vegetable and calculate compliance stats
+result = neighborhood_data.groupby('vegetable_arabic').agg(
+    عدد_العينات=('vegetable_arabic', 'count'),
+    فوق_الحد=('is_compliant', lambda x: (x == 0).sum()),
+    تحت_الحد=('is_compliant', lambda x: (x == 1).sum())
+).reset_index()
+
+# Rename columns for clarity
+result.columns = ['الخضار', 'عدد العينات', 'فوق الحد', 'تحت الحد']
+result = result.sort_values('عدد العينات', ascending=False)
+```
+
+For "vegetables affected by pesticide with compliance" (Arabic query):
+```python
+# Example: "ما هي الخضروات التي يشملها مبيد البايفنثرن و ماهي العينات تحت الحد و فوق الحد المسموح"
+# Translate pesticide name
+pesticide_name = pesticide_mapping.get('البايفنثرن', 'Bifenthrin')
+
+# Filter by pesticide
+pesticide_data = df[df['pesticide_standardized'].str.contains(pesticide_name, case=False, na=False)].copy()
+
+# Group by vegetable and calculate compliance
+result = pesticide_data.groupby('vegetable_arabic').agg(
+    عدد_العينات=('vegetable_arabic', 'count'),
+    تحت_الحد=('is_compliant', lambda x: (x == 1).sum()),
+    فوق_الحد=('is_compliant', lambda x: (x == 0).sum())
+).reset_index()
+
+result.columns = ['الخضار', 'عدد العينات', 'تحت الحد', 'فوق الحد']
+result = result.sort_values('عدد العينات', ascending=False)
+```
+
 Generate ONLY the Python code wrapped in ```python``` markers:"""
+
 
             # Generate response using DeepSeek (first priority) or Gemini (fallback)
             generated_text = ""
@@ -4033,15 +4127,18 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
             try:
                 # Check if it looks like an OpenAI/DeepSeek client
                 if hasattr(model, 'chat') and hasattr(model.chat, 'completions'):
-                   response = model.chat.completions.create(
-                       model="gpt-4o-mini", 
-                       messages=[
-                           {"role": "system", "content": "You are a Python data analysis expert. Output ONLY python code. 'df' (DataFrame) and 'query' (str) are already defined. Do not define functions."},
-                           {"role": "user", "content": prompt}
-                       ],
-                       temperature=0.0
-                   )
-                   generated_text = response.choices[0].message.content
+                    # Get model name from session state (either gpt-4o-mini or qwen2.5-coder:1.5b)
+                    model_name = st.session_state.get('model_name', 'gpt-4o-mini')
+                    
+                    response = model.chat.completions.create(
+                        model=model_name,  # Use dynamic model name
+                        messages=[
+                            {"role": "system", "content": "You are a Python data analysis expert. Output ONLY python code. 'df' (DataFrame) and 'query' (str) are already defined. Do not define functions."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.0
+                    )
+                    generated_text = response.choices[0].message.content
                 else:
                     # Assume Gemini GenerativeModel
                     response = model.generate_content(prompt)
@@ -4649,28 +4746,89 @@ def show_chat_page(api_client):
         return
     
     # ========================================================================
-    # STEP 2: Initialize Gemini
+    # STEP 2: Initialize AI Model (OpenAI or Ollama)
     # ========================================================================
     
-    api_key = os.environ.get('OPENAI_API_KEY')
-    
-    if not api_key:
-        st.error("⚠️ OPENAI_API_KEY not set")
-        st.info("""
-        **How to fix:**
-        1. Get your API key from OpenAI
-        2. Set it in your .env.app file as `OPENAI_API_KEY`
-        """)
-        return
-    
-    # Configure OpenAI Client
-    try:
-        model = OpenAI(
-            api_key=api_key
+    # Add model selection toggle in sidebar
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 🤖 AI Model Selection")
+        
+        model_choice = st.radio(
+            "Select AI Model",
+            ["🟢 OpenAI (gpt-4o-mini)", "🔵 Ollama (mistral:7b-instruct)"],
+            help="Choose between OpenAI API or local Ollama model"
         )
-    except Exception as e:
-        st.error(f"Failed to initialize DeepSeek client: {e}")
-        return
+        
+        if model_choice == "🟢 OpenAI (gpt-4o-mini)":
+            st.info("Using OpenAI Cloud API")
+        else:
+            st.info("Using Local Ollama Model")
+    
+    # Initialize based on selection
+    model = None
+    model_name = None
+    
+    if model_choice == "🟢 OpenAI (gpt-4o-mini)":
+        # OpenAI Configuration
+        api_key = os.environ.get('OPENAI_API_KEY')
+        
+        if not api_key:
+            st.error("⚠️ OPENAI_API_KEY not set")
+            st.info("""
+            **How to fix:**
+            1. Get your API key from OpenAI
+            2. Set it in your .env.app file as `OPENAI_API_KEY`
+            """)
+            return
+        
+        # Configure OpenAI Client
+        try:
+            model = OpenAI(api_key=api_key)
+            model_name = "gpt-4o-mini"
+            st.success("✅ OpenAI model ready")
+        except Exception as e:
+            st.error(f"Failed to initialize OpenAI client: {e}")
+            return
+    
+    else:  # Ollama
+        # Ollama Configuration
+        try:
+            from openai import OpenAI as OllamaClient
+            
+            # Initialize Ollama client (defaults to http://localhost:11434)
+            model = OllamaClient(
+                base_url="http://localhost:11434/v1",
+                api_key="ollama"  # Ollama doesn't need real API key
+            )
+            model_name = "mistral:7b-instruct"
+            
+            # Test if Ollama is running
+            try:
+                # Quick test call
+                test_response = model.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": "test"}],
+                    max_tokens=5
+                )
+                st.success(f"✅ Ollama model ready: {model_name}")
+            except Exception as test_error:
+                st.error(f"⚠️ Ollama not responding: {test_error}")
+                st.info("""
+                **How to fix:**
+                1. Install Ollama: https://ollama.ai
+                2. Run: `ollama pull mistral:7b-instruct`
+                3. Ollama should auto-start, or run: `ollama serve`
+                """)
+                return
+                
+        except Exception as e:
+            st.error(f"Failed to initialize Ollama client: {e}")
+            st.info("Make sure Ollama is installed and running on http://localhost:11434")
+            return
+    
+    # Store model info in session state for use in process_data_query
+    st.session_state.model_name = model_name
     
     # ========================================================================
     # STEP 3: Show Instructions
