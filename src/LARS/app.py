@@ -2670,379 +2670,6 @@ import re
 import numpy as np
 
 
-# def show_chat_page(api_client):
-#     """
-#     Enhanced chat page with both RAG (ISO documents) and Gemini (data analysis) capabilities
-#     Includes complete sidebar with upload and risk assessment options
-#     """
-    
-#     st.header("💬 AI Assistant 🌱")
-#     st.caption("Powered by Gemini + RAG - Ask about ISO documents or analyze pesticide data")
-    
-#     # ========================================================================
-#     # SIDEBAR COMPONENTS
-#     # ========================================================================
-    
-#     with st.sidebar:
-#         st.markdown("---")
-        
-#         # Project Configuration
-#         st.markdown("## 🏢 Project Configuration")
-        
-#         # Initialize project ID in session state if not exists
-#         if 'project_id' not in st.session_state:
-#             st.session_state.project_id = "TrhBVe_m5gg2002_E5VVqS"
-        
-#         project_id = st.text_input(
-#             "Project ID",
-#             value=st.session_state.project_id,
-#             help="Enter your project identifier",
-#             key="project_id_input"
-#         )
-        
-#         if project_id != st.session_state.project_id:
-#             st.session_state.project_id = project_id
-        
-#         st.info(f"📁 Active Project: `{st.session_state.project_id}`")
-        
-#         st.markdown("---")
-        
-#         # ISO Document Upload
-#         st.markdown("## 📄 ISO Document Upload")
-        
-#         uploaded_file = st.file_uploader(
-#             "Upload ISO Document",
-#             type=['pdf', 'docx', 'xlsx'],
-#             help="Upload Quality Manual, Procedures, Work Instructions, or Forms"
-#         )
-        
-#         doc_type = st.selectbox(
-#             "Document Type",
-#             [
-#                 "Quality Manual",
-#                 "Procedure", 
-#                 "Work Instruction",
-#                 "Form/Record",
-#                 "Unknown"
-#             ]
-#         )
-        
-#         if uploaded_file is not None:
-#             st.caption(f"Will upload to project: {st.session_state.project_id}")
-            
-#             if st.button("📤 Upload ISO Document", use_container_width=True, type="primary"):
-#                 upload_iso_document_ui(
-#                     api_client, 
-#                     uploaded_file, 
-#                     doc_type, 
-#                     st.session_state.project_id
-#                 )
-        
-#         st.markdown("---")
-        
-#         # Data Context
-#         st.markdown("## 📅 Data Context")
-        
-#         # Initialize selected_year if not exists
-#         if 'selected_year' not in st.session_state:
-#             st.session_state.selected_year = "2022"
-        
-#         st.info(f"**Active Year:** {st.session_state.selected_year}")
-        
-#         selected_year = st.selectbox(
-#             "Default Year",
-#             AVAILABLE_YEARS,
-#             index=AVAILABLE_YEARS.index(st.session_state.selected_year)
-#         )
-        
-#         if selected_year != st.session_state.selected_year:
-#             st.session_state.selected_year = selected_year
-        
-#         st.markdown("---")
-        
-#         # Data Indexing
-#         st.markdown("## 🗄️ Data Indexing")
-        
-#         year_to_index = st.selectbox("Select Year to Index", AVAILABLE_YEARS)
-        
-#         col1, col2 = st.columns(2)
-        
-#         with col1:
-#             if st.button("📥 Index", use_container_width=True):
-#                 index_year_data(api_client, year_to_index, do_reset=False)
-        
-#         with col2:
-#             if st.button("🗑️ Reset", use_container_width=True):
-#                 index_year_data(api_client, year_to_index, do_reset=True)
-        
-#         # Initialize indexed_years if not exists
-#         if 'indexed_years' not in st.session_state:
-#             st.session_state.indexed_years = set()
-        
-#         if st.session_state.indexed_years:
-#             st.markdown("**✅ Indexed Years:**")
-#             for year in sorted(st.session_state.indexed_years):
-#                 st.markdown(f"- {year}")
-
-#         st.markdown("---")
-        
-#         # Risk Assessment Settings
-#         st.markdown("## ⚙️ Risk Assessment")
-        
-#         risk_mode = st.radio(
-#             "Risk Assessment Mode",
-#             options=["🤖 Auto-detect", "✅ Always On", "❌ Always Off"],
-#             index=0,
-#             help="Auto-detect: Enables when you ask about safety/risk\nAlways On: Include for every query\nAlways Off: Never include"
-#         )
-        
-#         st.session_state.risk_mode = risk_mode
-        
-#         # Additional risk settings
-#         with st.expander("🔧 Advanced Risk Settings"):
-#             population_type = st.selectbox(
-#                 "Population Type",
-#                 ["adult_average", "adult_high_consumption", "child_average", "child_high_consumption"],
-#                 index=0,
-#                 help="Select population for risk calculations"
-#             )
-#             st.session_state.population_type = population_type
-            
-#             risk_threshold = st.slider(
-#                 "Risk Threshold (%)",
-#                 min_value=50,
-#                 max_value=200,
-#                 value=100,
-#                 help="Percentage of ADI considered as risk threshold"
-#             )
-#             st.session_state.risk_threshold = risk_threshold
-
-#     # ========================================================================
-#     # MAIN CHAT INTERFACE
-#     # ========================================================================
-    
-#     # STEP 1: Get DataFrame (for Gemini analysis)
-#     try:
-#         if api_client and hasattr(api_client, 'get_data'):
-#             df = api_client.get_data()
-#         elif api_client and hasattr(api_client, 'df'):
-#             df = api_client.df
-#         elif 'current_data' in st.session_state:
-#             df = st.session_state.current_data
-#         elif 'df' in st.session_state:
-#             df = st.session_state.df
-#         else:
-#             df = None
-#             st.info("💡 No dataset loaded. You can still ask about ISO documents!")
-    
-#     except Exception as e:
-#         st.error(f"Error loading data: {e}")
-#         df = None
-
-#     # STEP 2: Initialize Gemini
-#     api_key = os.environ.get('GEMINI_API_KEY')
-#     gemini_available = bool(api_key)
-    
-#     if gemini_available:
-#         try:
-#             genai.configure(api_key=api_key)
-#             model = genai.GenerativeModel('gemini-2.0-flash-exp')
-#         except Exception as e:
-#             st.warning(f"⚠️ Gemini configuration issue: {e}")
-#             gemini_available = False
-#     else:
-#         st.info("🔑 Set GEMINI_API_KEY for data analysis features")
-
-#     # STEP 3: Show Instructions
-#     col1, col2 = st.columns(2)
-    
-#     with col1:
-#         st.info("""
-#         **📄 ISO Document Queries:**
-#         - "Show me calibration procedures"
-#         - "What are the GC-MS requirements?"
-#         - "Find sample handling procedures"
-#         - "Quality manual requirements"
-#         """)
-    
-#     with col2:
-#         if df is not None and gemini_available:
-#             st.info("""
-#             **📊 Data Analysis Queries:**
-#             - "Top 5 vegetables with violations"
-#             - "Compliance trends by year" 
-#             - "Pesticides with most exceedances"
-#             - "Calculate average readings by crop"
-#             """)
-#         else:
-#             st.info("""
-#             **📊 Data Analysis:**
-#             Load dataset and set GEMINI_API_KEY
-#             to enable data analysis features
-#             """)
-
-#     # STEP 4: Dual Input System
-#     st.markdown("---")
-#     st.subheader("🔍 Ask Detailed Questions")
-    
-#     col1, col2 = st.columns([4, 1])
-    
-#     with col1:
-#         text_question = st.text_area(
-#             "Type your question here:",
-#             height=100,
-#             placeholder="Example: What are the top 10 vegetables by violation count? Or ask about ISO procedures...",
-#             key="text_question"
-#         )
-    
-#     with col2:
-#         st.write("")  # Spacing
-#         st.write("")  # Spacing
-#         ask_button = st.button("🚀 Ask", type="primary", use_container_width=True, key="ask_button")
-    
-#     # Simple chat input
-#     st.markdown("---")
-#     st.subheader("💬 Quick Chat")
-#     chat_question = st.chat_input("Ask a quick question...")
-    
-#     # Determine which input to use
-#     user_question = None
-#     if ask_button and text_question:
-#         user_question = text_question
-#     elif chat_question:
-#         user_question = chat_question
-
-#     # STEP 5: Process Question
-#     if user_question:
-#         # Enhanced query type detection
-#         iso_keywords = [
-#             'iso', '17025', 'clause', 'requirement', 'accreditation',
-#             'calibration', 'validation', 'verification', 'maintenance',
-#             'procedure', 'manual', 'quality manual', 'work instruction', 
-#             'form', 'record', 'document', 'policy', 'sop',
-#             'gc', 'gc-ms', 'gcms', 'hplc', 'instrument', 'equipment',
-#             'laboratory', 'lab', 'sample handling', 'traceability',
-#             'معايرة', 'إجراء', 'دليل الجودة', 'متطلب', 'اعتماد'
-#         ]
-        
-#         data_keywords = [
-#             'pesticide', 'vegetable', 'violation', 'compliance', 'exceed',
-#             'limit', 'reading', 'sample', 'data', 'analysis', 'trend',
-#             'statistic', 'count', 'average', 'maximum', 'minimum',
-#             'طماطم', 'فلفل', 'خيار', 'مبيد', 'عينة'
-#         ]
-        
-#         query_lower = user_question.lower()
-        
-#         iso_score = sum(1 for kw in iso_keywords if kw in query_lower)
-#         data_score = sum(1 for kw in data_keywords if kw in query_lower)
-        
-#         has_year = any(year in query_lower for year in ['2022', '2023', '2024', '2025'])
-#         has_data_terms = any(term in query_lower for term in ['top', 'trend', 'average', 'count', 'sum', 'max', 'min'])
-        
-#         if iso_score > data_score:
-#             query_type = "iso"
-#         elif data_score > iso_score or has_year or has_data_terms:
-#             query_type = "data"
-#         else:
-#             query_type = "iso"
-        
-#         # Display detection info
-#         if query_type == "iso":
-#             st.info("🔍 Detected ISO/document query - searching uploaded documents...")
-#             process_iso_query(api_client, user_question)
-#         else:
-#             if df is None:
-#                 st.error("📊 No dataset available for analysis. Please load your Excel file first.")
-#                 st.info("💡 You can still ask ISO/document questions without a dataset!")
-#                 return
-            
-#             if not gemini_available:
-#                 st.error("🔑 Gemini API key not configured for data analysis.")
-#                 st.info("💡 Set GEMINI_API_KEY environment variable to enable data analysis.")
-#                 return
-            
-#             st.info("🔍 Detected data analysis query - using AI to analyze your dataset...")
-            
-#             # Apply risk assessment settings
-#             risk_mode = st.session_state.get('risk_mode', '🤖 Auto-detect')
-#             if risk_mode == "✅ Always On":
-#                 include_risk = True
-#             elif risk_mode == "❌ Always Off":
-#                 include_risk = False
-#             else:  # Auto-detect
-#                 risk_keywords = ['risk', 'safety', 'safe', 'health', 'assess', 'eat', 'consume', 'adult', 'child', 'population']
-#                 include_risk = any(kw in query_lower for kw in risk_keywords)
-            
-#             if include_risk:
-#                 st.success("🎯 Risk assessment enabled")
-            
-#             process_data_query(user_question, df, model, include_risk)
-
-#     # STEP 6: Quick Action Buttons
-#     st.markdown("---")
-#     st.subheader("⚡ Quick Actions")
-    
-#     col1, col2, col3, col4 = st.columns(4)
-    
-#     with col1:
-#         if st.button("📄 ISO Procedures", use_container_width=True):
-#             st.session_state.quick_query = "Show me all calibration procedures"
-#             st.rerun()
-    
-#     with col2:
-#         if st.button("🔬 Lab Equipment", use_container_width=True):
-#             st.session_state.quick_query = "What are the GC-MS maintenance requirements?"
-#             st.rerun()
-    
-#     with col3:
-#         if df is not None and st.button("📊 Top Vegetables", use_container_width=True):
-#             st.session_state.quick_query = "What are the top 10 vegetables by violation count?"
-#             st.rerun()
-    
-#     with col4:
-#         if df is not None and st.button("🧪 Risk Analysis", use_container_width=True):
-#             st.session_state.quick_query = "Show me samples with health risk concerns"
-#             st.rerun()
-
-#     # Handle quick queries
-#     if 'quick_query' in st.session_state and st.session_state.quick_query:
-#         user_question = st.session_state.quick_query
-#         st.session_state.quick_query = None
-#         st.rerun()
-
-#     # STEP 7: Show Chat History
-#     if 'chat_history' in st.session_state and st.session_state.chat_history:
-#         st.markdown("---")
-#         st.subheader("📜 Recent Queries")
-        
-#         for i, item in enumerate(reversed(st.session_state.chat_history[-5:])):
-#             # Remove the 'key' parameter from expander
-#             with st.expander(f"Q{i+1}: {item['question'][:50]}..."):
-#                 st.markdown(f"**Question:** {item['question']}")
-#                 st.markdown(f"**Type:** {item.get('query_type', 'Unknown')}")
-#                 st.markdown(f"**Time:** {item['timestamp'].strftime('%Y-%m-%d %H:%M')}")
-                
-#                 # Display results
-#                 if isinstance(item['result'], pd.DataFrame):
-#                     st.dataframe(item['result'].head(5))
-#                 elif isinstance(item['result'], dict):
-#                     st.json(item['result'])
-#                 else:
-#                     st.write(item['result'])
-                
-#                 # Show code in a separate section (NOT nested expander)
-#                 if item.get('code'):
-#                     st.markdown("---")
-#                     st.markdown("#### 👨‍💻 Generated Code")
-#                     st.code(item['code'], language='python')
-        
-#         # Clear history button
-#         if st.button("🗑️ Clear History", use_container_width=True):
-#             st.session_state.chat_history = []
-#             st.rerun()
-
-
 
 # ========================================================================
 # SUPPORTING FUNCTIONS
@@ -4058,162 +3685,162 @@ def generate_map_chart(df: pd.DataFrame, query: str):
         # ENHANCED HEATMAPS - ONLY FOR MAP CHART  
         # ============================================================================
         
-        st.markdown("---")
-        st.header("🔥 Advanced Heatmap Analysis")
+        # st.markdown("---")
+        # st.header("🔥 Advanced Heatmap Analysis")
         
-        # Check if we have enough data for heatmap
-        if 'vegetable_english' in map_df.columns or 'pesticide_standardized' in map_df.columns:
+        # # Check if we have enough data for heatmap
+        # if 'vegetable_english' in map_df.columns or 'pesticide_standardized' in map_df.columns:
             
-            # Prepare data for heatmaps
-            pest_col = 'pesticide_standardized' if 'pesticide_standardized' in map_df.columns else 'pesticide'
+        #     # Prepare data for heatmaps
+        #     pest_col = 'pesticide_standardized' if 'pesticide_standardized' in map_df.columns else 'pesticide'
             
-            heatmap_data = map_df.groupby(['vegetable_english', pest_col]).agg({
-                'is_compliant': lambda x: (x == 0).sum() if 'is_compliant' in map_df.columns else 0,
-                'reading': 'count'
-            }).reset_index()
+        #     heatmap_data = map_df.groupby(['vegetable_english', pest_col]).agg({
+        #         'is_compliant': lambda x: (x == 0).sum() if 'is_compliant' in map_df.columns else 0,
+        #         'reading': 'count'
+        #     }).reset_index()
             
-            heatmap_data.columns = ['Vegetable', 'Pesticide', 'Violations', 'Tests']
-            heatmap_data['Violation_Rate'] = heatmap_data['Violations'] / heatmap_data['Tests']
+        #     heatmap_data.columns = ['Vegetable', 'Pesticide', 'Violations', 'Tests']
+        #     heatmap_data['Violation_Rate'] = heatmap_data['Violations'] / heatmap_data['Tests']
             
-            # Filter combinations with minimum tests
-            min_tests = st.slider("Minimum tests for heatmap:", 1, 10, 3, 
-                                 help="Filter combinations with too few tests",
-                                 key="heatmap_min_tests")
-            heatmap_filtered = heatmap_data[heatmap_data['Tests'] >= min_tests].copy()
+        #     # Filter combinations with minimum tests
+        #     min_tests = st.slider("Minimum tests for heatmap:", 1, 10, 3, 
+        #                          help="Filter combinations with too few tests",
+        #                          key="heatmap_min_tests")
+        #     heatmap_filtered = heatmap_data[heatmap_data['Tests'] >= min_tests].copy()
             
-            if len(heatmap_filtered) >= 3:
+        #     if len(heatmap_filtered) >= 3:
                 
-                # ============================================================================
-                # HEATMAP 1: 2D MATRIX
-                # ============================================================================
-                st.subheader("🔥 Pesticide-Vegetable Violation Heatmap")
+        #         # ============================================================================
+        #         # HEATMAP 1: 2D MATRIX
+        #         # ============================================================================
+        #         st.subheader("🔥 Pesticide-Vegetable Violation Heatmap")
                 
-                # Pivot data for heatmap
-                pivot_data = heatmap_filtered.pivot_table(
-                    index='Vegetable',
-                    columns='Pesticide',
-                    values='Violation_Rate',
-                    aggfunc='mean',
-                    fill_value=0
-                )
+        #         # Pivot data for heatmap
+        #         pivot_data = heatmap_filtered.pivot_table(
+        #             index='Vegetable',
+        #             columns='Pesticide',
+        #             values='Violation_Rate',
+        #             aggfunc='mean',
+        #             fill_value=0
+        #         )
                 
-                # Get top vegetables and pesticides
-                top_veg = heatmap_filtered.groupby('Vegetable')['Violations'].sum().nlargest(12).index.tolist()
-                top_pest = heatmap_filtered.groupby('Pesticide')['Violations'].sum().nlargest(12).index.tolist()
+        #         # Get top vegetables and pesticides
+        #         top_veg = heatmap_filtered.groupby('Vegetable')['Violations'].sum().nlargest(12).index.tolist()
+        #         top_pest = heatmap_filtered.groupby('Pesticide')['Violations'].sum().nlargest(12).index.tolist()
                 
-                # Filter pivot
-                filtered_pivot = pivot_data.loc[
-                    pivot_data.index.isin(top_veg),
-                    pivot_data.columns.isin(top_pest)
-                ]
+        #         # Filter pivot
+        #         filtered_pivot = pivot_data.loc[
+        #             pivot_data.index.isin(top_veg),
+        #             pivot_data.columns.isin(top_pest)
+        #         ]
                 
-                # Create matrix heatmap
-                fig_matrix = go.Figure(data=go.Heatmap(
-                    z=filtered_pivot.values,
-                    x=filtered_pivot.columns,
-                    y=filtered_pivot.index,
-                    colorscale='RdYlGn_r',
-                    text=filtered_pivot.values,
-                    texttemplate='%{text:.0%}',
-                    textfont={"size": 9},
-                    colorbar=dict(title="Violation Rate", tickformat=".0%"),
-                    hovertemplate='<b>Vegetable:</b> %{y}<br><b>Pesticide:</b> %{x}<br><b>Rate:</b> %{z:.1%}<extra></extra>'
-                ))
+        #         # Create matrix heatmap
+        #         fig_matrix = go.Figure(data=go.Heatmap(
+        #             z=filtered_pivot.values,
+        #             x=filtered_pivot.columns,
+        #             y=filtered_pivot.index,
+        #             colorscale='RdYlGn_r',
+        #             text=filtered_pivot.values,
+        #             texttemplate='%{text:.0%}',
+        #             textfont={"size": 9},
+        #             colorbar=dict(title="Violation Rate", tickformat=".0%"),
+        #             hovertemplate='<b>Vegetable:</b> %{y}<br><b>Pesticide:</b> %{x}<br><b>Rate:</b> %{z:.1%}<extra></extra>'
+        #         ))
                 
-                fig_matrix.update_layout(
-                    title=f"Violation Rates Matrix (Top 12 each)",
-                    height=500,
-                    xaxis_title="Pesticide",
-                    yaxis_title="Vegetable",
-                    xaxis_tickangle=-45
-                )
+        #         fig_matrix.update_layout(
+        #             title=f"Violation Rates Matrix (Top 12 each)",
+        #             height=500,
+        #             xaxis_title="Pesticide",
+        #             yaxis_title="Vegetable",
+        #             xaxis_tickangle=-45
+        #         )
                 
-                st.plotly_chart(fig_matrix, use_container_width=True)
+        #         st.plotly_chart(fig_matrix, use_container_width=True)
                 
-                # ============================================================================
-                # HEATMAP 2: ENHANCED BUBBLE CHART
-                # ============================================================================
-                st.subheader("⚫ Risk Bubble Chart")
+        #         # ============================================================================
+        #         # HEATMAP 2: ENHANCED BUBBLE CHART
+        #         # ============================================================================
+        #         st.subheader("⚫ Risk Bubble Chart")
                 
-                top_combos = heatmap_filtered.nlargest(25, 'Violations').copy()
+        #         top_combos = heatmap_filtered.nlargest(25, 'Violations').copy()
                 
-                # Bubble sizes based on tests
-                if top_combos['Tests'].max() > top_combos['Tests'].min():
-                    bubble_sizes = 15 + (top_combos['Tests'] - top_combos['Tests'].min()) / \
-                                  (top_combos['Tests'].max() - top_combos['Tests'].min()) * 35
-                else:
-                    bubble_sizes = pd.Series([25] * len(top_combos))
+        #         # Bubble sizes based on tests
+        #         if top_combos['Tests'].max() > top_combos['Tests'].min():
+        #             bubble_sizes = 15 + (top_combos['Tests'] - top_combos['Tests'].min()) / \
+        #                           (top_combos['Tests'].max() - top_combos['Tests'].min()) * 35
+        #         else:
+        #             bubble_sizes = pd.Series([25] * len(top_combos))
                 
-                # Create bubble chart
-                fig_bubble = go.Figure()
+        #         # Create bubble chart
+        #         fig_bubble = go.Figure()
                 
-                for risk_level, color, rate_range in [
-                    ('Low', 'green', (0, 0.2)),
-                    ('Medium', 'orange', (0.2, 0.5)),
-                    ('High', 'red', (0.5, 1.0))
-                ]:
-                    mask = (top_combos['Violation_Rate'] >= rate_range[0]) & \
-                           (top_combos['Violation_Rate'] < rate_range[1] if rate_range[1] < 1 else True)
+        #         for risk_level, color, rate_range in [
+        #             ('Low', 'green', (0, 0.2)),
+        #             ('Medium', 'orange', (0.2, 0.5)),
+        #             ('High', 'red', (0.5, 1.0))
+        #         ]:
+        #             mask = (top_combos['Violation_Rate'] >= rate_range[0]) & \
+        #                    (top_combos['Violation_Rate'] < rate_range[1] if rate_range[1] < 1 else True)
                     
-                    if mask.any():
-                        subset = top_combos[mask]
-                        subset_sizes = bubble_sizes[mask]
+        #             if mask.any():
+        #                 subset = top_combos[mask]
+        #                 subset_sizes = bubble_sizes[mask]
                         
-                        fig_bubble.add_trace(go.Scatter(
-                            x=subset['Pesticide'],
-                            y=subset['Vegetable'],
-                            mode='markers',
-                            marker=dict(size=subset_sizes, color=color, line=dict(width=1.5, color='black'), opacity=0.8),
-                            name=f'{risk_level} Risk',
-                            text=[f"<b>{r['Vegetable']} + {r['Pesticide']}</b><br>Tests: {r['Tests']}<br>Violations: {r['Violations']}<br>Rate: {r['Violation_Rate']:.1%}" 
-                                  for _, r in subset.iterrows()],
-                            hovertemplate='%{text}<extra></extra>'
-                        ))
+        #                 fig_bubble.add_trace(go.Scatter(
+        #                     x=subset['Pesticide'],
+        #                     y=subset['Vegetable'],
+        #                     mode='markers',
+        #                     marker=dict(size=subset_sizes, color=color, line=dict(width=1.5, color='black'), opacity=0.8),
+        #                     name=f'{risk_level} Risk',
+        #                     text=[f"<b>{r['Vegetable']} + {r['Pesticide']}</b><br>Tests: {r['Tests']}<br>Violations: {r['Violations']}<br>Rate: {r['Violation_Rate']:.1%}" 
+        #                           for _, r in subset.iterrows()],
+        #                     hovertemplate='%{text}<extra></extra>'
+        #                 ))
                 
-                fig_bubble.update_layout(
-                    title=f'Top {len(top_combos)} Risk Combinations (size=tests)',
-                    height=550,
-                    xaxis_title='Pesticide',
-                    yaxis_title='Vegetable',
-                    xaxis_tickangle=-45,
-                    showlegend=True
-                )
+        #         fig_bubble.update_layout(
+        #             title=f'Top {len(top_combos)} Risk Combinations (size=tests)',
+        #             height=550,
+        #             xaxis_title='Pesticide',
+        #             yaxis_title='Vegetable',
+        #             xaxis_tickangle=-45,
+        #             showlegend=True
+        #         )
                 
-                st.plotly_chart(fig_bubble, use_container_width=True)
+        #         st.plotly_chart(fig_bubble, use_container_width=True)
                 
-                # ============================================================================
-                # HEATMAP 3: CORRELATION HEATMAP
-                # ============================================================================
-                st.subheader("📊 Variable Correlation Heatmap")
+        #         # ============================================================================
+        #         # HEATMAP 3: CORRELATION HEATMAP
+        #         # ============================================================================
+        #         st.subheader("📊 Variable Correlation Heatmap")
                 
-                numeric_cols = map_df.select_dtypes(include=[np.number]).columns.tolist()
-                relevant_cols = [c for c in numeric_cols if c not in ['is_compliant', 'season', 'year']]
+        #         numeric_cols = map_df.select_dtypes(include=[np.number]).columns.tolist()
+        #         relevant_cols = [c for c in numeric_cols if c not in ['is_compliant', 'season', 'year']]
                 
-                if len(relevant_cols) >= 3:
-                    corr_matrix = map_df[relevant_cols].corr()
+        #         if len(relevant_cols) >= 3:
+        #             corr_matrix = map_df[relevant_cols].corr()
                     
-                    fig_corr = go.Figure(data=go.Heatmap(
-                        z=corr_matrix.values,
-                        x=corr_matrix.columns,
-                        y=corr_matrix.columns,
-                        colorscale='RdBu',
-                        zmid=0,
-                        text=corr_matrix.values,
-                        texttemplate='%{text:.2f}',
-                        textfont={"size": 10},
-                        colorbar=dict(title="Correlation"),
-                        hovertemplate='<b>X:</b> %{x}<br><b>Y:</b> %{y}<br><b>Correlation:</b> %{z:.2f}<extra></extra>'
-                    ))
+        #             fig_corr = go.Figure(data=go.Heatmap(
+        #                 z=corr_matrix.values,
+        #                 x=corr_matrix.columns,
+        #                 y=corr_matrix.columns,
+        #                 colorscale='RdBu',
+        #                 zmid=0,
+        #                 text=corr_matrix.values,
+        #                 texttemplate='%{text:.2f}',
+        #                 textfont={"size": 10},
+        #                 colorbar=dict(title="Correlation"),
+        #                 hovertemplate='<b>X:</b> %{x}<br><b>Y:</b> %{y}<br><b>Correlation:</b> %{z:.2f}<extra></extra>'
+        #             ))
                     
-                    fig_corr.update_layout(
-                        title="Numeric Variable Correlations",
-                        height=450,
-                        xaxis_tickangle=-45
-                    )
+        #             fig_corr.update_layout(
+        #                 title="Numeric Variable Correlations",
+        #                 height=450,
+        #                 xaxis_tickangle=-45
+        #             )
                     
-                    st.plotly_chart(fig_corr, use_container_width=True)
-            else:
-                st.info("Not enough data combinations for heatmap analysis (need at least 3)")
+        #             st.plotly_chart(fig_corr, use_container_width=True)
+        #     else:
+        #         st.info("Not enough data combinations for heatmap analysis (need at least 3)")
         
     except Exception as e:
         st.error(f"Error generating map chart: {e}")
@@ -4314,6 +3941,9 @@ User Question: {query}
 - pd: pandas module
 - np: numpy module  
 - query: The user's question as a string
+- pesticide_mapping: Dictionary mapping Arabic pesticide names to English
+  Example: pesticide_mapping['البايفنثرن'] = 'Bifenthrin'
+  Use this to translate Arabic pesticide names when filtering
 
 **CRITICAL REQUIREMENTS:**
 1. ANSWER THE EXACT QUESTION - don't provide generic summaries
@@ -4321,6 +3951,14 @@ User Question: {query}
 3. Execute code DIRECTLY - do NOT wrap in a function
 4. Do NOT use 'return' statement
 5. Handle missing values with .fillna() or dropna()
+6. **STRING FILTERING - CRITICAL:** 
+   - ALWAYS use `na=False` parameter with .str.contains() to handle NaN values
+   - Example: df[df['vegetable_english'].str.contains('Cucumber', case=False, na=False)]
+   - Never use .str.contains() without na=False parameter
+7. **PESTICIDE NAME MATCHING:** 
+   - If query mentions pesticide name in Arabic (e.g., 'البايفنثرن'), use pesticide_mapping
+   - Example: pesticide_name = pesticide_mapping.get('البايفنثرن', 'Bifenthrin')
+   - Then filter: df[df['pesticide_standardized'].str.contains(pesticide_name, case=False, na=False)]
 
 **KEY COLUMNS TO USE:**
 - 'year' - for yearly analysis
@@ -4347,6 +3985,44 @@ For "pesticides with most violations":
 ```python
 result = df[df['is_compliant'] == 0].groupby('pesticide_standardized').size().reset_index(name='violations')
 result = result.sort_values('violations', ascending=False).head(15)
+```
+
+For "total number of cucumber samples" (simple count):
+```python
+# Count total samples for cucumber (IMPORTANT: use na=False to handle NaN)
+cucumber_samples = df[df['vegetable_english'].str.contains('Cucumber', case=False, na=False)]
+total_count = len(cucumber_samples)
+
+# Create result DataFrame
+result = pd.DataFrame({{
+    'الخضار': ['خيار (Cucumber)'],
+    'عدد العينات الكلي': [total_count]
+}})
+```
+
+For "tomato samples with Bifenthrin above/below limit" (Arabic query):
+```python
+# Extract pesticide name from Arabic
+pesticide_name = pesticide_mapping.get('البايفنثرن', 'Bifenthrin')
+
+# Filter for tomato and this pesticide (IMPORTANT: use na=False)
+filtered = df[
+    (df['vegetable_english'].str.contains('Tomato', case=False, na=False)) &
+    (df['pesticide_standardized'].str.contains(pesticide_name, case=False, na=False))
+].copy()
+
+# Calculate above/below limit
+above_limit = (filtered['is_compliant'] == 0).sum()
+below_limit = (filtered['is_compliant'] == 1).sum()
+
+# Create result DataFrame
+result = pd.DataFrame({{
+    'الخضار': ['الطماطم'],
+    'المبيد': [pesticide_name],
+    'عدد العينات': [len(filtered)],
+    'فوق الحد': [above_limit],
+    'تحت الحد': [below_limit]
+}})
 ```
 
 Generate ONLY the Python code wrapped in ```python``` markers:"""
@@ -4386,11 +4062,30 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                 else:
                     generated_code = generated_text.strip()
             
+            # Create pesticide name mapping for Arabic queries
+            pesticide_mapping = {
+                'البايفنثرن': 'Bifenthrin',
+                'الكلوربيريفوس': 'Chlorpyrifos',
+                'الديمثويت': 'Dimethoate',
+                'اللامبدا': 'Lambda-cyhalothrin',
+                'الميثوميل': 'Methomyl',
+                'الكاربندزيم': 'Carbendazim',
+                'الإيماميكتين': 'Emamectin',
+                'الأيميداكلوبريد': 'Imidacloprid',
+                'الثيامثوكسام': 'Thiamethoxam',
+                'البروفيزين': 'Buprofezin',
+                'الأباميكتين': 'Abamectin',
+                'الأسيتامبريد': 'Acetamiprid',
+                'الدلتامثرين': 'Deltamethrin',
+                'السيبرمثرين': 'Cypermethrin'
+            }
+            
             exec_globals = {
                 'df': df.copy(),
                 'pd': pd,
                 'np': np,
                 'query': query,
+                'pesticide_mapping': pesticide_mapping,  # Add mapping to globals
                 'result': None
             }
             
@@ -4476,6 +4171,75 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                     st.metric("📋 Results Found", len(result))
                 
                 st.dataframe(result, use_container_width=True)
+                
+                # ADDED: Show detailed individual samples for vegetable/neighborhood queries
+                if 'vegetable_arabic' in result_cols and 'عدد العينات' in result_cols:
+                    st.markdown("---")
+                    st.markdown("### 📋 Detailed Individual Samples")
+                    st.caption("Showing all individual test samples (not grouped)")
+                    
+                    # Try to re-query the original data to show individual samples
+                    try:
+                        # Extract neighborhood from query if present
+                        neighborhood_keywords = {
+                            'الاسكان': 'Al Iskan',
+                            'الموطأ': 'Al Mowata', 
+                            'الصفراء': 'Al Safra',
+                            'الأفق': 'Al Ufuq',
+                            'الريان': 'Al Rayyan',
+                            'السلام': 'Al Salam'
+                        }
+                        
+                        neighborhood_found = None
+                        for arabic, english in neighborhood_keywords.items():
+                            if arabic in query:
+                                neighborhood_found = english
+                                break
+                        
+                        if neighborhood_found and 'neighborhood_english' in df.columns:
+                            # Filter for this specific neighborhood
+                            detailed_df = df[df['neighborhood_english'] == neighborhood_found].copy()
+                            
+                            # Select relevant columns
+                            detail_cols = []
+                            if 'vegetable_arabic' in detailed_df.columns:
+                                detail_cols.append('vegetable_arabic')
+                            if 'pesticide_standardized' in detailed_df.columns:
+                                detail_cols.append('pesticide_standardized')
+                            if 'reading' in detailed_df.columns:
+                                detail_cols.append('reading')
+                            if 'limits' in detailed_df.columns:
+                                detail_cols.append('limits')
+                            if 'result' in detailed_df.columns:
+                                detail_cols.append('result')
+                            if 'is_compliant' in detailed_df.columns:
+                                detail_cols.append('is_compliant')
+                            if 'date' in detailed_df.columns:
+                                detail_cols.append('date')
+                            
+                            if detail_cols:
+                                detailed_display = detailed_df[detail_cols].copy()
+                                
+                                # Add above/below limit indicator
+                                if 'is_compliant' in detailed_display.columns:
+                                    detailed_display['حالة العينة'] = detailed_display['is_compliant'].map({
+                                        0: '🔴 فوق الحد',
+                                        1: '🟢 تحت الحد'
+                                    })
+                                
+                                st.info(f"📊 Total individual samples found: **{len(detailed_display)}** samples")
+                                st.dataframe(detailed_display, use_container_width=True)
+                                
+                                # Add download button for detailed data
+                                csv = detailed_display.to_csv(index=False).encode('utf-8-sig')
+                                st.download_button(
+                                    label="📥 Download Detailed Data (CSV)",
+                                    data=csv,
+                                    file_name=f"detailed_samples_{neighborhood_found}.csv",
+                                    mime="text/csv",
+                                )
+                    except Exception as e:
+                        st.info(f"💡 Showing grouped summary. Individual samples: {st.session_state.get('last_query', 'N/A')}")
                 
                 # Note: Chart buttons are now handled by display_stored_results_with_charts()
                 # which is called after this function to persist across button clicks
