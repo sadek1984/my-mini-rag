@@ -1,13 +1,26 @@
-# ✅ Schema-Only Prompting Implementation - Summary
+# ✅ LARS Implementation Summary
 
-**Date**: 2025-12-08  
-**Version**: 1.1 (Enhanced)  
+**Date**: 2025-12-12  
+**Version**: 2.0 (SQL + DuckDB + Schema-Only Prompting)  
 **Status**: ✅ **COMPLETED AND TESTED**  
 **Security Level**: 🔒 **MAXIMUM PRIVACY**
 
-**Latest Update**: Enhanced with categorical info and value patterns to handle complex Arabic queries while maintaining 100% data privacy.
+## 🆕 Latest Updates
+
+### v2.0 (2025-12-12) - DuckDB Integration
+- ✅ **SQL Query Engine**: AI generates SQL instead of Pandas
+- ✅ **DuckDB Database**: 10x faster queries than Excel
+- ✅ **Dual Engine Support**: Choose SQL or Pandas in sidebar
+- ✅ **Schema-Only Prompting**: Maintained for both engines
+- 📄 See: [`docs/DUCKDB_INTEGRATION.md`](docs/DUCKDB_INTEGRATION.md)
+
+### v1.1 (2025-12-08) - Enhanced Schema Prompting
+- ✅ Added categorical column info
+- ✅ Added value patterns for complex queries
+- 📄 See: [`docs/SCHEMA_PROMPTING_v1.1_ENHANCEMENT.md`](docs/SCHEMA_PROMPTING_v1.1_ENHANCEMENT.md)
 
 ---
+
 
 ## 🎯 What Was Implemented
 

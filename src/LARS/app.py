@@ -20,6 +20,7 @@ from pathlib import Path
 # Import your existing NLP controller
 import os
 from openai import OpenAI
+import duckdb  # 🆕 DuckDB for SQL queries
 
 # Securely load API Key from docker/env/.env.app
 try:
@@ -3095,7 +3096,28 @@ def show_data_entry_form():
                 
                 if os.path.exists(data_path):
                     new_df.to_excel(data_path, index=False)
-                    st.success(f"✅ Sample added successfully! Total records: {len(new_df):,}")
+                    
+                    # 🆕 Also save to DuckDB database
+                    db_path = os.path.join(os.path.dirname(__file__), 'lars_data.duckdb')
+                    if os.path.exists(db_path):
+                        try:
+                            con = duckdb.connect(db_path, read_only=False)
+                            
+                            # Insert the new row into samples table
+                            # Create a DataFrame with just the new row for insertion
+                            new_row_df = pd.DataFrame([new_row])
+                            
+                            # Insert using DuckDB's append functionality
+                            con.execute("INSERT INTO samples SELECT * FROM new_row_df")
+                            con.close()
+                            
+                            st.success(f"✅ Sample added to both Excel and DuckDB! Total records: {len(new_df):,}")
+                        except Exception as db_error:
+                            st.warning(f"⚠️ Added to Excel but DuckDB error: {db_error}")
+                            st.info("💡 Run `python migrate_db.py` to sync the database.")
+                    else:
+                        st.success(f"✅ Sample added to Excel! Total records: {len(new_df):,}")
+                        st.info("💡 DuckDB database not found. Create it with: `python migrate_db.py`")
                     
                     # Show the added row details
                     with st.expander("📋 View Added Record"):
@@ -3846,6 +3868,411 @@ def generate_map_chart(df: pd.DataFrame, query: str):
         st.error(f"Error generating map chart: {e}")
         with st.expander("🔍 Error Details"):
             st.exception(e)
+
+# ============================================================================
+# 🆕 SQL-BASED QUERY PROCESSING WITH DUCKDB
+# ============================================================================
+
+def get_duckdb_connection():
+    """Get DuckDB connection to the LARS database"""
+    db_path = Path(__file__).parent / 'lars_data.duckdb'
+    if not db_path.exists():
+        return None
+    return duckdb.connect(str(db_path), read_only=True)
+
+def get_sql_schema_info(con) -> str:
+    """
+    Get database schema information for Schema-Only Prompting
+    Returns metadata WITHOUT exposing actual sensitive data
+    """
+    schema_parts = []
+    
+    # 1. Get column information
+    columns_df = con.execute("DESCRIBE samples").df()
+    schema_parts.append("**Column Information:**")
+    schema_parts.append("| Column | Type |")
+    schema_parts.append("|--------|------|")
+    for _, row in columns_df.iterrows():
+        schema_parts.append(f"| {row['column_name']} | {row['column_type']} |")
+    
+    # 2. Get row count
+    count = con.execute("SELECT COUNT(*) as count FROM samples").fetchone()[0]
+    schema_parts.append(f"\n**Total Records:** {count:,} samples")
+    
+    # 3. Get numeric column statistics (aggregates only)
+    try:
+        numeric_stats = con.execute("""
+            SELECT 
+                'reading' as column_name,
+                ROUND(MIN(reading), 4) as min_val,
+                ROUND(MAX(reading), 4) as max_val,
+                ROUND(AVG(reading), 4) as mean_val
+            FROM samples
+            UNION ALL
+            SELECT 'limits', ROUND(MIN(limits), 4), ROUND(MAX(limits), 4), ROUND(AVG(limits), 4) FROM samples
+        """).df()
+        
+        schema_parts.append("\n**Numeric Column Ranges:**")
+        schema_parts.append(numeric_stats.to_markdown(index=False))
+    except:
+        pass
+    
+    # 4. Get categorical column unique counts
+    try:
+        categorical_info = con.execute("""
+            SELECT 'vegetable_english' as col, COUNT(DISTINCT vegetable_english) as cnt FROM samples
+            UNION ALL SELECT 'pesticide_standardized', COUNT(DISTINCT pesticide_standardized) FROM samples
+            UNION ALL SELECT 'الحي', COUNT(DISTINCT الحي) FROM samples
+            UNION ALL SELECT 'year', COUNT(DISTINCT year) FROM samples
+        """).df()
+        
+        schema_parts.append("\n**Categorical Columns Info:**")
+        for _, row in categorical_info.iterrows():
+            schema_parts.append(f"- `{row['col']}`: {row['cnt']} unique values")
+    except:
+        pass
+    
+    # 5. Add value patterns (generic examples)
+    schema_parts.append("""
+**Common Value Patterns (Generic Examples):**
+- `vegetable_english`: English vegetable names (e.g., 'Tomato', 'Cucumber', 'Pepper')
+- `vegetable_arabic`: Arabic vegetable names (e.g., 'طماطم', 'خيار', 'فلفل')
+- `pesticide_standardized`: English pesticide names (use for filtering)
+- `الحي`: Arabic neighborhood names (e.g., 'الإسكان', 'الصفراء', 'الموطأ')
+- `is_compliant`: 1=compliant (below limit), 0=violation (above limit)
+- `result`: Arabic text 'مطابق' (compliant) or 'غير مطابق' (non-compliant)
+""")
+    
+    return '\n'.join(schema_parts)
+
+
+def process_data_query_sql(query: str, model, include_risk: bool = False):
+    """
+    🆕 Process data analysis queries using SQL + DuckDB
+    Uses Schema-Only Prompting for privacy protection
+    """
+    
+    with st.spinner("🔄 Generating SQL query..."):
+        try:
+            # Connect to DuckDB
+            con = get_duckdb_connection()
+            if con is None:
+                st.error("❌ Database not found. Please run migrate_db.py first.")
+                return
+            
+            # Get schema info for prompt
+            schema_info = get_sql_schema_info(con)
+            
+            # Build risk instruction
+            risk_instruction = ""
+            if include_risk:
+                risk_instruction = """
+Also include risk assessment in the query:
+- Calculate exceedance_ratio (reading/limits) 
+- Add CASE WHEN for Risk_Level: 'High' (>2x limit), 'Medium' (1-2x), 'Low' (<1x)
+"""
+            
+            # Pesticide mapping for Arabic names
+            pesticide_mapping_str = """
+**Arabic Pesticide Name Mapping (use English names in SQL):**
+- البايفنثرن = Bifenthrin
+- الكلوربيريفوس = Chlorpyrifos  
+- الديمثويت = Dimethoate
+- اللامبدا = Lambda-cyhalothrin
+- الميثوميل = Methomyl
+- الكاربندزيم = Carbendazim
+- البروفيزين / بوبروفيزين = Buprofezin
+- الأباميكتين = Abamectin
+- الأسيتامبريد = Acetamiprid
+- الإيماميكتين = Emamectin
+- الأيميداكلوبريد = Imidacloprid
+- الثيامثوكسام = Thiamethoxam
+- الدلتامثرين = Deltamethrin
+- السيبرمثرين = Cypermethrin
+- الفيبرونيل = Fipronil
+
+**Arabic Vegetable Name Mapping (use English names in SQL):**
+- طماطم = Tomato
+- خيار = Cucumber
+- فلفل = Pepper
+- باذنجان = Eggplant
+- كوسة / كوسا = Squash / Zucchini
+- بطاطس = Potato
+- جزر = Carrot
+- خس = Lettuce
+- بقدونس = Parsley
+- سبانخ = Spinach
+- ملفوف / كرنب = Cabbage
+- فراولة = Strawberry
+- عنب = Grape
+- تفاح = Apple
+- برتقال = Orange
+"""
+            
+            # Build SQL prompt with Schema-Only information
+            prompt = f"""Generate a SQL query to answer this question about the pesticide testing database.
+
+🔒 Database Schema (Metadata Only - No Actual Data Exposed):
+
+{schema_info}
+
+{pesticide_mapping_str}
+
+⚠️ PRIVACY NOTE: You are receiving ONLY schema information.
+DO NOT assume specific values exist. Write generic SQL based on column names only.
+
+**TABLE NAME:** samples
+
+**User Question:** {query}
+{risk_instruction}
+
+**IMPORTANT SQL RULES:**
+1. Use standard SQL syntax (DuckDB compatible)
+2. Use single quotes for strings: WHERE column = 'value'
+3. For Arabic text matching, use: WHERE column LIKE '%الإسكان%'
+4. For compliance: is_compliant = 1 (compliant/below limit), is_compliant = 0 (violation/above limit)
+5. Always include ORDER BY for sorted results
+6. Use LIMIT 100 for large result sets
+7. For Arabic output column names, use AS: SELECT COUNT(*) AS عدد_العينات
+8. Filter by year using: WHERE CAST(year AS INTEGER) = 2022
+9. **CASE-INSENSITIVE MATCHING:** Use ILIKE instead of LIKE for case-insensitive search
+10. exceedance_ratio = reading / limits (already in database, use for >2x limit queries)
+11. **IMPORTANT: vegetable_english values are LOWERCASE** (e.g., 'tomato', 'cucumber', 'eggplant')
+12. **Pesticide names are Title Case** (e.g., 'Bifenthrin', 'Buprofezin', 'Chlorpyrifos')
+13. Use ILIKE '%tomato%' for vegetable matching (case-insensitive)
+
+**COLUMN REFERENCE:**
+- `vegetable_english`: English name (Tomato, Cucumber, Eggplant, Pepper, etc.)
+- `vegetable_arabic`: Arabic name (طماطم, خيار, باذنجان, فلفل)
+- `pesticide_standardized`: English pesticide name (Bifenthrin, Buprofezin, Chlorpyrifos, etc.)
+- `reading`: Measured value (DOUBLE)
+- `limits`: Maximum allowed limit (DOUBLE)
+- `exceedance_ratio`: reading/limits ratio (DOUBLE) - use for "more than X times limit"
+- `is_compliant`: 1 = below limit (مطابق), 0 = above limit (غير مطابق)
+- `year`: Year (2022, 2023, 2024)
+- `result`: Arabic compliance text (مطابق / غير مطابق)
+
+**EXAMPLE QUERIES:**
+
+-- 1. Find pesticide more than 2 times limit in vegetable for specific year
+-- Example: "Find Buprofezin more than 2 times limit in tomato 2022"
+SELECT 
+    vegetable_english,
+    pesticide_standardized,
+    reading,
+    limits,
+    ROUND(exceedance_ratio, 2) AS exceedance_ratio,
+    result
+FROM samples
+WHERE pesticide_standardized ILIKE '%Buprofezin%'
+  AND vegetable_english ILIKE '%tomato%'
+  AND CAST(year AS INTEGER) = 2022
+  AND exceedance_ratio > 2
+ORDER BY exceedance_ratio DESC;
+
+-- 2. Find non-compliant samples with specific pesticide in vegetable for year
+-- Example: "Find non-compliant samples with bifenthrin in cucumber 2023"
+SELECT 
+    vegetable_english,
+    vegetable_arabic,
+    pesticide_standardized,
+    reading,
+    limits,
+    result,
+    CAST(year AS INTEGER) AS year
+FROM samples
+WHERE is_compliant = 0
+  AND pesticide_standardized ILIKE '%Bifenthrin%'
+  AND vegetable_english ILIKE '%cucumber%'
+  AND CAST(year AS INTEGER) = 2023
+ORDER BY reading DESC;
+
+-- 3. Tomato samples with pesticide - above and below limit counts (Arabic)
+-- Example: "ما هي عينات الطماطم التي تحتوي علي مبيد البايفنثرن فوق الحد و تحت الحد"
+SELECT 
+    vegetable_arabic AS الخضار,
+    pesticide_standardized AS المبيد,
+    COUNT(*) AS عدد_العينات,
+    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS فوق_الحد,
+    SUM(CASE WHEN is_compliant = 1 THEN 1 ELSE 0 END) AS تحت_الحد
+FROM samples
+WHERE vegetable_english ILIKE '%tomato%'
+  AND pesticide_standardized ILIKE '%Bifenthrin%'
+GROUP BY vegetable_arabic, pesticide_standardized;
+
+-- 4. List all pesticides in a vegetable with counts (Arabic)
+-- Example: "ماهي المبيدات الموجوده في عينة الباذنجان و ما عدد تكرار المبيدات"
+SELECT 
+    pesticide_standardized AS المبيد,
+    COUNT(*) AS عدد_التكرار,
+    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS فوق_الحد,
+    SUM(CASE WHEN is_compliant = 1 THEN 1 ELSE 0 END) AS تحت_الحد
+FROM samples
+WHERE vegetable_english ILIKE '%eggplant%'
+GROUP BY pesticide_standardized
+ORDER BY عدد_التكرار DESC;
+
+-- 5. Vegetables in neighborhood with compliance stats
+SELECT 
+    vegetable_arabic AS الخضار,
+    COUNT(*) AS عدد_العينات,
+    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS فوق_الحد,
+    SUM(CASE WHEN is_compliant = 1 THEN 1 ELSE 0 END) AS تحت_الحد
+FROM samples
+WHERE الحي ILIKE '%الإسكان%'
+GROUP BY vegetable_arabic
+ORDER BY عدد_العينات DESC;
+
+-- 6. Compliance trends by year
+SELECT 
+    CAST(year AS INTEGER) AS السنة,
+    COUNT(*) AS total_samples,
+    SUM(is_compliant) AS compliant,
+    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS violations,
+    ROUND(AVG(is_compliant) * 100, 2) AS compliance_rate
+FROM samples
+GROUP BY year
+ORDER BY year;
+
+-- 7. Show all samples for a specific vegetable + pesticide combination
+SELECT 
+    vegetable_arabic,
+    pesticide_standardized,
+    reading,
+    limits,
+    ROUND(exceedance_ratio, 2) AS نسبة_التجاوز,
+    result,
+    CAST(year AS INTEGER) AS السنة
+FROM samples
+WHERE vegetable_english ILIKE '%tomato%'
+  AND pesticide_standardized ILIKE '%Bifenthrin%'
+ORDER BY exceedance_ratio DESC
+LIMIT 50;
+
+-- 8. Show last N rows (recently added samples)
+-- Example: "اعرض اخر 5 صفوف" or "Show last 5 rows"
+SELECT 
+    vegetable_arabic,
+    pesticide_standardized,
+    reading,
+    limits,
+    result,
+    document_date,
+    الحي
+FROM samples
+ORDER BY ROWID DESC
+LIMIT 5;
+
+-- 9. Total record count
+-- Example: "كم عدد العينات" or "How many samples"
+SELECT COUNT(*) AS total_samples FROM samples;
+
+Generate ONLY the SQL query wrapped in ```sql``` markers:"""
+
+            # Generate SQL using AI model
+            generated_text = ""
+            
+            try:
+                if hasattr(model, 'chat') and hasattr(model.chat, 'completions'):
+                    model_name = st.session_state.get('model_name', 'gpt-4o-mini')
+                    response = model.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": "You are a SQL expert. Generate ONLY valid SQL queries. Use DuckDB syntax."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.0
+                    )
+                    generated_text = response.choices[0].message.content
+                else:
+                    response = model.generate_content(prompt)
+                    generated_text = response.text
+            except Exception as gen_error:
+                st.error(f"Generation failed: {gen_error}")
+                raise gen_error
+
+            # Extract SQL from response
+            sql_match = re.search(r'```sql\n(.*?)```', generated_text, re.DOTALL | re.IGNORECASE)
+            
+            if sql_match:
+                generated_sql = sql_match.group(1).strip()
+            else:
+                sql_match = re.search(r'```\n(.*?)```', generated_text, re.DOTALL)
+                if sql_match:
+                    generated_sql = sql_match.group(1).strip()
+                else:
+                    generated_sql = generated_text.strip()
+            
+            # Clean up SQL
+            generated_sql = generated_sql.replace('```', '').strip()
+            
+            # Execute SQL
+            try:
+                result = con.execute(generated_sql).df()
+            except Exception as sql_error:
+                st.error(f"❌ SQL Error: {sql_error}")
+                st.code(generated_sql, language='sql')
+                st.info("💡 The AI-generated SQL had an error. Try rephrasing your question.")
+                con.close()
+                return
+            
+            # Store results
+            st.session_state.last_query_result = result
+            st.session_state.last_query = query
+            st.session_state.last_generated_code = generated_sql
+            st.session_state.last_query_type = 'sql'
+            
+            st.success("✅ Query executed successfully!")
+            st.markdown("### 📊 Results:")
+            
+            if result is None or result.empty:
+                st.warning("⚠️ No results found for this query.")
+            else:
+                # Show metrics for common result types
+                if len(result.columns) > 0:
+                    numeric_cols = result.select_dtypes(include=[np.number]).columns
+                    if 'عدد_العينات' in result.columns or 'عدد العينات' in result.columns:
+                        col_name = 'عدد_العينات' if 'عدد_العينات' in result.columns else 'عدد العينات'
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("📊 Total Records", result[col_name].sum() if pd.api.types.is_numeric_dtype(result[col_name]) else len(result))
+                        with col2:
+                            if 'فوق_الحد' in result.columns or 'فوق الحد' in result.columns:
+                                above_col = 'فوق_الحد' if 'فوق_الحد' in result.columns else 'فوق الحد'
+                                st.metric("🔴 Above Limit", result[above_col].sum())
+                        with col3:
+                            if 'تحت_الحد' in result.columns or 'تحت الحد' in result.columns:
+                                below_col = 'تحت_الحد' if 'تحت_الحد' in result.columns else 'تحت الحد'
+                                st.metric("🟢 Below Limit", result[below_col].sum())
+                
+                # Display results
+                st.dataframe(result, use_container_width=True)
+                
+                # Download button
+                csv = result.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Results as CSV",
+                    data=csv,
+                    file_name="query_results.csv",
+                    mime="text/csv"
+                )
+            
+            # Show generated SQL
+            with st.expander("🔍 View Generated SQL"):
+                st.code(generated_sql, language='sql')
+                st.caption("This SQL was AI-generated and executed on DuckDB")
+            
+            # Close connection
+            con.close()
+            
+        except Exception as e:
+            st.error(f"❌ Error in SQL analysis: {str(e)}")
+            with st.expander("🔍 Debug Details"):
+                st.exception(e)
+                if 'generated_sql' in locals():
+                    st.markdown("**Generated SQL:**")
+                    st.code(generated_sql, language='sql')
+
 
 def process_data_query(query: str, df: pd.DataFrame, model, include_risk: bool = False):
     """Process data analysis queries using Gemini with risk assessment option"""
@@ -4635,6 +5062,31 @@ def show_chat_page(api_client):
         else:
             has_risk = None # Auto-detect will handle this later
         
+        # 🆕 Query Engine Selection (SQL vs Pandas)
+        st.markdown("---")
+        st.markdown("### 🗄️ Query Engine")
+        
+        # Check if DuckDB database exists
+        db_path = Path(__file__).parent / 'lars_data.duckdb'
+        db_exists = db_path.exists()
+        
+        if db_exists:
+            query_engine = st.radio(
+                "Choose Query Engine",
+                ["🚀 SQL (DuckDB)", "🐼 Pandas"],
+                help="SQL is faster and more secure. Pandas is the legacy option."
+            )
+            st.session_state.query_engine = 'sql' if 'SQL' in query_engine else 'pandas'
+            
+            if 'SQL' in query_engine:
+                st.success("⚡ SQL mode: Faster queries with DuckDB")
+            else:
+                st.info("🐼 Pandas mode: Legacy query engine")
+        else:
+            st.warning("⚠️ DuckDB database not found. Using Pandas.")
+            st.caption("Run `python migrate_db.py` to enable SQL mode.")
+            st.session_state.query_engine = 'pandas'
+        
         # ========================================================================
         # DATE FILTER SECTION
         # ========================================================================
@@ -4955,8 +5407,17 @@ def show_chat_page(api_client):
                         st.warning("⚠️ No data found in the selected date range. Try a different range.")
                         return
             
-            # Use the robust function we defined earlier
-            process_data_query(user_question, df_filtered, model, include_risk)
+            # Choose query engine based on sidebar selection
+            query_engine = st.session_state.get('query_engine', 'pandas')
+            
+            if query_engine == 'sql':
+                # 🆕 Use SQL (DuckDB) - faster and more secure
+                st.info("🚀 Using SQL (DuckDB) query engine")
+                process_data_query_sql(user_question, model, include_risk)
+            else:
+                # Legacy: Use Pandas
+                st.info("🐼 Using Pandas query engine")
+                process_data_query(user_question, df_filtered, model, include_risk)
 
     # ========================================================================
     # STEP 6.5: Display stored results with chart buttons (PERSISTENT)

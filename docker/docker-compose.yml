@@ -12,16 +12,16 @@ services:
       - fastapi_data:/app/assets
       - ./chroma_data:/app/chroma_db:rw
       - /Users/a12/mini-rag/src/data:/app/data
-      - ./single_dataset_system:/app/single_dataset_system  # 👈 Add this line for models
+      - ./single_dataset_system:/app/single_dataset_system # 👈 Add this line for models
+      - ../src/LARS/lars_data.duckdb:/app/src/LARS/lars_data.duckdb:rw # 🆕 DuckDB database persistence
+      - ../src/LARS/processed_data_with_neighborhood.xlsx:/app/src/LARS/processed_data_with_neighborhood.xlsx:rw # 🆕 Excel data persistence
     networks:
       - backend
     restart: always
     depends_on:
-      - postgres  # Changed from pgvector to postgres
+      - postgres # Changed from pgvector to postgres
     env_file:
       - ./env/.env.app
-    
-
 
   # Nginx Service
   nginx:
@@ -37,7 +37,6 @@ services:
       - backend
     restart: always
 
-
   # PostgreSQL (pgvector)
   postgres:
     image: pgvector/pgvector:0.8.0-pg17
@@ -52,7 +51,7 @@ services:
       - backend
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -106,7 +105,6 @@ services:
       - backend
     restart: always
 
-
   # Node Exporter for system metrics
   node-exporter:
     image: prom/node-exporter:v1.9.1
@@ -135,7 +133,7 @@ services:
     env_file:
       - ./env/.env.postgres-exporter
     depends_on:
-      - postgres  # Changed from pgvector to postgres
+      - postgres # Changed from pgvector to postgres
     networks:
       - backend
     restart: always
