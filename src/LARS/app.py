@@ -53,7 +53,7 @@ if not os.environ.get('OPENAI_API_KEY'):
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 try:
-    from hybrid_query_system import HybridQuerySystem  # No lars_simple prefix!
+    from core.hybrid_query_system import HybridQuerySystem  # Updated path
     HYBRID_AVAILABLE = True
     print("✅ Hybrid system imported!")
 except ImportError as e:
@@ -184,7 +184,7 @@ def get_hybrid_system_optional():
         
         # Initialize WITHOUT NLP controller (works for pesticide queries!)
         hybrid_system = HybridQuerySystem(
-            excel_path='/Users/a12/mini-rag/src/LARS/processed_data_with_neighborhood.xlsx',
+            excel_path=str(Path(__file__).parent / 'data' / 'processed_data_with_neighborhood.xlsx'),
             iso_rag_client=None,  # ⭐ Set to None - no ISO docs but pesticide works!
             gemini_api_key=gemini_key
         )
@@ -226,7 +226,7 @@ def get_hybrid_system():
         
         # Initialize hybrid
         hybrid = HybridQuerySystem(
-            excel_path='/Users/a12/mini-rag/src/data/processed_data_with_neighborhood.xlsx',  # Adjust path
+            excel_path=str(Path(__file__).parent / 'data' / 'processed_data_with_neighborhood.xlsx'),
             iso_rag_client=nlp_controller,
             gemini_api_key=gemini_key
         )
@@ -1237,7 +1237,7 @@ def render_animated_header():
 def main():
 
     if 'df' not in st.session_state:
-        data_path = os.path.join(os.path.dirname(__file__), 'processed_data_with_neighborhood.xlsx')
+        data_path = os.path.join(os.path.dirname(__file__), 'data', 'processed_data_with_neighborhood.xlsx')
         if os.path.exists(data_path):
             st.session_state.df = pd.read_excel(data_path)
             st.session_state.data_loaded = True
@@ -1542,8 +1542,9 @@ def show_statistical_insights_page(api_client):
     def load_data_from_path():
         """Load pesticide data from predefined paths"""
         try:
-            # Try multiple possible paths
+            # Try multiple possible paths (prioritize data folder)
             possible_paths = [
+                os.path.join(os.path.dirname(__file__), 'data', 'processed_data_with_neighborhood.xlsx'),
                 os.path.join(os.path.dirname(__file__), 'processed_data_with_neighborhood.xlsx'),
                 'data/cleaned_data.csv',
                 '../data/cleaned_data.csv',
@@ -3092,13 +3093,13 @@ def show_data_entry_form():
                 st.session_state.df = new_df
                 
                 # Save to Excel file
-                data_path = os.path.join(os.path.dirname(__file__), 'processed_data_with_neighborhood.xlsx')
+                data_path = os.path.join(os.path.dirname(__file__), 'data', 'processed_data_with_neighborhood.xlsx')
                 
                 if os.path.exists(data_path):
                     new_df.to_excel(data_path, index=False)
                     
                     # 🆕 Also save to DuckDB database
-                    db_path = os.path.join(os.path.dirname(__file__), 'lars_data.duckdb')
+                    db_path = os.path.join(os.path.dirname(__file__), 'data', 'lars_data.duckdb')
                     if os.path.exists(db_path):
                         try:
                             con = duckdb.connect(db_path, read_only=False)
@@ -3875,7 +3876,7 @@ def generate_map_chart(df: pd.DataFrame, query: str):
 
 def get_duckdb_connection():
     """Get DuckDB connection to the LARS database"""
-    db_path = Path(__file__).parent / 'lars_data.duckdb'
+    db_path = Path(__file__).parent / 'data' / 'lars_data.duckdb'
     if not db_path.exists():
         return None
     return duckdb.connect(str(db_path), read_only=True)
@@ -3884,11 +3885,12 @@ def get_sql_schema_info(con) -> str:
     """
     Get database schema information for Schema-Only Prompting
     Returns metadata WITHOUT exposing actual sensitive data
+    Uses CHEMISTRY_TIDY table (transformed with separate columns)
     """
     schema_parts = []
     
     # 1. Get column information
-    columns_df = con.execute("DESCRIBE samples").df()
+    columns_df = con.execute("DESCRIBE chemistry_tidy").df()
     schema_parts.append("**Column Information:**")
     schema_parts.append("| Column | Type |")
     schema_parts.append("|--------|------|")
@@ -3896,51 +3898,83 @@ def get_sql_schema_info(con) -> str:
         schema_parts.append(f"| {row['column_name']} | {row['column_type']} |")
     
     # 2. Get row count
-    count = con.execute("SELECT COUNT(*) as count FROM samples").fetchone()[0]
-    schema_parts.append(f"\n**Total Records:** {count:,} samples")
+    count = con.execute("SELECT COUNT(*) as count FROM chemistry_tidy").fetchone()[0]
+    schema_parts.append(f"\n**Total Records:** {count:,} records")
     
-    # 3. Get numeric column statistics (aggregates only)
+    # 3. Get sample type statistics
     try:
-        numeric_stats = con.execute("""
+        sample_type_stats = con.execute("""
             SELECT 
-                'reading' as column_name,
-                ROUND(MIN(reading), 4) as min_val,
-                ROUND(MAX(reading), 4) as max_val,
-                ROUND(AVG(reading), 4) as mean_val
-            FROM samples
-            UNION ALL
-            SELECT 'limits', ROUND(MIN(limits), 4), ROUND(MAX(limits), 4), ROUND(AVG(limits), 4) FROM samples
+                "نوع العينة" as sample_type,
+                COUNT(*) as count
+            FROM chemistry_tidy
+            WHERE "نوع العينة" IS NOT NULL
+            GROUP BY "نوع العينة"
+            ORDER BY count DESC
+            LIMIT 10
         """).df()
         
-        schema_parts.append("\n**Numeric Column Ranges:**")
-        schema_parts.append(numeric_stats.to_markdown(index=False))
+        schema_parts.append("\n**Sample Types (نوع العينة):**")
+        for _, row in sample_type_stats.iterrows():
+            schema_parts.append(f"- {row['sample_type']}: {row['count']} records")
     except:
         pass
     
-    # 4. Get categorical column unique counts
+    # 4. Get pesticide statistics (NEW - using tidy format!)
     try:
-        categorical_info = con.execute("""
-            SELECT 'vegetable_english' as col, COUNT(DISTINCT vegetable_english) as cnt FROM samples
-            UNION ALL SELECT 'pesticide_standardized', COUNT(DISTINCT pesticide_standardized) FROM samples
-            UNION ALL SELECT 'الحي', COUNT(DISTINCT الحي) FROM samples
-            UNION ALL SELECT 'year', COUNT(DISTINCT year) FROM samples
+        pesticide_stats = con.execute("""
+            SELECT 
+                pesticide_name,
+                COUNT(*) as count,
+                SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) as violations
+            FROM chemistry_tidy
+            WHERE pesticide_name IS NOT NULL AND is_detected = 1
+            GROUP BY pesticide_name
+            ORDER BY count DESC
+            LIMIT 10
         """).df()
         
-        schema_parts.append("\n**Categorical Columns Info:**")
-        for _, row in categorical_info.iterrows():
-            schema_parts.append(f"- `{row['col']}`: {row['cnt']} unique values")
+        schema_parts.append("\n**Top Pesticides Detected:**")
+        for _, row in pesticide_stats.iterrows():
+            schema_parts.append(f"- {row['pesticide_name']}: {row['count']} detections ({row['violations']} violations)")
     except:
         pass
     
-    # 5. Add value patterns (generic examples)
+    # 5. Get compliance statistics
+    try:
+        compliance_stats = con.execute("""
+            SELECT 
+                SUM(CASE WHEN is_compliant = 1 THEN 1 ELSE 0 END) as compliant,
+                SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) as violations,
+                ROUND(AVG(CASE WHEN is_compliant IS NOT NULL THEN is_compliant END) * 100, 2) as compliance_rate
+            FROM chemistry_tidy
+            WHERE is_detected = 1
+        """).fetchone()
+        
+        schema_parts.append(f"\n**Compliance Statistics:**")
+        schema_parts.append(f"- Compliant: {compliance_stats[0]}")
+        schema_parts.append(f"- Violations: {compliance_stats[1]}")
+        schema_parts.append(f"- Compliance Rate: {compliance_stats[2]}%")
+    except:
+        pass
+    
+    # 6. Add column descriptions for TIDY format
     schema_parts.append("""
-**Common Value Patterns (Generic Examples):**
-- `vegetable_english`: English vegetable names (e.g., 'Tomato', 'Cucumber', 'Pepper')
-- `vegetable_arabic`: Arabic vegetable names (e.g., 'طماطم', 'خيار', 'فلفل')
-- `pesticide_standardized`: English pesticide names (use for filtering)
-- `الحي`: Arabic neighborhood names (e.g., 'الإسكان', 'الصفراء', 'الموطأ')
-- `is_compliant`: 1=compliant (below limit), 0=violation (above limit)
-- `result`: Arabic text 'مطابق' (compliant) or 'غير مطابق' (non-compliant)
+**Column Descriptions (TIDY FORMAT):**
+- `كود العينة`: Sample code (unique identifier)
+- `التاريخ`: Sample date (TIMESTAMP)
+- `اسم العينة`: Sample name (e.g., 'طماطم', 'بقدونس', 'جزر', 'كمون')
+- `نوع العينة`: Sample type (e.g., 'خضراوات', 'فواكهة', 'توابل', 'مكسرات', 'حبوب')
+- `نوع الاختبار`: Test type (e.g., 'متبقيات مبيدات', 'سموم فطرية')
+- `الحى`: Neighborhood name
+- `اسم البلدية`: Municipality name
+- `pesticide_name`: Pesticide/contaminant name (e.g., 'chlorpyrifos', 'imidacloprid')
+- `concentration`: Measured concentration (DOUBLE)
+- `limit_value`: Maximum allowed limit (DOUBLE)
+- `exceedance_ratio`: concentration / limit_value (DOUBLE)
+- `is_compliant`: 1 = compliant (below limit), 0 = violation (above limit)
+- `is_detected`: 1 = pesticide detected, 0 = no detection (e.g., 'NO CBD')
+- `contaminant_number`: Which contaminant column (1-10)
 """)
     
     return '\n'.join(schema_parts)
@@ -4009,163 +4043,181 @@ Also include risk assessment in the query:
 - برتقال = Orange
 """
             
-            # Build SQL prompt with Schema-Only information
-            prompt = f"""Generate a SQL query to answer this question about the pesticide testing database.
+            # Build SQL prompt with Schema-Only information (TIDY FORMAT)
+            prompt = f"""Generate a SQL query to answer this question about the CHEMISTRY testing database.
 
 🔒 Database Schema (Metadata Only - No Actual Data Exposed):
 
 {schema_info}
 
-{pesticide_mapping_str}
-
 ⚠️ PRIVACY NOTE: You are receiving ONLY schema information.
 DO NOT assume specific values exist. Write generic SQL based on column names only.
 
-**TABLE NAME:** samples
+**TABLE NAME:** chemistry_tidy
 
 **User Question:** {query}
 {risk_instruction}
 
 **IMPORTANT SQL RULES:**
 1. Use standard SQL syntax (DuckDB compatible)
-2. Use single quotes for strings: WHERE column = 'value'
-3. For Arabic text matching, use: WHERE column LIKE '%الإسكان%'
-4. For compliance: is_compliant = 1 (compliant/below limit), is_compliant = 0 (violation/above limit)
+2. ALWAYS use double quotes for Arabic column names: "اسم العينة"
+3. For Arabic text matching, use: WHERE "column" LIKE '%طماطم%'
+4. For compliance check: use is_compliant = 1 (compliant) or is_compliant = 0 (violation)
 5. Always include ORDER BY for sorted results
 6. Use LIMIT 100 for large result sets
 7. For Arabic output column names, use AS: SELECT COUNT(*) AS عدد_العينات
-8. Filter by year using: WHERE CAST(year AS INTEGER) = 2022
+8. Filter by year using: WHERE YEAR("التاريخ") = 2024
 9. **CASE-INSENSITIVE MATCHING:** Use ILIKE instead of LIKE for case-insensitive search
-10. exceedance_ratio = reading / limits (already in database, use for >2x limit queries)
-11. **IMPORTANT: vegetable_english values are LOWERCASE** (e.g., 'tomato', 'cucumber', 'eggplant')
-12. **Pesticide names are Title Case** (e.g., 'Bifenthrin', 'Buprofezin', 'Chlorpyrifos')
-13. Use ILIKE '%tomato%' for vegetable matching (case-insensitive)
+10. **EXCEEDANCE:** Use exceedance_ratio > 1 to find violations, > 2 for 2x limit violations
 
-**COLUMN REFERENCE:**
-- `vegetable_english`: English name (Tomato, Cucumber, Eggplant, Pepper, etc.)
-- `vegetable_arabic`: Arabic name (طماطم, خيار, باذنجان, فلفل)
-- `pesticide_standardized`: English pesticide name (Bifenthrin, Buprofezin, Chlorpyrifos, etc.)
-- `reading`: Measured value (DOUBLE)
-- `limits`: Maximum allowed limit (DOUBLE)
-- `exceedance_ratio`: reading/limits ratio (DOUBLE) - use for "more than X times limit"
-- `is_compliant`: 1 = below limit (مطابق), 0 = above limit (غير مطابق)
-- `year`: Year (2022, 2023, 2024)
-- `result`: Arabic compliance text (مطابق / غير مطابق)
+**COLUMN REFERENCE (TIDY FORMAT - Separate columns for pesticide data!):**
+- `"كود العينة"`: Sample code (unique ID)
+- `"التاريخ"`: Sample date (TIMESTAMP)
+- `"اسم العينة"`: Sample name in Arabic (طماطم, بقدونس, كمون, etc.)
+- `"نوع العينة"`: Sample type (خضراوات, فواكهة, توابل, مكسرات, حبوب, ورقيات)
+- `"نوع الاختبار"`: Test type (متبقيات مبيدات, سموم فطرية)
+- `"الحى"`: Neighborhood name
+- `"اسم البلدية"`: Municipality name
+- `pesticide_name`: Pesticide/contaminant name (e.g., 'chlorpyrifos', 'imidacloprid', 'bifenthrin')
+- `concentration`: Measured concentration value (DOUBLE - numeric!)
+- `limit_value`: Maximum allowed limit (DOUBLE - numeric!)
+- `exceedance_ratio`: concentration / limit_value (DOUBLE)
+- `is_compliant`: 1 = compliant (below limit), 0 = violation (above limit)
+- `is_detected`: 1 = pesticide detected with value, 0 = no detection (e.g., 'NO CBD')
 
 **EXAMPLE QUERIES:**
 
--- 1. Find pesticide more than 2 times limit in vegetable for specific year
--- Example: "Find Buprofezin more than 2 times limit in tomato 2022"
+-- 1. Find all violations (above limit)
 SELECT 
-    vegetable_english,
-    pesticide_standardized,
-    reading,
-    limits,
-    ROUND(exceedance_ratio, 2) AS exceedance_ratio,
-    result
-FROM samples
-WHERE pesticide_standardized ILIKE '%Buprofezin%'
-  AND vegetable_english ILIKE '%tomato%'
-  AND CAST(year AS INTEGER) = 2022
-  AND exceedance_ratio > 2
+    "اسم العينة" AS sample,
+    pesticide_name,
+    concentration,
+    limit_value,
+    ROUND(exceedance_ratio, 2) AS ratio
+FROM chemistry_tidy
+WHERE is_compliant = 0
+ORDER BY exceedance_ratio DESC
+LIMIT 20;
+
+-- 2. Count violations by sample type
+SELECT 
+    "نوع العينة" AS sample_type,
+    COUNT(*) AS total,
+    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS violations,
+    ROUND(SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS violation_rate
+FROM chemistry_tidy
+WHERE is_detected = 1
+GROUP BY "نوع العينة"
+ORDER BY violations DESC;
+
+-- 3. Most common pesticides
+SELECT 
+    pesticide_name AS المبيد,
+    COUNT(*) AS عدد_الكشف,
+    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS عدد_المخالفات
+FROM chemistry_tidy
+WHERE is_detected = 1
+GROUP BY pesticide_name
+ORDER BY عدد_الكشف DESC
+LIMIT 15;
+
+-- 4. Find samples with specific pesticide
+SELECT 
+    "اسم العينة" AS sample,
+    "الحى" AS neighborhood,
+    concentration,
+    limit_value,
+    ROUND(exceedance_ratio, 2) AS ratio,
+    is_compliant
+FROM chemistry_tidy
+WHERE pesticide_name ILIKE '%chlorpyrifos%'
 ORDER BY exceedance_ratio DESC;
 
--- 2. Find non-compliant samples with specific pesticide in vegetable for year
--- Example: "Find non-compliant samples with bifenthrin in cucumber 2023"
+-- 5. Samples exceeding 2x the limit
 SELECT 
-    vegetable_english,
-    vegetable_arabic,
-    pesticide_standardized,
-    reading,
-    limits,
-    result,
-    CAST(year AS INTEGER) AS year
-FROM samples
-WHERE is_compliant = 0
-  AND pesticide_standardized ILIKE '%Bifenthrin%'
-  AND vegetable_english ILIKE '%cucumber%'
-  AND CAST(year AS INTEGER) = 2023
-ORDER BY reading DESC;
-
--- 3. Tomato samples with pesticide - above and below limit counts (Arabic)
--- Example: "ما هي عينات الطماطم التي تحتوي علي مبيد البايفنثرن فوق الحد و تحت الحد"
-SELECT 
-    vegetable_arabic AS الخضار,
-    pesticide_standardized AS المبيد,
-    COUNT(*) AS عدد_العينات,
-    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS فوق_الحد,
-    SUM(CASE WHEN is_compliant = 1 THEN 1 ELSE 0 END) AS تحت_الحد
-FROM samples
-WHERE vegetable_english ILIKE '%tomato%'
-  AND pesticide_standardized ILIKE '%Bifenthrin%'
-GROUP BY vegetable_arabic, pesticide_standardized;
-
--- 4. List all pesticides in a vegetable with counts (Arabic)
--- Example: "ماهي المبيدات الموجوده في عينة الباذنجان و ما عدد تكرار المبيدات"
-SELECT 
-    pesticide_standardized AS المبيد,
-    COUNT(*) AS عدد_التكرار,
-    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS فوق_الحد,
-    SUM(CASE WHEN is_compliant = 1 THEN 1 ELSE 0 END) AS تحت_الحد
-FROM samples
-WHERE vegetable_english ILIKE '%eggplant%'
-GROUP BY pesticide_standardized
-ORDER BY عدد_التكرار DESC;
-
--- 5. Vegetables in neighborhood with compliance stats
-SELECT 
-    vegetable_arabic AS الخضار,
-    COUNT(*) AS عدد_العينات,
-    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS فوق_الحد,
-    SUM(CASE WHEN is_compliant = 1 THEN 1 ELSE 0 END) AS تحت_الحد
-FROM samples
-WHERE الحي ILIKE '%الإسكان%'
-GROUP BY vegetable_arabic
-ORDER BY عدد_العينات DESC;
-
--- 6. Compliance trends by year
-SELECT 
-    CAST(year AS INTEGER) AS السنة,
-    COUNT(*) AS total_samples,
-    SUM(is_compliant) AS compliant,
-    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS violations,
-    ROUND(AVG(is_compliant) * 100, 2) AS compliance_rate
-FROM samples
-GROUP BY year
-ORDER BY year;
-
--- 7. Show all samples for a specific vegetable + pesticide combination
-SELECT 
-    vegetable_arabic,
-    pesticide_standardized,
-    reading,
-    limits,
-    ROUND(exceedance_ratio, 2) AS نسبة_التجاوز,
-    result,
-    CAST(year AS INTEGER) AS السنة
-FROM samples
-WHERE vegetable_english ILIKE '%tomato%'
-  AND pesticide_standardized ILIKE '%Bifenthrin%'
+    "اسم العينة" AS sample,
+    pesticide_name,
+    concentration,
+    limit_value,
+    ROUND(exceedance_ratio, 2) AS ratio
+FROM chemistry_tidy
+WHERE exceedance_ratio > 2
 ORDER BY exceedance_ratio DESC
-LIMIT 50;
+LIMIT 20;
 
--- 8. Show last N rows (recently added samples)
--- Example: "اعرض اخر 5 صفوف" or "Show last 5 rows"
+-- 6. Average concentration by pesticide
 SELECT 
-    vegetable_arabic,
-    pesticide_standardized,
-    reading,
-    limits,
-    result,
-    document_date,
-    الحي
-FROM samples
-ORDER BY ROWID DESC
-LIMIT 5;
+    pesticide_name,
+    COUNT(*) AS samples,
+    ROUND(AVG(concentration), 4) AS avg_concentration,
+    ROUND(AVG(limit_value), 4) AS avg_limit,
+    ROUND(AVG(exceedance_ratio), 2) AS avg_ratio
+FROM chemistry_tidy
+WHERE is_detected = 1
+GROUP BY pesticide_name
+ORDER BY avg_ratio DESC
+LIMIT 15;
 
--- 9. Total record count
--- Example: "كم عدد العينات" or "How many samples"
-SELECT COUNT(*) AS total_samples FROM samples;
+-- 7. Violations by neighborhood
+SELECT 
+    "الحى" AS الحي,
+    COUNT(*) AS total,
+    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS violations
+FROM chemistry_tidy
+WHERE "الحى" IS NOT NULL
+GROUP BY "الحى"
+ORDER BY violations DESC;
+
+-- 8. Total record count
+SELECT COUNT(*) AS total_records FROM chemistry_tidy;
+
+-- 9. Samples with multiple pesticides count
+SELECT 
+    "اسم العينة" AS sample,
+    "كود العينة" AS code,
+    COUNT(*) AS pesticide_count
+FROM chemistry_tidy
+WHERE is_detected = 1
+GROUP BY "كود العينة", "اسم العينة"
+HAVING COUNT(*) > 1
+ORDER BY pesticide_count DESC
+LIMIT 10;
+
+-- 10. **IMPORTANT: Show last N SAMPLES with ALL their pesticides**
+-- NOTE: Each row = 1 pesticide. Use subquery to get all pesticides for last N samples
+-- Example: "اعرض آخر 5 عينات مع جميع المبيدات" or "Show last 5 samples with all pesticides"
+SELECT 
+    "كود العينة" AS code,
+    "اسم العينة" AS sample,
+    "نوع العينة" AS type,
+    pesticide_name,
+    concentration,
+    limit_value,
+    ROUND(exceedance_ratio, 2) AS ratio,
+    is_compliant
+FROM chemistry_tidy
+WHERE "كود العينة" IN (
+    SELECT DISTINCT "كود العينة" 
+    FROM chemistry_tidy 
+    ORDER BY "كود العينة" DESC 
+    LIMIT 5
+)
+ORDER BY "كود العينة" DESC, contaminant_number;
+
+-- 11. Get ALL pesticides for a specific sample code
+-- Example: "اعرض جميع الملوثات في عينة كود 6433"
+SELECT 
+    "كود العينة" AS code,
+    "اسم العينة" AS sample,
+    contaminant_number,
+    pesticide_name,
+    concentration,
+    limit_value,
+    ROUND(exceedance_ratio, 2) AS ratio,
+    is_compliant
+FROM chemistry_tidy
+WHERE "كود العينة" = 6433
+ORDER BY contaminant_number;
 
 Generate ONLY the SQL query wrapped in ```sql``` markers:"""
 
@@ -5067,7 +5119,7 @@ def show_chat_page(api_client):
         st.markdown("### 🗄️ Query Engine")
         
         # Check if DuckDB database exists
-        db_path = Path(__file__).parent / 'lars_data.duckdb'
+        db_path = Path(__file__).parent / 'data' / 'lars_data.duckdb'
         db_exists = db_path.exists()
         
         if db_exists:
@@ -5521,8 +5573,9 @@ def show_anova_analysis_page(api_client):
     def load_data_from_path():
         """Load pesticide data from predefined paths"""
         try:
-            # Try multiple possible paths
+            # Try multiple possible paths (prioritize data folder)
             possible_paths = [
+                os.path.join(os.path.dirname(__file__), 'data', 'processed_data_with_neighborhood.xlsx'),
                 os.path.join(os.path.dirname(__file__), 'processed_data_with_neighborhood.xlsx'),
                 'data/cleaned_data.csv',
                 '../data/cleaned_data.csv',
@@ -6324,6 +6377,7 @@ def show_risk_analysis_page(api_client):
         """Load pesticide data"""
         try:
             possible_paths = [
+                os.path.join(os.path.dirname(__file__), 'data', 'processed_data_with_neighborhood.xlsx'),
                 'data/cleaned_data.csv',
                 'data/processed_data_with_neighborhood.xlsx',
                 '../data/processed_data_with_neighborhood.xlsx',
@@ -6963,8 +7017,9 @@ def show_trend_analysis_page(api_client):
     def load_data_from_path():
         """Load pesticide data from predefined paths"""
         try:
-            # Try multiple possible paths
+            # Try multiple possible paths (prioritize data folder)
             possible_paths = [
+                os.path.join(os.path.dirname(__file__), 'data', 'processed_data_with_neighborhood.xlsx'),
                 os.path.join(os.path.dirname(__file__), 'processed_data_with_neighborhood.xlsx'),
                 'data/cleaned_data.csv',
                 '../data/cleaned_data.csv',
