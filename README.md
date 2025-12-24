@@ -103,47 +103,44 @@ docker compose up --build
 streamlit run src/LARS/app.py
 
 
-what is the gc column specifications
 
-pip install nbformat==4.2.0 
 
-find bifenazate in 2022
 
-find bifenthrin in all samples in 2023
 
-Find bifenazate exceeding limits in 2022
+find bifenazate in tomato
 
-Find bifenazate more than limits in 2022
+find bifenthrin in all samples 
 
-http://localhost:8000/api/v1/nlp/local/debug-filter/1?year=2022
+Find 'Buprofezin' more than 2 times the limit in tomato samples
 
-Find 'Buprofezin' more than 2 times the limit in tomato sample 2022
-include_risk_assessment : true
+find non compliant samples with bifenthrin in cucumber samples 
 
-find non compliant samples with bifenthrin in cucumber samples 2023
-Find 'fipronil' in eggplant samples 2022
+ ما عدد عينات الطماطم و الخيار و الكوسة كل علي حده
+
+ما هو عدد العينات التي تحتوي علي عدد ٦ مبيد
+
+Find 'fipronil' in eggplant samples 
+ابحث عن الفيبرونيل داخل الفاصوليا
+ابحث عن imidacloprid في الفستق
 
 what are the count of tomato samples that reading more than limits?
 
-ما عدد عينات الطماطم و الخيار و الكوسة
-
-ما هو عدد عينات الخيار التي تحتوي علي عدد ٢ مبيد
-
 ما هي الخضروات التي يشملها مبيد البايفنثرن و ماهي العينات تحت الحد و فوق الحد المسموح
 
-ما هي عينات الكوسه و الباذنجان التي تحتوي علي مبيد bifenthrin from 31/01/2022 to 28/08/2023
+ما هي عينات الكوسه و الباذنجان التي تحتوي علي مبيد bifenthrin 
+
+ما هي انواع التوابل الموجودة في حي الاسكان و ما عددها و ماهي العينات فوق الحد المسموح وتحت الحد المسموح
+
+ما هي عينات الطماطم التي تحتوي علي مبيد البابروفيزن فوق الحد و تحت الحد المسموح (typo problem solved)
+
+ماهي المبيدات الموجوده في عينة الطماطم  و ما عدد تكرار المبيدات
+
+ماهي المبيدات في حي الإسكان و الصفراء و الموطأ كل علي حده
+
+كم عدد عينات الخيار الفريدة بناءً على كود العينة؟
+
+
 ######
-ما هي انواع الخضروات الموجودة في حي الاسكان و ما عددها و ماهي العينات فوق الحد المسموح وتحت الحد المسموح
-
-ما هي عينات الطماطم التي تحتوي علي مبيد البايفنثرن فوق الحد و تحت الحد المسموح
-
-ماهي المبيدات الموجوده في عينة الباذنجان و ما عدد تكرار المبيدات
-
-ماهي المبيدات في حي الإسكان و الصفراء و الموطأ
-
 اعرض الاحياء في ترتيب تنازلي من الاكثر الي الاقل مخالفه
 
 Show me violations by neighborhood
-
-
-

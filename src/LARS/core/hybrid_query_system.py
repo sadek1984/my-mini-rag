@@ -30,6 +30,8 @@ class QueryType(Enum):
     HYBRID = "hybrid"        # Both systems
     UNKNOWN = "unknown"
 
+import duckdb
+
 class HybridQuerySystem:
     """
     Smart query router that uses:
@@ -45,13 +47,29 @@ class HybridQuerySystem:
         Initialize hybrid system
         
         Args:
-            excel_path: Path to pesticide Excel data
+            excel_path: Path to pesticide Excel data or DuckDB file
             iso_rag_client: Your existing RAG client for ISO docs
             gemini_api_key: Gemini API key (for both systems)
         """
         
-        # Load pesticide data
-        self.df = pd.read_excel(excel_path)
+        # Load data (detect format by extension)
+        if excel_path.endswith('.duckdb') or excel_path.endswith('.db'):
+            print(f"📂 Loading data from DuckDB: {excel_path}")
+            con = duckdb.connect(excel_path, read_only=True)
+            # Try to load formatted validation data if available, else raw samples
+            try:
+                self.df = con.execute("SELECT * FROM samples").df()
+            except Exception as e:
+                print(f"⚠️ Could not load 'samples' table: {e}")
+                # Fallback to listing tables
+                tables = con.execute("SHOW TABLES").fetchall()
+                print(f"Available tables: {tables}")
+                self.df = pd.DataFrame()
+            con.close()
+        else:
+            print(f"📂 Loading data from Excel: {excel_path}")
+            self.df = pd.read_excel(excel_path)
+            
         self._prepare_data()
         
         # Setup Gemini
