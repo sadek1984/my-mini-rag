@@ -4041,17 +4041,25 @@ def get_sql_schema_info(con) -> str:
         column_descriptions = {
             'كود العينة': 'Sample code (unique identifier)',
             'التاريخ': 'Sample date (TIMESTAMP)',
-            'اسم العينة': 'Sample name in Arabic',
+            'اسم العينة': 'Sample name in Arabic (e.g., طماطم, خيار, كمون)',
             'نوع العينة': 'Sample type (خضراوات, فواكهة, توابل, etc.)',
+            'تصنيف العينة': 'Sample classification (خدمية, تجارية, etc.)',
+            'نوع الاختبار': 'Test type (متبقيات مبيدات, افلاتوكسين, etc.)',
             'الحى': 'Neighborhood name',
-            'اسم المنشاة': 'Establishment name',
+            'اسم المنشاة': 'Establishment/facility name',
+            'اسم البلدية': 'Municipality name (e.g., بلدية غرب بريدة)',
+            'رقم الرخصة': 'License number',
+            'حالة العينة': 'Sample condition/status',
+            'اسم المستلم': 'Receiver name',
             'pesticide_name': 'Pesticide/contaminant name',
             'concentration': 'Measured concentration (DOUBLE)',
             'limit_value': 'Maximum allowed limit (DOUBLE)',
             'exceedance_ratio': 'concentration / limit_value (DOUBLE)',
-            'is_compliant': '1 = compliant (below limit), 0 = violation (above limit)',
+            'is_above_limit': '1 = above limit (فوق الحد), 0 = below limit (تحت الحد) - CALCULATED',
+            'is_compliant': '1 = compliant (مطابق), 0 = non-compliant (غير مطابق) - LAB JUDGMENT',
             'is_detected': '1 = pesticide detected, 0 = no detection',
-            'contaminant_number': 'Which contaminant column (1-8)'
+            'contaminant_number': 'Which contaminant column (1-10)',
+            'sample_result': 'Original lab result text'
         }
         
         for _, row in columns_df.iterrows():
@@ -4816,21 +4824,33 @@ DO NOT assume specific values exist. Write generic SQL based on column names onl
 8. Filter by year using: WHERE YEAR("التاريخ") = 2024
 9. **CASE-INSENSITIVE MATCHING:** Use ILIKE instead of LIKE for case-insensitive search
 10. **EXCEEDANCE:** Use exceedance_ratio > 1 to find violations, > 2 for 2x limit violations
+11. **ARABIC CHARACTER VARIANTS:** Arabic has interchangeable characters. For name searches, use multiple OR conditions:
+    - ى and ي are often interchangeable (الرشيدى = الرشيدي)
+    - ة and ه are often interchangeable (منشأة = منشاه)
+    - أ/إ/آ and ا are often interchangeable
+    - Example: WHERE "اسم المستلم" LIKE '%الرشيد%' (use partial match to avoid ى/ي issue)
 
 **COLUMN REFERENCE (TIDY FORMAT - Separate columns for pesticide data!):**
 - `"كود العينة"`: Sample code (unique ID)
 - `"التاريخ"`: Sample date (TIMESTAMP)
 - `"اسم العينة"`: Sample name in Arabic (طماطم, بقدونس, كمون, etc.)
 - `"نوع العينة"`: Sample type (خضراوات, فواكهة, توابل, مكسرات, حبوب, ورقيات)
-- `"نوع الاختبار"`: Test type (متبقيات مبيدات, سموم فطرية)
+- `"تصنيف العينة"`: Sample classification (خدمية, تجارية, etc.)
+- `"نوع الاختبار"`: Test type (متبقيات مبيدات, افلاتوكسين, سموم فطرية)
 - `"الحى"`: Neighborhood name
-- `"اسم البلدية"`: Municipality name
+- `"اسم المنشاة"`: Establishment/facility name
+- `"اسم البلدية"`: Municipality name (e.g., بلدية غرب بريدة)
+- `"رقم الرخصة"`: License number
+- `"حالة العينة"`: Sample condition/status
+- `"اسم المستلم"`: Receiver name
 - `pesticide_name`: Pesticide/contaminant name (e.g., 'chlorpyrifos', 'imidacloprid', 'bifenthrin')
 - `concentration`: Measured concentration value (DOUBLE - numeric!)
 - `limit_value`: Maximum allowed limit (DOUBLE - numeric!)
 - `exceedance_ratio`: concentration / limit_value (DOUBLE)
-- `is_compliant`: 1 = compliant (below limit), 0 = violation (above limit)
+- `is_above_limit`: 1 = فوق الحد (concentration > limit), 0 = تحت الحد - CALCULATED FROM DATA
+- `is_compliant`: 1 = مطابق (compliant), 0 = غير مطابق (non-compliant) - ORIGINAL LAB JUDGMENT
 - `is_detected`: 1 = pesticide detected with value, 0 = no detection (e.g., 'NO CBD')
+- `sample_result`: Original lab result text (compliant/non-compliant)
 
 **EXAMPLE QUERIES:**
 
