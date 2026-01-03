@@ -3493,217 +3493,582 @@ def generate_scatter_plot(df: pd.DataFrame, query: str):
     except Exception as e:
         st.error(f"Error generating scatter plot: {e}")
 
-def generate_map_chart(df: pd.DataFrame, query: str):
+def generate_map_chart(df: pd.DataFrame, query: str = ""):
     """Generate an interactive map chart for neighborhoods in القصيم, السعودية"""
     try:
         import plotly.express as px
         import plotly.graph_objects as go
+        import re
+        import random
         
-        # Neighborhood coordinates for Buraydah/Qassim region
-        # Format: {Arabic name: (latitude, longitude), English name: (latitude, longitude)}
+        # Enhanced neighborhood coordinates with Arabic names and proper positioning
         NEIGHBORHOOD_COORDS = {
-            # Arabic names
-            'الموطأ': (26.3650, 43.9550),
-            'الاسكان': (26.3580, 43.9420),
-            'الأفق': (26.3450, 43.9680),
-            'الافق': (26.3450, 43.9680),
-            'الريان': (26.3200, 43.9600),
-            'النخيل': (26.3400, 43.9800),
-            'الصفراء': (26.3700, 43.9300),
-            'الخليج': (26.3100, 43.9700),
-            'السلام': (26.3500, 43.9400),
-            'الفيصلية': (26.3300, 43.9500),
-            'المنار': (26.3250, 43.9350),
-            'الراشد': (26.3150, 43.9450),
-            'الحمر': (26.3400, 43.9250),
-            'الضاحي': (26.3050, 43.9550),
-            'قرطبة': (26.2950, 43.9650),
-            'الوادي': (26.3550, 43.9700),
-            'المروج': (26.3600, 43.9850),
-            'الجردة': (26.3350, 43.9150),
-            'البصر': (26.3750, 43.9750),
-            'الغدير': (26.2900, 43.9400),
-            'المحمدية': (26.3480, 43.9380),
-            'الربوة': (26.3380, 43.9280),
-            'النزهة': (26.3280, 43.9580),
-            'الورود': (26.3180, 43.9380),
-            'الروضة': (26.3080, 43.9280),
-            'الحزم': (26.2980, 43.9480),
-            'العليا': (26.3880, 43.9480),
-            # English names
-            'Al Mowata': (26.3650, 43.9550),
-            'Al Iskan': (26.3580, 43.9420),
-            'Al Ufuq': (26.3450, 43.9680),
-            'Al Rayyan': (26.3200, 43.9600),
-            'Al Nakhil': (26.3400, 43.9800),
-            'Al Safra': (26.3700, 43.9300),
-            'Al Khaleej': (26.3100, 43.9700),
-            'Al Salam': (26.3500, 43.9400),
-            'Al Faisaliyah': (26.3300, 43.9500),
-            'Al Manar': (26.3250, 43.9350),
-            'Al Rashid': (26.3150, 43.9450),
+            # Main neighborhoods in Buraydah, Qassim
+            'الإسكان': (26.3380, 43.9720),
+            'الموطأ': (26.3650, 43.9850),
+            'الصفراء': (26.3700, 43.9400),
+            'الأفق': (26.3550, 43.9650),
+            'الريان': (26.3300, 43.9600),
+            'النخيل': (26.3400, 43.9900),
+            'السلام': (26.3500, 43.9500),
+            'الفيصلية': (26.3250, 43.9550),
+            'المنار': (26.3200, 43.9450),
+            'الراشد': (26.3150, 43.9550),
+            'الحمر': (26.3400, 43.9350),
+            'الضاحي': (26.3050, 43.9650),
+            'قرطبة': (26.2950, 43.9750),
+            'الوادي': (26.3550, 43.9800),
+            'المروج': (26.3600, 43.9950),
+            'الجردة': (26.3350, 43.9250),
+            'البصر': (26.3750, 43.9850),
+            'الغدير': (26.2900, 43.9500),
+            'المحمدية': (26.3480, 43.9480),
+            'الربوة': (26.3380, 43.9380),
+            'النزهة': (26.3280, 43.9680),
+            'الورود': (26.3180, 43.9480),
+            'الروضة': (26.3080, 43.9380),
+            'الحزم': (26.2980, 43.9580),
+            'العليا': (26.3880, 43.9580),
+            'واسط': (26.3350, 43.9700),
+            'الملك فيصل': (26.3300, 43.9750),
+            'الملك عبدالله': (26.3400, 43.9800),
+            'الملك سلمان': (26.3200, 43.9750),
+            'الخالدية': (26.3100, 43.9700),
+            'النهضة': (26.3000, 43.9650),
+            'الرمال': (26.2900, 43.9600),
+            'الوريف': (26.2800, 43.9550),
+            'الغربية': (26.2700, 43.9500),
+            'الشمالية': (26.2600, 43.9450),
+            'الجنوبية': (26.2500, 43.9400),
+            'الشرقية': (26.2400, 43.9350),
+            'الوسطى': (26.2300, 43.9300),
         }
         
         # DEFAULT: Buraydah city center
         DEFAULT_COORDS = (26.3300, 43.9750)
         
-        # Check if we have neighborhood data in the result
+        # Function to extract neighborhood from address
+        def extract_neighborhood(address):
+            if pd.isna(address):
+                return "غير محدد"
+            
+            address_str = str(address)
+            
+            # Remove numbers and special characters for cleaner matching
+            clean_address = re.sub(r'\d+', '', address_str)
+            clean_address = clean_address.strip()
+            
+            # Direct neighborhood matches
+            for neighborhood in NEIGHBORHOOD_COORDS.keys():
+                if neighborhood in clean_address:
+                    return neighborhood
+            
+            # Common variations
+            variations = {
+                'فيصل': 'الملك فيصل',
+                'واسط': 'واسط',
+                'اسكان': 'الإسكان',
+                'سكن': 'الإسكان',
+                'مطأ': 'الموطأ',
+                'صفاء': 'الصفراء',
+                'افق': 'الأفق',
+                'ريان': 'الريان',
+                'نخيل': 'النخيل',
+                'سلم': 'السلام',
+                'فيصليه': 'الفيصلية',
+                'منار': 'المنار',
+                'راشد': 'الراشد',
+                'حمر': 'الحمر',
+                'ضاحي': 'الضاحي',
+                'قصر': 'قرطبة',
+                'وادي': 'الوادي',
+                'مروج': 'المروج',
+                'جردة': 'الجردة',
+                'بصر': 'البصر',
+                'غدير': 'الغدير',
+                'محمديه': 'المحمدية',
+                'ربوه': 'الربوة',
+                'نزهة': 'النزهة',
+                'ورود': 'الورود',
+                'روضه': 'الروضة',
+                'حزم': 'الحزم',
+                'عليا': 'العليا',
+            }
+            
+            for variation, neighborhood in variations.items():
+                if variation in clean_address:
+                    return neighborhood
+            
+            # If still no match, return the address itself (truncated)
+            return clean_address[:30] if len(clean_address) > 30 else clean_address
+        
+        # ================================================================
+        # PREPARE NEIGHBORHOOD DATA
+        # ================================================================
+        
+        # Check if data already has neighborhood column
         neighborhood_col = None
-        map_df = df  # Start with the query result
         
-        if 'الحي' in df.columns:
-            neighborhood_col = 'الحي'
-        elif 'neighborhood_english' in df.columns:
-            neighborhood_col = 'neighborhood_english'
+        # Look for neighborhood columns
+        for col in df.columns:
+            col_lower = str(col).lower()
+            if any(word in col_lower for word in ['حي', 'neighborhood', 'الحي', 'المنطق', 'منطق', 'region', 'area']):
+                neighborhood_col = col
+                break
         
-        # If no neighborhood in result, try to use full dataset from session state
-        # BUT filter it based on neighborhoods mentioned in the query
+        # If no neighborhood column, check for address columns
         if neighborhood_col is None:
-            if 'df' in st.session_state and st.session_state.df is not None:
-                full_df = st.session_state.df
-                if 'الحي' in full_df.columns:
-                    neighborhood_col = 'الحي'
-                elif 'neighborhood_english' in full_df.columns:
-                    neighborhood_col = 'neighborhood_english'
+            address_col = None
+            for col in df.columns:
+                col_lower = str(col).lower()
+                if any(word in col_lower for word in ['عنوان', 'address', 'العنوان', 'موقع', 'location']):
+                    address_col = col
+                    break
+            
+            if address_col:
+                # Extract neighborhoods from addresses
+                df['neighborhood_extracted'] = df[address_col].apply(extract_neighborhood)
+                neighborhood_col = 'neighborhood_extracted'
+                st.success(f"✅ تم استخراج الأحياء من عمود '{address_col}'")
+            else:
+                # Check if the data itself might be neighborhood names
+                if len(df.columns) == 1:
+                    # Assume the single column contains neighborhood names
+                    df.columns = ['neighborhood']
+                    neighborhood_col = 'neighborhood'
+                else:
+                    st.error("⚠️ لم يتم العثور على بيانات الأحياء")
+                    st.info("💡 يرجى التأكد من وجود عمود للأحياء أو العناوين")
+                    return
+        
+        # ================================================================
+        # PREPARE VIOLATION DATA
+        # ================================================================
+        
+        # Check for violation data - look for numeric columns
+        violation_col = None
+        violation_values = None
+        
+        # First, check if we have explicit violation columns
+        for col in df.columns:
+            col_lower = str(col).lower()
+            if any(word in col_lower for word in ['violation', 'مخالفة', 'مخالفات', 'غير مطابق', 'non']):
+                violation_col = col
+                break
+        
+        # If no explicit violation column, check for numeric columns that could be violations
+        if violation_col is None:
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            if len(numeric_cols) > 0:
+                # Use the first numeric column as violation count
+                violation_col = numeric_cols[0]
+                st.info(f"📊 تم استخدام عمود '{violation_col}' كعدد المخالفات")
+        
+        # Prepare violation data
+        if violation_col:
+            try:
+                # Convert to numeric
+                df['violation_count'] = pd.to_numeric(df[violation_col], errors='coerce').fillna(0)
                 
-                if neighborhood_col:
-                    # Extract neighborhood names mentioned in the query
-                    mentioned_neighborhoods = []
-                    all_neighborhoods = list(NEIGHBORHOOD_COORDS.keys())
-                    
-                    for neighborhood in all_neighborhoods:
-                        if neighborhood in query:
-                            mentioned_neighborhoods.append(neighborhood)
-                    
-                    # Filter data to only mentioned neighborhoods
-                    if mentioned_neighborhoods:
-                        # Filter full_df to only rows matching mentioned neighborhoods
-                        mask = full_df[neighborhood_col].isin(mentioned_neighborhoods)
-                        map_df = full_df[mask].copy()
-                        st.info(f"📍 Showing map for: {', '.join(mentioned_neighborhoods)}")
-                    else:
-                        # No specific neighborhoods mentioned, use full dataset
-                        map_df = full_df
-                        st.info("📍 Showing full neighborhood map")
-        
-        if neighborhood_col is None:
-            st.warning("⚠️ No neighborhood column found in data or session state")
-            st.info("💡 Try asking a question that includes neighborhood data, or use this map with the full dataset.")
-            return
-        
-        # Use map_df instead of df from here
-        
-        # Aggregate data by neighborhood
-        agg_data = map_df.groupby(neighborhood_col).agg({
-            neighborhood_col: 'count'
-        }).rename(columns={neighborhood_col: 'sample_count'}).reset_index()
-        
-        # Add violation count if available
-        if 'violation_numeric' in map_df.columns:
-            violations = map_df.groupby(neighborhood_col)['violation_numeric'].sum().reset_index()
-            violations.columns = [neighborhood_col, 'violation_count']
-            agg_data = agg_data.merge(violations, on=neighborhood_col, how='left')
-            agg_data['violation_rate'] = (agg_data['violation_count'] / agg_data['sample_count'] * 100).round(1)
+                # Group by neighborhood
+                agg_data = df.groupby(neighborhood_col).agg({
+                    'violation_count': ['sum', 'count']
+                }).reset_index()
+                
+                # Flatten column names
+                agg_data.columns = ['neighborhood', 'violation_count', 'sample_count']
+                
+            except Exception as e:
+                st.warning(f"⚠️ خطأ في معالجة بيانات المخالفات: {e}")
+                # Just count samples
+                agg_data = df.groupby(neighborhood_col).size().reset_index(name='sample_count')
+                agg_data['violation_count'] = 0
         else:
+            # Just count samples
+            agg_data = df.groupby(neighborhood_col).size().reset_index(name='sample_count')
             agg_data['violation_count'] = 0
-            agg_data['violation_rate'] = 0
+        
+        # Calculate violation rate
+        agg_data['violation_rate'] = agg_data.apply(
+            lambda row: row['violation_count'] / row['sample_count'] if row['sample_count'] > 0 else 0,
+            axis=1
+        )
         
         # Add coordinates
-        agg_data['lat'] = agg_data[neighborhood_col].apply(
-            lambda x: NEIGHBORHOOD_COORDS.get(x, DEFAULT_COORDS)[0]
+        agg_data['lat'] = agg_data['neighborhood'].apply(
+            lambda x: NEIGHBORHOOD_COORDS.get(str(x), DEFAULT_COORDS)[0]
         )
-        agg_data['lon'] = agg_data[neighborhood_col].apply(
-            lambda x: NEIGHBORHOOD_COORDS.get(x, DEFAULT_COORDS)[1]
+        agg_data['lon'] = agg_data['neighborhood'].apply(
+            lambda x: NEIGHBORHOOD_COORDS.get(str(x), DEFAULT_COORDS)[1]
         )
         
-        # Add small random offset for neighborhoods with same/default coords
-        import random
-        for idx in agg_data.index:
-            if agg_data.loc[idx, 'lat'] == DEFAULT_COORDS[0]:
-                agg_data.loc[idx, 'lat'] += random.uniform(-0.02, 0.02)
-                agg_data.loc[idx, 'lon'] += random.uniform(-0.02, 0.02)
+        # ================================================================
+        # CREATE CLEAR NEIGHBORHOOD MAP WITH VIOLATIONS
+        # ================================================================
         
+        st.subheader("🗺️ خريطة الأحياء مع تحديد المخالفات")
         
-        # Create DENSITY HEATMAP instead of bubbles
-        # Prepare data for density heatmap - expand to individual violation points
-        heatmap_points = []
+        # Create a clear bubble map that shows neighborhoods
+        fig = go.Figure()
         
-        for _, row in agg_data.iterrows():
-            # Create points based on violation count (more violations = more density)
-            violation_weight = max(int(row['violation_count']), 1)
-            sample_weight = max(int(row['sample_count']), 1)
-            
-            # Add slight random offset to create density clusters
-            import random
-            
-            # Create MORE points for better visibility (3 points per violation)
-            for _ in range(violation_weight * 3):
-                # Small random offset (0.005 degrees ≈ 500 meters)
-                lat_offset = random.uniform(-0.008, 0.008)
-                lon_offset = random.uniform(-0.008, 0.008)
-                
-                heatmap_points.append({
-                    'lat': row['lat'] + lat_offset,
-                    'lon': row['lon'] + lon_offset,
-                    'neighborhood': row[neighborhood_col],
-                    'intensity': 10  # Higher intensity value for visibility
-                })
-            
-            # Also add background points for all samples (lower intensity)
-            for _ in range(sample_weight):
-                lat_offset = random.uniform(-0.01, 0.01)
-                lon_offset = random.uniform(-0.01, 0.01)
-                
-                heatmap_points.append({
-                    'lat': row['lat'] + lat_offset,
-                    'lon': row['lon'] + lon_offset,
-                    'neighborhood': row[neighborhood_col],
-                    'intensity': 1  # Lower intensity for background
-                })
-        
-        # Convert to DataFrame
-        heatmap_df = pd.DataFrame(heatmap_points)
-        
-        # Create density heatmap with INCREASED visibility settings
-        fig = px.density_mapbox(
-            heatmap_df,
-            lat='lat',
-            lon='lon',
-            z='intensity',  # Intensity value
-            radius=30,  # INCREASED: Size of each point's influence (was 15)
-            center={'lat': 26.33, 'lon': 43.97},
-            zoom=11,
-            mapbox_style='open-street-map',
-            color_continuous_scale=[
-                [0.0, '#00ff00'],  # Bright green
-                [0.3, '#7fff00'],  # Yellow-green
-                [0.5, '#ffff00'],  # Bright yellow
-                [0.7, '#ff8800'],  # Orange
-                [1.0, '#ff0000']   # Bright red
+        # Add neighborhoods as bubbles with size based on violation count
+        fig.add_trace(go.Scattermapbox(
+            lat=agg_data['lat'],
+            lon=agg_data['lon'],
+            mode='markers+text',
+            text=agg_data['neighborhood'],
+            textposition="top center",
+            textfont=dict(
+                size=14,
+                color='black',
+                family='Arial, sans-serif',
+                weight='bold'
+            ),
+            marker=dict(
+                size=agg_data['violation_count'].apply(
+                    lambda x: max(20, min(60, x * 5))  # Size based on violations
+                ),
+                color=agg_data['violation_rate'].apply(
+                    lambda rate: 
+                    'red' if rate > 0.5 else
+                    'orange' if rate > 0.3 else
+                    'yellow' if rate > 0.1 else
+                    'green'
+                ),
+                opacity=0.8,
+                symbol='circle',
+                sizemode='diameter'
+            ),
+            hoverinfo='text',
+            hovertext=[
+                f"<b>{row['neighborhood']}</b><br>"
+                f"📍 الموقع: {row['lat']:.4f}, {row['lon']:.4f}<br>"
+                f"📊 عدد العينات: {row['sample_count']}<br>"
+                f"❌ عدد المخالفات: {row['violation_count']}<br>"
+                f"📈 نسبة المخالفات: {row['violation_rate']:.1%}"
+                for _, row in agg_data.iterrows()
             ],
-            title='🗺️ خريطة حرارية للمخالفات - Violation Density Heatmap (القصيم، السعودية)',
-            height=600,
-            opacity=0.9  # INCREASED: More opaque (was 0.6)
-        )
+            name='الأحياء',
+            showlegend=True
+        ))
         
+        # Add a heatmap layer for density visualization
+        if not agg_data.empty:
+            # Create density points
+            density_points = []
+            for _, row in agg_data.iterrows():
+                intensity = row['violation_count']
+                num_points = max(3, min(20, int(intensity * 2)))
+                
+                for i in range(num_points):
+                    lat_offset = random.uniform(-0.001, 0.001)
+                    lon_offset = random.uniform(-0.001, 0.001)
+                    
+                    density_points.append({
+                        'lat': row['lat'] + lat_offset,
+                        'lon': row['lon'] + lon_offset,
+                        'intensity': intensity
+                    })
+            
+            if density_points:
+                density_df = pd.DataFrame(density_points)
+                
+                fig.add_trace(go.Densitymapbox(
+                    lat=density_df['lat'],
+                    lon=density_df['lon'],
+                    z=density_df['intensity'],
+                    radius=30,
+                    colorscale=[
+                        [0.0, 'rgba(0, 255, 0, 0.2)'],
+                        [0.3, 'rgba(255, 255, 0, 0.4)'],
+                        [0.6, 'rgba(255, 165, 0, 0.6)'],
+                        [1.0, 'rgba(255, 0, 0, 0.8)']
+                    ],
+                    opacity=0.6,
+                    showscale=False,
+                    hoverinfo='none'
+                ))
+        
+        # Update layout for better readability
         fig.update_layout(
-            margin={'r': 0, 't': 50, 'l': 0, 'b': 0},
-            coloraxis_colorbar=dict(
-                title='Violation<br>Density'
+            mapbox=dict(
+                style="open-street-map",
+                center=dict(
+                    lat=agg_data['lat'].mean() if not agg_data.empty else 26.33,
+                    lon=agg_data['lon'].mean() if not agg_data.empty else 43.97
+                ),
+                zoom=11 if not agg_data.empty else 10,
+                bearing=0,
+                pitch=0
+            ),
+            title=dict(
+                text="خريطة توزيع المخالفات على الأحياء - القصيم",
+                font=dict(size=20, family='Arial, sans-serif'),
+                x=0.5,
+                xanchor='center'
+            ),
+            height=700,
+            margin=dict(r=0, t=50, l=0, b=0),
+            showlegend=True,
+            legend=dict(
+                title="مفتاح الألوان:",
+                y=1,
+                x=0.02,
+                bgcolor='rgba(255, 255, 255, 0.9)',
+                bordercolor='black',
+                borderwidth=1,
+                font=dict(size=12)
             )
         )
         
+        # Add a custom legend
+        fig.add_annotation(
+            x=0.02,
+            y=0.98,
+            xref="paper",
+            yref="paper",
+            text="<b>مفتاح الألوان:</b><br>🔴 عالي (>50%)<br>🟠 متوسط (30-50%)<br>🟡 منخفض (10-30%)<br>🟢 جيد (<10%)",
+            showarrow=False,
+            font=dict(size=12),
+            align="left",
+            bgcolor="rgba(255, 255, 255, 0.9)",
+            bordercolor="black",
+            borderwidth=1,
+            borderpad=4
+        )
+        
+        # Display the map
         st.plotly_chart(fig, use_container_width=True)
         
-        # Show data table
-        with st.expander("📊 Neighborhood Statistics"):
-            display_df = agg_data[[neighborhood_col, 'sample_count', 'violation_count', 'violation_rate']].copy()
-            display_df.columns = ['الحي / Neighborhood', 'عدد العينات', 'عدد المخالفات', 'نسبة المخالفات %']
-            st.dataframe(display_df.sort_values('عدد العينات', ascending=False), use_container_width=True)
+        # ================================================================
+        # ADD A SEPARATE MINI-MAP FOR NEIGHBORHOOD IDENTIFICATION
+        # ================================================================
         
-        st.caption("📍 Map shows neighborhood data in Qassim Region - Circle size = samples, Color = violations")
-        st.caption("🔴 Red = Many violations | 🟡 Yellow = Medium | 🟢 Green = Few violations")
+        st.subheader("📍 دليل الأحياء")
         
+        # Create a simple reference map showing all neighborhoods
+        fig_ref = go.Figure()
+        
+        # Add all known neighborhoods for reference
+        for neighborhood, coords in NEIGHBORHOOD_COORDS.items():
+            # Check if this neighborhood is in our data
+            in_data = neighborhood in agg_data['neighborhood'].values
+            
+            fig_ref.add_trace(go.Scattermapbox(
+                lat=[coords[0]],
+                lon=[coords[1]],
+                mode='markers+text',
+                text=[neighborhood],
+                textposition="top center",
+                textfont=dict(
+                    size=10 if in_data else 8,
+                    color='blue' if in_data else 'gray',
+                    family='Arial, sans-serif',
+                    weight='bold' if in_data else 'normal'
+                ),
+                marker=dict(
+                    size=8 if in_data else 6,
+                    color='blue' if in_data else 'gray',
+                    opacity=0.7 if in_data else 0.4
+                ),
+                name=neighborhood,
+                showlegend=False,
+                hoverinfo='text',
+                hovertext=f"حي {neighborhood}" + (" ⭐ (موجود في البيانات)" if in_data else "")
+            ))
+        
+        fig_ref.update_layout(
+            mapbox=dict(
+                style="open-street-map",
+                center=dict(lat=26.33, lon=43.97),
+                zoom=10,
+            ),
+            title="جميع أحياء القصيم",
+            height=400,
+            margin=dict(r=0, t=30, l=0, b=0),
+            showlegend=False
+        )
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.plotly_chart(fig_ref, use_container_width=True)
+        
+        with col2:
+            st.markdown("### 🎯 كيفية قراءة الخريطة:")
+            st.markdown("""
+            1. **الدوائر الملونة** تمثل الأحياء
+            2. **حجم الدائرة** ← عدد المخالفات
+            3. **لون الدائرة** ← نسبة المخالفات
+            4. **اللون الأزرق** ← أحياء موجودة في البيانات
+            5. **اللون الرمادي** ← أحياء أخرى
+            6. **انقر على أي دائرة** لرؤية التفاصيل
+            """)
+            
+            # Show legend
+            st.markdown("### 🎨 مفتاح الألوان:")
+            st.markdown("""
+            - <span style='color:red; font-weight:bold'>🔴 أحمر</span>: نسبة مخالفات عالية (>50%)
+            - <span style='color:orange; font-weight:bold'>🟠 برتقالي</span>: نسبة متوسطة (30-50%)
+            - <span style='color:yellow; font-weight:bold'>🟡 أصفر</span>: نسبة منخفضة (10-30%)
+            - <span style='color:green; font-weight:bold'>🟢 أخضر</span>: نسبة جيدة (<10%)
+            """)
+        
+        # ================================================================
+        # DATA TABLE AND STATISTICS
+        # ================================================================
+        
+        with st.expander("📊 تفاصيل بيانات الأحياء", expanded=True):
+            # Sort data
+            display_df = agg_data.copy()
+            if 'violation_count' in display_df.columns:
+                display_df = display_df.sort_values('violation_count', ascending=False)
+            
+            # Format for display
+            display_df_display = display_df[['neighborhood', 'sample_count', 'violation_count', 'violation_rate']].copy()
+            display_df_display.columns = ['اسم الحي', 'عدد العينات', 'عدد المخالفات', 'نسبة المخالفات']
+            display_df_display['نسبة المخالفات'] = display_df_display['نسبة المخالفات'].apply(lambda x: f"{x:.1%}")
+            
+            # Add color coding
+            def color_violation_rate(val):
+                rate = float(val.strip('%')) / 100
+                if rate > 0.5:
+                    return 'background-color: #ffcccc; color: #990000; font-weight: bold'
+                elif rate > 0.3:
+                    return 'background-color: #ffe6cc; color: #cc6600;'
+                elif rate > 0.1:
+                    return 'background-color: #ffffcc; color: #666600;'
+                else:
+                    return 'background-color: #ccffcc; color: #006600;'
+            
+            styled_df = display_df_display.style.applymap(
+                color_violation_rate,
+                subset=['نسبة المخالفات']
+            )
+            
+            st.dataframe(styled_df, use_container_width=True)
+            
+            # Statistics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("عدد الأحياء", len(display_df))
+            with col2:
+                total_violations = display_df['violation_count'].sum()
+                st.metric("إجمالي المخالفات", total_violations)
+            with col3:
+                avg_rate = display_df['violation_rate'].mean() * 100
+                st.metric("متوسط نسبة المخالفات", f"{avg_rate:.1f}%")
+            with col4:
+                max_violations = display_df['violation_count'].max()
+                top_area = display_df[display_df['violation_count'] == max_violations]['neighborhood'].iloc[0]
+                st.metric("أكثر حي مخالفات", top_area)
+        
+        # ================================================================
+        # BAR CHART VISUALIZATION
+        # ================================================================
+        
+        st.subheader("📈 مقارنة بين الأحياء")
+        
+        # Create bar chart
+        bar_data = display_df.head(15).copy()  # Top 15 neighborhoods
+        
+        fig_bar = px.bar(
+            bar_data,
+            x='neighborhood',
+            y='violation_count',
+            title="أعلى الأحياء في عدد المخالفات",
+            labels={'neighborhood': 'اسم الحي', 'violation_count': 'عدد المخالفات'},
+            color='violation_rate',
+            color_continuous_scale='RdYlGn_r',  # Red to Green (reversed)
+            text='violation_count'
+        )
+        
+        fig_bar.update_layout(
+            height=500,
+            xaxis_tickangle=-45,
+            showlegend=False,
+            coloraxis_colorbar=dict(
+                title="نسبة المخالفات",
+                title_side="right"
+            )
+        )
+        
+        fig_bar.update_traces(
+            texttemplate='%{text}',
+            textposition='outside'
+        )
+        
+        st.plotly_chart(fig_bar, use_container_width=True)
+        
+        # ================================================================
+        # DOWNLOAD OPTIONS
+        # ================================================================
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.download_button(
+                label="📥 تحميل بيانات الأحياء (CSV)",
+                data=display_df_display.to_csv(index=False, encoding='utf-8-sig'),
+                file_name="neighborhood_violations_data.csv",
+                mime="text/csv",
+                key="download_data"
+            )
+        
+        with col2:
+            # Export map as image
+            st.download_button(
+                label="🖼️ تحميل الخريطة كصورة",
+                data=fig.to_image(format="png"),
+                file_name="neighborhood_violations_map.png",
+                mime="image/png",
+                key="download_map"
+            )
+        
+        # ================================================================
+        # INTERACTIVE FILTERS
+        # ================================================================
+        
+        st.sidebar.markdown("### 🔍 تصفية البيانات")
+        
+        # Filter by violation rate
+        min_rate, max_rate = st.sidebar.slider(
+            "نسبة المخالفات (%)",
+            0, 100,
+            (0, 100),
+            key="violation_rate_filter"
+        )
+        
+        min_rate_dec = min_rate / 100
+        max_rate_dec = max_rate / 100
+        
+        filtered_df = agg_data[
+            (agg_data['violation_rate'] >= min_rate_dec) & 
+            (agg_data['violation_rate'] <= max_rate_dec)
+        ]
+        
+        if len(filtered_df) < len(agg_data):
+            st.sidebar.info(f"عرض {len(filtered_df)} من {len(agg_data)} حي")
+        
+        # Search for specific neighborhood
+        search_term = st.sidebar.text_input("🔎 بحث عن حي:", "")
+        
+        if search_term:
+            search_results = agg_data[
+                agg_data['neighborhood'].str.contains(search_term, case=False, na=False)
+            ]
+            if not search_results.empty:
+                st.sidebar.success(f"وجدت {len(search_results)} نتيجة")
+                for _, row in search_results.iterrows():
+                    st.sidebar.markdown(f"**{row['neighborhood']}**: {row['violation_count']} مخالفة ({row['violation_rate']:.1%})")
+            else:
+                st.sidebar.warning("لم يتم العثور على نتائج")
+        
+    except Exception as e:
+        st.error(f"❌ خطأ في إنشاء خريطة الأحياء: {e}")
+        with st.expander("🔍 تفاصيل الخطأ"):
+            st.exception(e)
+
         # ============================================================================
         # ENHANCED HEATMAPS - ONLY FOR MAP CHART  
         # ============================================================================
@@ -4926,14 +5291,27 @@ ORDER BY avg_ratio DESC
 LIMIT 15;
 
 -- 7. Violations by neighborhood
+-- Neighborhood violations in descending order (Arabic query):
 SELECT 
     "الحى" AS الحي,
-    COUNT(*) AS total,
-    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS violations
+    COUNT(DISTINCT "كود العينة") AS عدد_العينات,
+    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS عدد_المخالفات,
+    ROUND(SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(DISTINCT "كود العينة"), 2) AS نسبة_المخالفات
 FROM chemistry_tidy
 WHERE "الحى" IS NOT NULL
 GROUP BY "الحى"
-ORDER BY violations DESC;
+ORDER BY عدد_المخالفات DESC
+LIMIT 15;
+
+-- For your specific query: "اعرض الاحياء في ترتيب تنازلي من الاكثر الي الاقل مخالفه"
+SELECT 
+    "الحى" AS الحي,
+    COUNT(*) AS عدد_المخالفات
+FROM chemistry_tidy
+WHERE is_compliant = 0 AND "الحى" IS NOT NULL
+GROUP BY "الحى"
+ORDER BY عدد_المخالفات DESC;
+
 
 -- 8. Total record count
 SELECT COUNT(*) AS total_records FROM chemistry_tidy;
@@ -5783,6 +6161,7 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                     st.code(generated_code, language='python')
 
 
+# In your display_stored_results_with_charts function:
 def display_stored_results_with_charts():
     """
     Display stored query results with chart buttons.
@@ -5800,49 +6179,64 @@ def display_stored_results_with_charts():
         return
     
     st.markdown("---")
-    st.subheader("📊 Last Query Results")
-    st.caption(f"Query: {query[:100]}..." if len(query) > 100 else f"Query: {query}")
+    st.subheader("📊 نتائج آخر استعلام")
+    st.caption(f"السؤال: {query[:100]}..." if len(query) > 100 else f"السؤال: {query}")
     
     # Show the result dataframe
     st.dataframe(result, use_container_width=True)
     
     # ========================================================================
-    # CHART GENERATION BUTTONS (PERSISTENT)
+    # AUTO-DETECT BEST CHART TYPE BASED ON DATA
+    # ========================================================================
+    
+    # Check if query is about neighborhoods
+    query_lower = query.lower()
+    is_neighborhood_query = any(word in query_lower for word in ['احياء', 'حي', 'neighborhood', 'الحى'])
+    
+    # Check if result has neighborhood column
+    has_neighborhood = any(col in result.columns for col in ['الحي', 'neighborhood', 'الحى'])
+    
+    # If it's a neighborhood query, automatically suggest map chart
+    if is_neighborhood_query and has_neighborhood:
+        st.info("📍 تم اكتشاف أن الاستعلام يتعلق بالأحياء. انقر على زر الخريطة لعرض خريطة حرارية.")
+    
+    # ========================================================================
+    # CHART GENERATION BUTTONS
     # ========================================================================
     
     st.markdown("---")
-    st.subheader("📊 Visualize Results")
-    st.caption("Choose a chart type to visualize your data")
+    st.subheader("📊 تصوير النتائج")
+    st.caption("اختر نوع الرسم البياني لتصوير بياناتك")
     
     # Initialize session state for selected chart
     if 'selected_chart' not in st.session_state:
         st.session_state.selected_chart = None
     
-    # Create columns for chart buttons (6 buttons now - removed Heatmap)
+    # Create columns for chart buttons
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
-        if st.button("📊 Bar", use_container_width=True, key="btn_bar_stored"):
+        if st.button("📊 أعمدة", use_container_width=True, key="btn_bar_stored"):
             st.session_state.selected_chart = "bar"
     
     with col2:
-        if st.button("📈 Line", use_container_width=True, key="btn_line_stored"):
+        if st.button("📈 خطي", use_container_width=True, key="btn_line_stored"):
             st.session_state.selected_chart = "line"
     
     with col3:
-        if st.button("🥧 Pie", use_container_width=True, key="btn_pie_stored"):
+        if st.button("🥧 دائري", use_container_width=True, key="btn_pie_stored"):
             st.session_state.selected_chart = "pie"
     
     with col4:
-        if st.button("🎯 Radar", use_container_width=True, key="btn_radar_stored"):
+        if st.button("🎯 رادار", use_container_width=True, key="btn_radar_stored"):
             st.session_state.selected_chart = "radar"
     
     with col5:
-        if st.button("💠 Scatter", use_container_width=True, key="btn_scatter_stored"):
+        if st.button("💠 مبعثر", use_container_width=True, key="btn_scatter_stored"):
             st.session_state.selected_chart = "scatter"
     
     with col6:
-        if st.button("🗺️ Map", use_container_width=True, key="btn_map_stored"):
+        if st.button("🗺️ خريطة", use_container_width=True, key="btn_map_stored"):
             st.session_state.selected_chart = "map"
     
     # Display selected chart
@@ -5850,27 +6244,32 @@ def display_stored_results_with_charts():
         st.markdown("---")
         
         chart_mapping = {
-            "bar": ("📊 Bar Chart", generate_bar_chart),
-            "line": ("📈 Line Chart", generate_line_chart),
-            "pie": ("🥧 Pie Chart", generate_pie_chart),
-            "radar": ("🎯 Radar Chart", generate_radar_chart),
-            "scatter": ("💠 Scatter Plot", generate_scatter_plot),
-            "map": ("🗺️ Neighborhood Map", generate_map_chart)
+            "bar": ("📊 رسم بياني عمودي", generate_bar_chart),
+            "line": ("📈 رسم بياني خطي", generate_line_chart),
+            "pie": ("🥧 رسم بياني دائري", generate_pie_chart),
+            "radar": ("🎯 رسم بياني راداري", generate_radar_chart),
+            "scatter": ("💠 رسم بياني مبعثر", generate_scatter_plot),
+            "map": ("🗺️ خريطة الأحياء", generate_map_chart)
         }
         
         chart_name, chart_func = chart_mapping[st.session_state.selected_chart]
-        st.subheader(f"Displaying: {chart_name}")
-        chart_func(result, query)
+        st.subheader(f"عرض: {chart_name}")
+        
+        # For map chart with neighborhood data, use the result directly
+        if st.session_state.selected_chart == "map" and has_neighborhood:
+            chart_func(result, query)
+        else:
+            chart_func(result, query)
         
         # Add clear button
-        if st.button("🗑️ Clear Chart", key="clear_chart_stored"):
+        if st.button("🗑️ مسح الرسم البياني", key="clear_chart_stored"):
             st.session_state.selected_chart = None
             st.rerun()
     
     # Download button
-    csv = result.to_csv(index=False)
+    csv = result.to_csv(index=False, encoding='utf-8-sig')
     st.download_button(
-        label="📥 Download Results as CSV",
+        label="📥 تحميل النتائج كملف CSV",
         data=csv,
         file_name="analysis_results.csv",
         mime="text/csv",
