@@ -1,0 +1,274 @@
+{
+  "chemical_groups": {
+    "pyrethroids": {
+      "name_en": "Pyrethroids",
+      "name_ar": "بايرثرويدات",
+      "pesticides": [
+        "lambda-cyhalothrin", "cyhalothrin", "cypermethrin", "deltamethrin",
+        "bifenthrin", "cyfluthrin", "permethrin", "fenvalerate", "esfenvalerate",
+        "fenpropathrin", "tefluthrin", "cyflulthrin"
+      ]
+    },
+    "organophosphates": {
+      "name_en": "Organophosphates",
+      "name_ar": "فوسفات عضوية",
+      "pesticides": [
+        "chlorpyrifos", "chlorpyriphos", "chlorpyrifos-methyl", "malathion",
+        "diazinon", "profenofos", "pirimiphos", "pirimiphos-methyl", "phoxim",
+        "omethoate", "ometheoate", "ethion", "dimethoate"
+      ]
+    },
+    "carbamates": {
+      "name_en": "Carbamates",
+      "name_ar": "كرباميت",
+      "pesticides": [
+        "carbendazim", "carbaryl", "carbofuran", "methomyl", "thiophanate-methyl",
+        "thiophonat-methyl", "thiophonat methyl", "thiophonate"
+      ]
+    },
+    "neonicotinoids": {
+      "name_en": "Neonicotinoids",
+      "name_ar": "نيونيكوتينويدات",
+      "pesticides": [
+        "imidacloprid", "imidaclopride", "acetamiprid", "aceatamiprid",
+        "thiamethoxam", "clothianidin", "dinotefuran", "thiacloprid"
+      ]
+    },
+    "triazoles": {
+      "name_en": "Triazole Fungicides",
+      "name_ar": "مبيدات ترايازول",
+      "pesticides": [
+        "tebuconazole", "propiconazole", "difenoconazole", "myclobutanil",
+        "penconazole", "flutriafol", "cyproconazole", "epoxiconazole"
+      ]
+    },
+    "strobilurins": {
+      "name_en": "Strobilurin Fungicides",
+      "name_ar": "ستروبيلورينات",
+      "pesticides": [
+        "azoxystrobin", "pyraclostrobin", "trifloxystrobin", "kresoxim-methyl",
+        "famoxadone", "famoxadon", "picoxystrobin"
+      ]
+    },
+    "diamides": {
+      "name_en": "Diamide Insecticides",
+      "name_ar": "دياميدات",
+      "pesticides": [
+        "chlorantraniliprole", "cyantraniliprole", "cyanantraniliprole",
+        "flubendiamide"
+      ]
+    },
+    "spinosyns": {
+      "name_en": "Spinosyns",
+      "name_ar": "سبينوسينات",
+      "pesticides": [
+        "spinosad", "spinosad a", "spinosad d", "spinetoram"
+      ]
+    },
+    "benzoylureas": {
+      "name_en": "Benzoylurea Insecticides",
+      "name_ar": "بنزويل يوريا",
+      "pesticides": [
+        "diflubenzuron", "diflubenzoran", "lufenuron", "hexaflumuron",
+        "triflumuron"
+      ]
+    },
+    "mite_growth_regulators": {
+      "name_en": "Mite Growth Regulators",
+      "name_ar": "منظمات نمو الحلم",
+      "pesticides": [
+        "hexythiazox", "etoxazole", "clofentezine", "bifenazate"
+      ]
+    },
+    "ketoenols": {
+      "name_en": "Ketoenol Insecticides",
+      "name_ar": "كيتوينول",
+      "pesticides": [
+        "spiromesifen", "spiromesfin", "spirotetramat", "spirodiclofen"
+      ]
+    },
+    "sulfoximines": {
+      "name_en": "Sulfoximine Insecticides",
+      "name_ar": "سلفوكسيمينات",
+      "pesticides": [
+        "sulfoxaflor"
+      ]
+    },
+    "phenylpyrazoles": {
+      "name_en": "Phenylpyrazoles",
+      "name_ar": "فينيل بيرازول",
+      "pesticides": [
+        "fipronil"
+      ]
+    },
+    "pyrroles": {
+      "name_en": "Pyrrole Insecticides",
+      "name_ar": "بيرولات",
+      "pesticides": [
+        "chlorfenapyr"
+      ]
+    },
+    "avermectins": {
+      "name_en": "Avermectins",
+      "name_ar": "أفيرميكتينات",
+      "pesticides": [
+        "abamectin"
+      ]
+    },
+    "benzimidazoles": {
+      "name_en": "Benzimidazole Fungicides",
+      "name_ar": "بنزيميدازول",
+      "pesticides": [
+        "thiabendazole", "thiopendazole"
+      ]
+    },
+    "morpholines": {
+      "name_en": "Morpholine Fungicides",
+      "name_ar": "مورفولين",
+      "pesticides": [
+        "dimethomorph"
+      ]
+    },
+    "oxazolidinediones": {
+      "name_en": "Oxazolidinedione Insecticides",
+      "name_ar": "أوكسازوليدينيديون",
+      "pesticides": [
+        "indoxacarb"
+      ]
+    },
+    "carboxamides": {
+      "name_en": "Carboxamide Fungicides",
+      "name_ar": "كربوكساميدات",
+      "pesticides": [
+        "boscalid", "fluopyram", "fluxapyroxad"
+      ]
+    },
+    "anilinopyrimidines": {
+      "name_en": "Anilinopyrimidine Fungicides",
+      "name_ar": "أنيلينوبيريميدين",
+      "pesticides": [
+        "cyprodinil", "cyprodianil", "pyrimethanil"
+      ]
+    },
+    "phenylpyrroles": {
+      "name_en": "Phenylpyrrole Fungicides",
+      "name_ar": "فينيل بيرول",
+      "pesticides": [
+        "fludioxonil"
+      ]
+    },
+    "hydroxyanilides": {
+      "name_en": "Hydroxyanilide Fungicides",
+      "name_ar": "هيدروكسي أنيلايد",
+      "pesticides": [
+        "fenhexamid"
+      ]
+    },
+    "insect_growth_regulators": {
+      "name_en": "Insect Growth Regulators",
+      "name_ar": "منظمات نمو الحشرات",
+      "pesticides": [
+        "buprofezin", "pyriproxyfen", "methoxyfenozide", "mrthoxyfenoxide"
+      ]
+    },
+    "meti_acaricides": {
+      "name_en": "METI Acaricides",
+      "name_ar": "مبيدات ميتي",
+      "pesticides": [
+        "fenpyroximate", "pyridaben", "fenazaquin", "cyflumetofen"
+      ]
+    },
+    "carbamoylphosphonates": {
+      "name_en": "Carbamoylphosphonate Fungicides",
+      "name_ar": "كاربامويل فوسفونات",
+      "pesticides": [
+        "propamocarb"
+      ]
+    },
+    "acylalanines": {
+      "name_en": "Acylalanine Fungicides",
+      "name_ar": "أسيل ألانين",
+      "pesticides": [
+        "metalaxyl"
+      ]
+    },
+    "synergists": {
+      "name_en": "Synergists",
+      "name_ar": "محسنات",
+      "pesticides": [
+        "piperonyl butoxide", "pipronyl butoxide"
+      ]
+    },
+    "ureas": {
+      "name_en": "Urea Herbicides",
+      "name_ar": "يوريا",
+      "pesticides": [
+        "linuron"
+      ]
+    },
+    "other": {
+      "name_en": "Other",
+      "name_ar": "أخرى",
+      "pesticides": [
+        "tricyclazole", "metrafenone", "mandipropamid", "cyflufenamid",
+        "ethofumesate", "ethofumesite", "flumetaquin"
+      ]
+    }
+  },
+  "population_classes": {
+    "infants": {
+      "name_en": "Infants",
+      "name_ar": "رضع",
+      "age_range": "<1",
+      "default_weight_kg": 8.0
+    },
+    "toddlers": {
+      "name_en": "Toddlers",
+      "name_ar": "صغار الأطفال",
+      "age_range": "1-<3",
+      "default_weight_kg": 12.0
+    },
+    "other_children": {
+      "name_en": "Other Children",
+      "name_ar": "أطفال آخرون",
+      "age_range": "3-<10",
+      "default_weight_kg": 23.0
+    },
+    "adolescents": {
+      "name_en": "Adolescents",
+      "name_ar": "مراهقون",
+      "age_range": "10-<18",
+      "default_weight_kg": 53.0
+    },
+    "adults": {
+      "name_en": "Adults",
+      "name_ar": "بالغون",
+      "age_range": "18-<65",
+      "default_weight_kg": 70.0
+    },
+    "elderly": {
+      "name_en": "Elderly",
+      "name_ar": "كبار السن",
+      "age_range": "65-<75",
+      "default_weight_kg": 68.0
+    },
+    "very_elderly": {
+      "name_en": "Very Elderly",
+      "name_ar": "كبار السن جداً",
+      "age_range": ">=75",
+      "default_weight_kg": 65.0
+    },
+    "pregnant_women": {
+      "name_en": "Pregnant Women",
+      "name_ar": "نساء حوامل",
+      "age_range": "15-45",
+      "default_weight_kg": 65.0
+    },
+    "lactating_women": {
+      "name_en": "Lactating Women",
+      "name_ar": "نساء مرضعات",
+      "age_range": "28-39",
+      "default_weight_kg": 65.0
+    }
+  }
+}

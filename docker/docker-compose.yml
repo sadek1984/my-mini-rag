@@ -15,6 +15,7 @@ services:
       - ./single_dataset_system:/app/single_dataset_system # 👈 Add this line for models
       - ../src/LARS/lars_data.duckdb:/app/src/LARS/lars_data.duckdb:rw # 🆕 DuckDB database persistence
       - ../src/LARS/processed_data_with_neighborhood.xlsx:/app/src/LARS/processed_data_with_neighborhood.xlsx:rw # 🆕 Excel data persistence
+      - ../src/LARS/scripts:/app/src/LARS/scripts:ro # 🆕 ADI data and classification files
     networks:
       - backend
     restart: always

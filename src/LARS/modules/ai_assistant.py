@@ -15,6 +15,19 @@ from openai import OpenAI
 import google.generativeai as genai
 import random
 
+# Import risk window components
+try:
+    from modules.risk_windows import (
+        show_health_risk_window,
+        show_quality_index_window,
+        process_triggered_query
+    )
+    from modules.risk_assessment_service import detect_query_type
+    RISK_WINDOWS_AVAILABLE = True
+except ImportError:
+    RISK_WINDOWS_AVAILABLE = False
+
+
 
 def generate_bar_chart(df: pd.DataFrame, query: str):
     """Generate an interactive bar chart from DataFrame"""
@@ -347,6 +360,59 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
     
     with st.spinner("🔄 Generating SQL query..."):
         try:
+            # ===== RISK KEYWORD DETECTION =====
+            # Check for Health Risk or Quality Index keywords
+            if RISK_WINDOWS_AVAILABLE:
+                trigger = detect_query_type(query)
+                
+                if trigger:
+                    # Import sample type detection
+                    from modules.risk_windows import detect_sample_type
+                    
+                    # Detect sample type from query
+                    detected_sample = detect_sample_type(query)
+                    
+                    # Get DuckDB connection for residue data
+                    con = get_duckdb_connection()
+                    if con:
+                        # Build sample filter if detected
+                        sample_filter = ""
+                        commodity = "Total Vegetables"
+                        
+                        if detected_sample:
+                            arabic_pattern = detected_sample[1]
+                            commodity = detected_sample[0]
+                            sample_filter = f"AND \"اسم العينة\" LIKE '%{arabic_pattern}%'"
+                            st.info(f"🔍 Filtering for sample type: **{detected_sample[0]}** ({arabic_pattern})")
+                        
+                        # Extract pesticide residue data for risk analysis
+                        residue_query = f"""
+                        SELECT 
+                            pesticide_name as name,
+                            concentration,
+                            limit_value as mrl
+                        FROM chemistry_tidy 
+                        WHERE is_detected = 1 
+                        AND concentration > 0
+                        AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
+                        {sample_filter}
+                        LIMIT 200
+                        """
+                        residue_df = con.execute(residue_query).df()
+                        con.close()
+                        
+                        # Convert to list of dicts
+                        residue_data = residue_df.to_dict('records')
+                        
+                        if trigger == "[TRIGGER_UI: HEALTH_RISK_WINDOW]":
+                            st.info(f"🏥 **Detected health risk query** - Analyzing {len(residue_data)} pesticide records...")
+                            show_health_risk_window(residue_data, commodity, query=query)
+                            return
+                        elif trigger == "[TRIGGER_UI: QUALITY_INDEX_WINDOW]":
+                            st.info(f"📐 **Detected quality query** - Analyzing {len(residue_data)} pesticide records...")
+                            show_quality_index_window(residue_data, commodity, query=query)
+                            return
+            
             # Connect to DuckDB
             con = get_duckdb_connection()
             if con is None:

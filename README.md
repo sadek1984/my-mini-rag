@@ -9,6 +9,12 @@
 - 🔒 **Privacy-First Design** - Schema-only prompting ensures data never leaves your server
 - 📈 **Predictive Analytics** - Trend analysis and risk assessment
 - 🗺️ **Interactive Maps** - Geographic visualization of compliance data
+- 🧬 **Dietary Exposure Assessment (NEW)** - PRIMo 4 methodology implementation:
+  - ADI-based risk calculations (EDI, HQc, HIc)
+  - 9 population classes with PRIMo 4 body weights
+  - Chemical group classification (Pyrethroids, Organophosphates, Carbamates, etc.)
+  - EU MRL API integration for current limits
+  - Risk visualization by chemical group
 
 This is a minimal implementation of the RAG model for Excel files retrieval.
 ## Requirements ›
@@ -163,5 +169,4 @@ what are the count of tomato samples that reading more than limits?
 
 Show me violations by neighborhood
 
-
-
+  لعينات الطماطم بناءً على متوسط استهلاك الفرد في السعودية؟ (HRI) ما هو مؤشر الخطر الصحي 
