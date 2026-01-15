@@ -87,6 +87,84 @@ def detect_sample_type(query: str) -> Optional[tuple]:
 # RISK INPUT FORM
 # ============================================================================
 
+def get_residue_data_for_sample(sample_type_arabic: str) -> List[Dict[str, Any]]:
+    """
+    Query database for residue data filtered by sample type.
+    
+    Parameters:
+        sample_type_arabic: Arabic name of sample type for filtering
+    
+    Returns:
+        List of dicts with name, concentration, mrl
+    """
+    try:
+        import duckdb
+        from pathlib import Path
+        
+        # Find database path
+        possible_paths = [
+            Path(__file__).parent.parent / 'data' / 'lars_data.duckdb',
+            Path(__file__).parent.parent / 'lars_data.duckdb',
+            Path('/app/src/LARS/lars_data.duckdb'),
+        ]
+        
+        db_path = None
+        for p in possible_paths:
+            if p.exists():
+                db_path = p
+                break
+        
+        if not db_path:
+            return []
+        
+        con = duckdb.connect(str(db_path), read_only=True)
+        
+        # Build query with sample filter
+        sample_filter = f"AND \"اسم العينة\" LIKE '%{sample_type_arabic}%'" if sample_type_arabic else ""
+        
+        query = f"""
+        SELECT 
+            pesticide_name as name,
+            concentration,
+            limit_value as mrl
+        FROM chemistry_tidy 
+        WHERE is_detected = 1 
+        AND concentration > 0
+        AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
+        {sample_filter}
+        LIMIT 200
+        """
+        
+        result_df = con.execute(query).df()
+        con.close()
+        
+        return result_df.to_dict('records')
+    except Exception as e:
+        print(f"Error querying database: {e}")
+        return []
+
+
+# Reverse mapping: English commodity to Arabic sample name
+COMMODITY_TO_ARABIC = {
+    'Tomato': 'طماطم',
+    'Cucumber': 'خيار',
+    'Pepper': 'فلفل',
+    'Eggplant': 'باذنجان',
+    'Zucchini': 'كوسة',
+    'Beans': 'فاصوليا',
+    'Okra': 'بامية',
+    'Lettuce': 'خس',
+    'Parsley': 'بقدونس',
+    'Coriander': 'كزبرة',
+    'Mint': 'نعناع',
+    'Leafy Greens': 'ورقيات',
+    'Cabbage': 'ملفوف',
+    'Root Vegetables': 'جزر',
+    'Total Vegetables': '',  # No filter for total
+    'Total Fruits': '',
+}
+
+
 def show_risk_input_form(
     query: str,
     detected_sample: Optional[tuple] = None
@@ -134,11 +212,22 @@ def show_risk_input_form(
             "🥬 Commodity / المنتج",
             options=commodity_options,
             index=default_idx,
-            help="Select commodity for ingestion rate lookup",
+            help="⚠️ Changing this will re-query database for that sample type!",
             key="risk_commodity_selector"
         )
         
         ir = get_saudi_ir(selected_commodity)
+        
+        # Check if commodity changed from original query
+        original_commodity = st.session_state.get('risk_original_commodity', default_commodity)
+        if selected_commodity != original_commodity:
+            # Commodity changed - need to re-query database
+            arabic_sample = COMMODITY_TO_ARABIC.get(selected_commodity, '')
+            new_data = get_residue_data_for_sample(arabic_sample)
+            if new_data:
+                st.session_state['risk_residue_data'] = new_data
+                st.session_state['risk_original_commodity'] = selected_commodity
+                st.rerun()  # Rerun to display updated data
     
     with col3:
         # Custom ingestion rate override
@@ -185,20 +274,23 @@ def show_health_risk_window(
     Display Health Risk assessment window with HIc and HQc calculations.
     Uses session state to persist data across filter changes.
     """
-    # Store data in session state to persist across reruns
-    if residue_data:
-        st.session_state['risk_residue_data'] = residue_data
-        st.session_state['risk_query'] = query
-        st.session_state['risk_commodity'] = commodity
-    
-    # Retrieve from session state if not provided (on rerun)
-    if not residue_data and 'risk_residue_data' in st.session_state:
-        residue_data = st.session_state['risk_residue_data']
-        query = st.session_state.get('risk_query', '')
-        commodity = st.session_state.get('risk_commodity', 'Total Vegetables')
+    # Use session state data if passed data is empty
+    if not residue_data:
+        residue_data = st.session_state.get('risk_residue_data', [])
+        query = st.session_state.get('risk_query', query)
+        commodity = st.session_state.get('risk_commodity', commodity)
     
     st.markdown("---")
-    st.subheader("🏥 Health Risk Index (HRI) Assessment / مؤشر الخطر الصحي")
+    
+    # Header with close button
+    col_title, col_close = st.columns([6, 1])
+    with col_title:
+        st.subheader("🏥 Health Risk Index (HRI) Assessment / مؤشر الخطر الصحي")
+    with col_close:
+        if st.button("❌ Close", key="close_risk_window"):
+            st.session_state['risk_show_window'] = False
+            st.session_state.pop('risk_residue_data', None)
+            st.rerun()
     
     # Detect sample type from query
     detected_sample = detect_sample_type(query) if query else None
@@ -209,7 +301,7 @@ def show_health_risk_window(
     # Show parameter input form
     params = show_risk_input_form(query, detected_sample)
     
-    # Use the residue data (either passed or from session state)
+    # Use the residue data
     filtered_data = residue_data
     
     st.markdown("---")
@@ -258,7 +350,8 @@ def show_health_risk_window(
             )
         
         with col4:
-            sample_info = detected_sample[0] if detected_sample else "All"
+            # Show current commodity, not original detection
+            sample_info = params['commodity'] if params.get('commodity') else (detected_sample[0] if detected_sample else "All")
             st.metric(
                 "Sample Type",
                 sample_info
@@ -337,9 +430,25 @@ def show_quality_index_window(
 ):
     """
     Display Quality Index (IqR) assessment window.
+    Uses session state to persist data across filter changes.
     """
+    # Use session state data if passed data is empty
+    if not residue_data:
+        residue_data = st.session_state.get('iqr_residue_data', [])
+        query = st.session_state.get('iqr_query', query)
+        commodity = st.session_state.get('iqr_commodity', commodity)
+    
     st.markdown("---")
-    st.subheader("📐 Quality Index (IqR) Assessment / مؤشر الجودة")
+    
+    # Header with close button
+    col_title, col_close = st.columns([6, 1])
+    with col_title:
+        st.subheader("📐 Quality Index (IqR) Assessment / مؤشر الجودة")
+    with col_close:
+        if st.button("❌ Close", key="close_iqr_window"):
+            st.session_state['iqr_show_window'] = False
+            st.session_state.pop('iqr_residue_data', None)
+            st.rerun()
     
     st.markdown("""
     **Index of Quality for Residues (IqR)** = Concentration / MRL  
@@ -363,7 +472,7 @@ def show_quality_index_window(
             "🥬 Commodity / المنتج",
             options=commodity_options,
             index=commodity_options.index(default_commodity) if default_commodity in commodity_options else 0,
-            key="iqr_commodity"
+            key="iqr_commodity_select"
         )
     
     with col2:

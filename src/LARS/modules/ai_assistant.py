@@ -406,10 +406,24 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                         
                         if trigger == "[TRIGGER_UI: HEALTH_RISK_WINDOW]":
                             st.info(f"🏥 **Detected health risk query** - Analyzing {len(residue_data)} pesticide records...")
+                            # Store in session state for persistence
+                            st.session_state['risk_residue_data'] = residue_data
+                            st.session_state['risk_query'] = query
+                            st.session_state['risk_commodity'] = commodity
+                            st.session_state['risk_original_commodity'] = commodity  # Track original
+                            st.session_state['risk_show_window'] = True
+                            st.session_state['iqr_show_window'] = False  # Hide other window
                             show_health_risk_window(residue_data, commodity, query=query)
                             return
                         elif trigger == "[TRIGGER_UI: QUALITY_INDEX_WINDOW]":
                             st.info(f"📐 **Detected quality query** - Analyzing {len(residue_data)} pesticide records...")
+                            # Store in session state for persistence
+                            st.session_state['iqr_residue_data'] = residue_data
+                            st.session_state['iqr_query'] = query
+                            st.session_state['iqr_commodity'] = commodity
+                            st.session_state['iqr_original_commodity'] = commodity  # Track original
+                            st.session_state['iqr_show_window'] = True
+                            st.session_state['risk_show_window'] = False  # Hide other window
                             show_quality_index_window(residue_data, commodity, query=query)
                             return
             
@@ -2370,6 +2384,29 @@ def show_chat_page(api_client):
     - "Calculate average exceedance ratio by vegetable"
     - "Find vegetables with more than 10 violations"
     """)
+    
+    # ========================================================================
+    # PERSISTENT RISK WINDOW DISPLAY
+    # Check if there's ongoing risk analysis in session state and display it
+    # This ensures the risk window persists when filters are changed
+    # ========================================================================
+    
+    if RISK_WINDOWS_AVAILABLE:
+        # Display Health Risk Window if data exists in session state
+        if 'risk_residue_data' in st.session_state and st.session_state.get('risk_show_window', False):
+            show_health_risk_window(
+                st.session_state['risk_residue_data'],
+                st.session_state.get('risk_commodity', 'Total Vegetables'),
+                query=st.session_state.get('risk_query', '')
+            )
+        
+        # Display Quality Index Window if data exists in session state
+        elif 'iqr_residue_data' in st.session_state and st.session_state.get('iqr_show_window', False):
+            show_quality_index_window(
+                st.session_state['iqr_residue_data'],
+                st.session_state.get('iqr_commodity', 'Total Vegetables'),
+                query=st.session_state.get('iqr_query', '')
+            )
     
     # ========================================================================
     # STEP 4: Get User Input (THIS IS THE KEY PART!)
