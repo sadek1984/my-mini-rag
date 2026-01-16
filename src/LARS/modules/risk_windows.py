@@ -177,10 +177,17 @@ def show_risk_input_form(
     """
     st.markdown("### ⚙️ Risk Assessment Parameters / معلمات تقييم المخاطر")
     
+    # Initialize session state for commodity tracking
+    if 'risk_selected_commodity' not in st.session_state:
+        default_commodity = "Total Vegetables"
+        if detected_sample and detected_sample[0] in SAUDI_IR_DATA:
+            default_commodity = detected_sample[0]
+        st.session_state['risk_selected_commodity'] = default_commodity
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # Population class dropdown with all PRIMo 4 options
+        # Population class dropdown
         pop_options = {}
         for key, pc in POPULATION_CLASSES.items():
             pop_options[key] = f"{pc.name_en} ({pc.name_ar}) - {pc.default_weight_kg} kg"
@@ -190,72 +197,60 @@ def show_risk_input_form(
             options=list(pop_options.keys()),
             format_func=lambda x: pop_options[x],
             index=list(pop_options.keys()).index('saudi_adults') if 'saudi_adults' in pop_options else 4,
-            help="Select population for body weight. Saudi adults=53kg, Saudi children=16kg",
-            key="risk_population_selector"
+            help="Select population for body weight."
         )
         
         body_weight = POPULATION_CLASSES[selected_pop].default_weight_kg
     
     with col2:
-        # Commodity selector with detected default
+        # Commodity selector
         commodity_options = [k for k in SAUDI_IR_DATA.keys() if k != "Default"]
         
-        default_commodity = "Total Vegetables"
-        if detected_sample:
-            if detected_sample[0] in commodity_options:
-                default_commodity = detected_sample[0]
-        
-        # Use session state to remember selection
-        default_idx = commodity_options.index(default_commodity) if default_commodity in commodity_options else 0
+        # Get current commodity from session state
+        current_commodity = st.session_state.get('risk_selected_commodity', 'Total Vegetables')
+        current_idx = commodity_options.index(current_commodity) if current_commodity in commodity_options else 0
         
         selected_commodity = st.selectbox(
             "🥬 Commodity / المنتج",
             options=commodity_options,
-            index=default_idx,
-            help="⚠️ Changing this will re-query database for that sample type!",
-            key="risk_commodity_selector"
+            index=current_idx,
+            help="Changing commodity updates the ingestion rate automatically"
         )
         
-        ir = get_saudi_ir(selected_commodity)
-        
-        # Check if commodity changed from original query
-        original_commodity = st.session_state.get('risk_original_commodity', default_commodity)
-        if selected_commodity != original_commodity:
-            # Commodity changed - need to re-query database
+        # Check if commodity changed
+        if selected_commodity != st.session_state.get('risk_selected_commodity'):
+            st.session_state['risk_selected_commodity'] = selected_commodity
+            # Re-query database for new sample type
             arabic_sample = COMMODITY_TO_ARABIC.get(selected_commodity, '')
             new_data = get_residue_data_for_sample(arabic_sample)
-            if new_data:
-                st.session_state['risk_residue_data'] = new_data
-                st.session_state['risk_original_commodity'] = selected_commodity
-                st.rerun()  # Rerun to display updated data
+            # Update data (even if empty)
+            st.session_state['risk_residue_data'] = new_data
+            st.rerun()
     
     with col3:
-        # Custom ingestion rate override
-        custom_ir = st.number_input(
-            "📊 Ingestion Rate (g/day)",
-            min_value=1.0,
-            max_value=500.0,
-            value=ir * 1000,  # Convert to g/day for display
-            step=5.0,
-            help="Daily consumption rate. Default from Saudi IR data.",
-            key="risk_ir_input"
-        )
-        ir = custom_ir / 1000  # Convert back to kg/day
+        # Get IR for selected commodity - ALWAYS use fresh value
+        ir_kgday = get_saudi_ir(selected_commodity)
+        ir_gday = ir_kgday * 1000
+        
+        # Show IR as read-only display
+        st.markdown(f"**📊 Ingestion Rate:**")
+        st.markdown(f"### {ir_gday:.1f} g/day")
+        st.caption(f"({ir_kgday:.4f} kg/day)")
     
-    # Show selected parameters
+    # Show selected parameters summary
     st.info(f"""
     **Selected Parameters:**
     - 👥 Population: {POPULATION_CLASSES[selected_pop].name_en} ({POPULATION_CLASSES[selected_pop].name_ar})
     - ⚖️ Body Weight: {body_weight} kg
     - 🥬 Commodity: {selected_commodity}
-    - 📊 Ingestion Rate: {ir*1000:.1f} g/day ({ir:.4f} kg/day)
+    - 📊 Ingestion Rate: {ir_gday:.1f} g/day
     """)
     
     return {
         'population': selected_pop,
         'body_weight': body_weight,
         'commodity': selected_commodity,
-        'ingestion_rate': ir,
+        'ingestion_rate': ir_kgday,
         'detected_sample': detected_sample
     }
 
@@ -312,11 +307,10 @@ def show_health_risk_window(
         analysis = calculate_lars_metrics(
             filtered_data, 
             params['commodity'], 
-            target_type
+            target_type,
+            body_weight=params['body_weight'],
+            ingestion_rate=params['ingestion_rate']
         )
-        
-        # Override with actual body weight if different
-        # Recalculate with custom IR if needed
         
         # Display summary metrics
         st.markdown("### 📊 Health Risk Summary / ملخص الخطر الصحي")
@@ -461,23 +455,41 @@ def show_quality_index_window(
     if detected_sample:
         st.success(f"🔍 Detected sample type: **{detected_sample[0]}** ({detected_sample[1]})")
     
+    # Initialize session state for IqR commodity tracking
+    if 'iqr_selected_commodity' not in st.session_state:
+        default_commodity = detected_sample[0] if detected_sample and detected_sample[0] in SAUDI_IR_DATA else "Total Vegetables"
+        st.session_state['iqr_selected_commodity'] = default_commodity
+    
     # Show parameter input form (simplified for IqR - no body weight needed)
     col1, col2 = st.columns(2)
     
     with col1:
         commodity_options = [k for k in SAUDI_IR_DATA.keys() if k != "Default"]
-        default_commodity = detected_sample[0] if detected_sample and detected_sample[0] in commodity_options else "Total Vegetables"
+        
+        # Get current commodity from session state
+        current_commodity = st.session_state.get('iqr_selected_commodity', 'Total Vegetables')
+        current_idx = commodity_options.index(current_commodity) if current_commodity in commodity_options else 0
         
         selected_commodity = st.selectbox(
             "🥬 Commodity / المنتج",
             options=commodity_options,
-            index=commodity_options.index(default_commodity) if default_commodity in commodity_options else 0,
-            key="iqr_commodity_select"
+            index=current_idx,
+            help="Changing commodity will re-query database for that sample type"
         )
+        
+        # Check if commodity changed - re-query database
+        if selected_commodity != st.session_state.get('iqr_selected_commodity'):
+            st.session_state['iqr_selected_commodity'] = selected_commodity
+            # Re-query database for new sample type
+            arabic_sample = COMMODITY_TO_ARABIC.get(selected_commodity, '')
+            new_data = get_residue_data_for_sample(arabic_sample)
+            # Update data (even if empty)
+            st.session_state['iqr_residue_data'] = new_data
+            st.rerun()
     
     with col2:
-        sample_info = detected_sample[0] if detected_sample else "All Samples"
-        st.info(f"🔍 Sample Filter: **{sample_info}**")
+        # Show current selected commodity as the filter
+        st.info(f"🔍 Sample Filter: **{selected_commodity}**")
     
     st.markdown("---")
     

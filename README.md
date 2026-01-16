@@ -170,3 +170,7 @@ what are the count of tomato samples that reading more than limits?
 Show me violations by neighborhood
 
   لعينات الطماطم بناءً على متوسط استهلاك الفرد في السعودية؟ (HRI) ما هو مؤشر الخطر الصحي 
+
+  احسب مؤشر الجودة لعينات الفلفل
+
+  

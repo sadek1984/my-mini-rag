@@ -765,7 +765,9 @@ def calculate_iqr(concentration: float, mrl: float) -> float:
 def calculate_lars_metrics(
     residue_list: List[Dict[str, Any]],
     commodity: str = "Total Vegetables",
-    target: str = "adult"
+    target: str = "adult",
+    body_weight: Optional[float] = None,
+    ingestion_rate: Optional[float] = None
 ) -> Dict[str, Any]:
     """
     Calculate comprehensive LARS metrics for a list of pesticide residues.
@@ -784,6 +786,8 @@ def calculate_lars_metrics(
             - 'adi': Acceptable Daily Intake mg/kg bw/day (optional)
         commodity: Commodity name for IR lookup (e.g., "Tomato", "Cucumber")
         target: "adult" (53kg) or "child" (16kg)
+        body_weight: Override body weight (uses exact value if provided)
+        ingestion_rate: Override ingestion rate in kg/day (uses exact value if provided)
     
     Returns:
         Dictionary with:
@@ -794,11 +798,17 @@ def calculate_lars_metrics(
             - iqr_driver: Pesticide with highest IqR
             - individual_results: Per-pesticide calculations
     """
-    # Define body weight based on target
-    bw = 53.0 if target == "adult" else 16.0
+    # Define body weight based on target OR use explicit parameter
+    if body_weight is not None:
+        bw = body_weight
+    else:
+        bw = 53.0 if target == "adult" else 16.0
     
-    # Get ingestion rate for commodity
-    ir = get_saudi_ir(commodity)
+    # Get ingestion rate for commodity OR use explicit parameter
+    if ingestion_rate is not None:
+        ir = ingestion_rate
+    else:
+        ir = get_saudi_ir(commodity)
     
     # Get risk service for ADI lookup
     service = get_risk_service()
