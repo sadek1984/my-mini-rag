@@ -120,19 +120,21 @@ def get_residue_data_for_sample(sample_type_arabic: str) -> List[Dict[str, Any]]
         con = duckdb.connect(str(db_path), read_only=True)
         
         # Build query with sample filter
-        sample_filter = f"AND \"اسم العينة\" LIKE '%{sample_type_arabic}%'" if sample_type_arabic else ""
+        sample_filter = f"WHERE \"اسم العينة\" LIKE '%{sample_type_arabic}%'" if sample_type_arabic else ""
         
         query = f"""
         SELECT 
             pesticide_name as name,
             concentration,
-            limit_value as mrl
+            limit_value as mrl,
+            "التاريخ" as date,
+            "كود العينة" as sample_code,
+            is_detected
         FROM chemistry_tidy 
-        WHERE is_detected = 1 
-        AND concentration > 0
-        AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
         {sample_filter}
-        LIMIT 200
+        AND pesticide_name NOT IN ('NO DATA')
+        ORDER BY "التاريخ" ASC
+        LIMIT 2000
         """
         
         result_df = con.execute(query).df()
@@ -142,6 +144,130 @@ def get_residue_data_for_sample(sample_type_arabic: str) -> List[Dict[str, Any]]
     except Exception as e:
         print(f"Error querying database: {e}")
         return []
+
+# Monthly Trend Analysis Constants
+ARABIC_MONTHS = {
+    1: 'يناير', 2: 'فبراير', 3: 'مارس', 4: 'أبريل',
+    5: 'مايو', 6: 'يونيو', 7: 'يوليو', 8: 'أغسطس',
+    9: 'سبتمبر', 10: 'أكتوبر', 11: 'نوفمبر', 12: 'ديسمبر'
+}
+
+def show_monthly_iqr_trend(residue_data: List[Dict[str, Any]]):
+    """
+    Shows monthly trend analysis for IqR as requested.
+    Formula: Avg IqR = Sum(IqR for all samples) / Total samples
+    """
+    if not residue_data:
+        st.warning("No data available for trend analysis.")
+        return
+
+    df = pd.DataFrame(residue_data)
+    
+    # Check if 'date' column exists to avoid KeyError
+    if 'date' not in df.columns or 'sample_code' not in df.columns:
+        st.warning("Trend analysis skipped: Date or Sample Code information missing from data.")
+        return
+        
+    # Ensure date is datetime
+    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    df = df.dropna(subset=['date'])
+    
+    if df.empty:
+        st.warning("No valid dates found in data for trend analysis.")
+        return
+        
+    # Calculate IqR for each row
+    df['iqr_val'] = df.apply(lambda row: row['concentration'] / row['mrl'] if row['mrl'] > 0 else 0.0, axis=1)
+    
+    # Extract month and year
+    df['month'] = df['date'].dt.month
+    df['year'] = df['date'].dt.year
+    df['month_name'] = df['month'].map(ARABIC_MONTHS)
+    
+    # Group by month (assuming single year or grouping all years' months)
+    # To follow the screenshot's study case (annual study), we group by month
+    
+    monthly_stats = []
+    for month in range(1, 13):
+        m_data = df[df['month'] == month]
+        if m_data.empty:
+            continue
+            
+        # Total unique samples in this month
+        total_samples = m_data['sample_code'].nunique()
+        
+        # Sum of all IqR ratios in this month
+        sum_iqr = m_data['iqr_val'].sum()
+        
+        # Average IqR per sample
+        avg_iqr = sum_iqr / total_samples if total_samples > 0 else 0
+        
+        # Status based on screenshot rules
+        if avg_iqr < 0.5:
+            status = "Good / جيدة"
+            status_color = "green"
+            status_key = "Good"
+        elif avg_iqr < 1.0:
+            status = "Adequate / مقبولة"
+            status_color = "orange"
+            status_key = "Adequate"
+        else:
+            status = "Inadequate / غير مقبولة"
+            status_color = "red"
+            status_key = "Inadequate"
+            
+        # Trend observations (simple logic)
+        observation = "Stable / مستقر"
+        if len(monthly_stats) > 0:
+            prev_iqr = monthly_stats[-1]['avg_iqr']
+            if avg_iqr > prev_iqr * 1.2:
+                observation = "Increasing / ارتفاع"
+            elif avg_iqr < prev_iqr * 0.8:
+                observation = "Decreasing / انخفاض"
+        
+        monthly_stats.append({
+            'month_num': month,
+            'الشهر (Month)': ARABIC_MONTHS[month],
+            'عدد العينات (Samples)': total_samples,
+            'متوسط قيمة IqR (Avg IqR)': round(avg_iqr, 3),
+            'الحالة (Status)': status,
+            'الملاحظات (Trend)': observation,
+            'avg_iqr': avg_iqr,
+            'status_key': status_key
+        })
+    
+    if not monthly_stats:
+        st.info("Insufficient monthly distribution for trend analysis.")
+        return
+        
+    trend_df = pd.DataFrame(monthly_stats)
+    
+    st.markdown("### 📈 Monthly IqR Trend Analysis / تحليل الترند الشهري")
+    
+    # Plotly Trend Chart
+    fig = px.line(
+        trend_df, 
+        x='الشهر (Month)', 
+        y='avg_iqr',
+        markers=True,
+        title="Monthly Average IqR Trend / اتجاه متوسط مؤشر الجودة",
+        labels={'avg_iqr': 'Average IqR', 'الشهر (Month)': 'Month'}
+    )
+    
+    # Add status zones
+    fig.add_hrect(y0=0, y1=0.5, line_width=0, fillcolor="green", opacity=0.1, annotation_text="Good")
+    fig.add_hrect(y0=0.5, y1=1.0, line_width=0, fillcolor="orange", opacity=0.1, annotation_text="Adequate")
+    fig.add_hrect(y0=1.0, y1=max(max(trend_df['avg_iqr'])*1.2, 1.5), line_width=0, fillcolor="red", opacity=0.1, annotation_text="Inadequate")
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Display table as requested in screenshot
+    display_df = trend_df[['الشهر (Month)', 'عدد العينات (Samples)', 'متوسط قيمة IqR (Avg IqR)', 'الحالة (Status)', 'الملاحظات (Trend)']]
+    st.dataframe(display_df, use_container_width=True)
+    
+    # Summary Info
+    peak_month = trend_df.loc[trend_df['avg_iqr'].idxmax()]
+    st.info(f"💡 **Peak Contamination:** {peak_month['الشهر (Month)']} (Avg IqR: {peak_month['avg_iqr']:.3f})")
 
 
 # Reverse mapping: English commodity to Arabic sample name
@@ -495,7 +621,9 @@ def show_quality_index_window(
     
     # Calculate metrics
     if residue_data:
-        analysis = calculate_lars_metrics(residue_data, selected_commodity, "adult")
+        # Filter for summary metrics (only detected pesticides)
+        detected_only = [r for r in residue_data if r.get('is_detected', 1) == 1]
+        analysis = calculate_lars_metrics(detected_only, selected_commodity, "adult")
         
         # Summary metrics
         st.markdown("### 📊 Quality Summary / ملخص الجودة")
@@ -533,6 +661,13 @@ def show_quality_index_window(
             st.error(f"⚠️ **مشكلة جودة** - Total IqR = {iqr_total:.4f} (≥1)")
         else:
             st.success(f"✅ **الجودة مقبولة** - Total IqR = {iqr_total:.4f} (<1)")
+            
+        st.markdown("---")
+        
+        # NEW: Monthly IqR Trend Analysis
+        show_monthly_iqr_trend(residue_data)
+        
+        st.markdown("---")
         
         # Chemical group statistics table
         st.markdown("### 🧪 Statistics by Chemical Group / إحصائيات حسب المجموعة")

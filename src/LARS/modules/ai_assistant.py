@@ -386,17 +386,21 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                             st.info(f"🔍 Filtering for sample type: **{detected_sample[0]}** ({arabic_pattern})")
                         
                         # Extract pesticide residue data for risk analysis
+                        # Including all samples for trend analysis (Sum IqR / Total Samples)
                         residue_query = f"""
                         SELECT 
                             pesticide_name as name,
                             concentration,
-                            limit_value as mrl
+                            limit_value as mrl,
+                            "التاريخ" as date,
+                            "كود العينة" as sample_code,
+                            is_detected
                         FROM chemistry_tidy 
-                        WHERE is_detected = 1 
-                        AND concentration > 0
-                        AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
+                        WHERE 1=1
                         {sample_filter}
-                        LIMIT 200
+                        AND pesticide_name NOT IN ('NO DATA')
+                        ORDER BY "التاريخ" ASC
+                        LIMIT 2000
                         """
                         residue_df = con.execute(residue_query).df()
                         con.close()
@@ -636,8 +640,13 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
             
             # Pattern 1: Find samples with exactly N pesticides (may include sample type filter)
             # Matches: "عينات الخيار التي تحتوي علي عدد ٢ مبيد" or "samples with 2 pesticides"
+            # NEW: Also detects classification requests ("صنف", "تصنيف", "classification")
             pesticide_count_pattern = r'(\d+)\s*(?:مبيد|pesticides?)'
             match = re.search(pesticide_count_pattern, query_normalized)
+            
+            # Check if user wants classification
+            classification_keywords = ['صنف', 'تصنيف', 'classify', 'classification', 'مجموع', 'groups']
+            wants_classification = any(kw in query.lower() or kw in query for kw in classification_keywords)
             
             if match:
                 n_pesticides = int(match.group(1))
@@ -650,6 +659,10 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 else:
                     st.info(f"🔍 Looking for samples with exactly {n_pesticides} pesticides...")
                 
+                if wants_classification:
+                    st.info("📊 Including chemical group classification...")
+                
+                # Main query to find samples
                 query_sql = f"""
                 SELECT 
                     "كود العينة" as sample_code,
@@ -672,11 +685,42 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                     # Display the samples
                     st.dataframe(result, use_container_width=True)
                     
+                    sample_codes = result['sample_code'].tolist()
+                    sample_codes_str = ','.join([str(code) for code in sample_codes])
+                    
+                    # NEW: If user wants classification, show group breakdown
+                    if wants_classification:
+                        st.subheader("🧪 Chemical Group Classification / التصنيف الكيميائي")
+                        
+                        classification_query = f"""
+                        WITH sample_groups AS (
+                            SELECT 
+                                t."كود العينة" as sample_code, 
+                                t."اسم العينة" as sample_name,
+                                COALESCE(g.group_name_ar, 'أخرى') as group_name,
+                                COUNT(*) as group_count
+                            FROM chemistry_tidy t
+                            LEFT JOIN pesticide_groups g ON LOWER(t.pesticide_name) = g.pesticide_name
+                            WHERE t."كود العينة" IN ({sample_codes_str})
+                            AND t.is_detected = 1
+                            GROUP BY t."كود العينة", t."اسم العينة", group_name
+                        )
+                        SELECT 
+                            sample_code as كود_العينة, 
+                            sample_name as اسم_العينة,
+                            SUM(group_count) as إجمالي_المبيدات,
+                            STRING_AGG(CAST(group_count AS VARCHAR) || ' ' || group_name, ' + ' ORDER BY group_count DESC) as التصنيف_الكيميائي
+                        FROM sample_groups
+                        GROUP BY sample_code, sample_name
+                        ORDER BY sample_code DESC
+                        """
+                        
+                        classification_result = con.execute(classification_query).df()
+                        st.dataframe(classification_result, use_container_width=True)
+                    
                     # Show detailed pesticide information for these samples
                     st.subheader("🔬 Detailed Pesticide Information")
                     
-                    sample_codes = result['sample_code'].tolist()
-                    sample_codes_str = ','.join([str(code) for code in sample_codes])
                     detailed_query = f"""
                     SELECT 
                         "كود العينة" as sample_code,
@@ -1102,7 +1146,9 @@ Also include risk assessment in the query:
 ⚠️ PRIVACY NOTE: You are receiving ONLY schema information.
 DO NOT assume specific values exist. Write generic SQL based on column names only.
 
-**TABLE NAME:** chemistry_tidy
+**TABLE NAMES:** 
+1. `chemistry_tidy` (Primary results)
+2. `pesticide_groups` (Helper table for chemical families)
 
 **User Question:** {query}
 {risk_instruction}
@@ -1118,33 +1164,19 @@ DO NOT assume specific values exist. Write generic SQL based on column names onl
 8. Filter by year using: WHERE YEAR("التاريخ") = 2024
 9. **CASE-INSENSITIVE MATCHING:** Use ILIKE instead of LIKE for case-insensitive search
 10. **EXCEEDANCE:** Use exceedance_ratio > 1 to find violations, > 2 for 2x limit violations
-11. **ARABIC CHARACTER VARIANTS:** Arabic has interchangeable characters. For name searches, use multiple OR conditions:
-    - ى and ي are often interchangeable (الرشيدى = الرشيدي)
-    - ة and ه are often interchangeable (منشأة = منشاه)
-    - أ/إ/آ and ا are often interchangeable
-    - Example: WHERE "اسم المستلم" LIKE '%الرشيد%' (use partial match to avoid ى/ي issue)
+11. **CLASSIFICATION:** Join `chemistry_tidy` with `pesticide_groups` on `pesticide_name` to get chemical families (Pyrethroids, Carbamates, etc.)
+12. **ARABIC CHARACTER VARIANTS:** Arabic has interchangeable characters. For name searches, use multiple OR conditions.
 
-**COLUMN REFERENCE (TIDY FORMAT - Separate columns for pesticide data!):**
-- `"كود العينة"`: Sample code (unique ID)
-- `"التاريخ"`: Sample date (TIMESTAMP)
-- `"اسم العينة"`: Sample name in Arabic (طماطم, بقدونس, كمون, etc.)
-- `"نوع العينة"`: Sample type (خضراوات, فواكهة, توابل, مكسرات, حبوب, ورقيات)
-- `"تصنيف العينة"`: Sample classification (خدمية, تجارية, etc.)
-- `"نوع الاختبار"`: Test type (متبقيات مبيدات, افلاتوكسين, سموم فطرية)
-- `"الحى"`: Neighborhood name
-- `"اسم المنشاة"`: Establishment/facility name
-- `"اسم البلدية"`: Municipality name (e.g., بلدية غرب بريدة)
-- `"رقم الرخصة"`: License number
-- `"حالة العينة"`: Sample condition/status
-- `"اسم المستلم"`: Receiver name
-- `pesticide_name`: Pesticide/contaminant name (e.g., 'chlorpyrifos', 'imidacloprid', 'bifenthrin')
-- `concentration`: Measured concentration value (DOUBLE - numeric!)
-- `limit_value`: Maximum allowed limit (DOUBLE - numeric!)
-- `exceedance_ratio`: concentration / limit_value (DOUBLE)
-- `is_above_limit`: 1 = فوق الحد (concentration > limit), 0 = تحت الحد - CALCULATED FROM DATA
-- `is_compliant`: 1 = مطابق (compliant), 0 = غير مطابق (non-compliant) - ORIGINAL LAB JUDGMENT
-- `is_detected`: 1 = pesticide detected with value, 0 = no detection (e.g., 'NO CBD')
-- `sample_result`: Original lab result text (compliant/non-compliant)
+**COLUMN REFERENCE:**
+- **chemistry_tidy**:
+  - `"كود العينة"`: Sample code (unique ID)
+  - `"اسم العينة"`: Sample name (Arabic)
+  - `pesticide_name`: Pesticide name (English)
+  - `concentration`, `limit_value`, `is_compliant`, `is_detected`
+- **pesticide_groups**:
+  - `pesticide_name`: Pesticide name (joins with chemistry_tidy)
+  - `group_name_en`: Chemical group in English
+  - `group_name_ar`: Chemical group in Arabic (e.g., 'بايرثرويدات', 'كرباميت')
 
 **EXAMPLE QUERIES:**
 
@@ -1396,6 +1428,28 @@ FROM chemistry_tidy
 WHERE "اسم العينة" LIKE '%طماطم%'
 AND pesticide_name ILIKE '%bifenthrin%'
 ORDER BY is_compliant, concentration DESC;
+
+-- 21. **Samples with N pesticides and their chemical classifications**
+-- Example: "ماهي العينات التي تحتوي علي ٦ مبيدات و صنف هذه المبيدات"
+WITH sample_groups AS (
+    SELECT 
+        t."كود العينة", 
+        t."اسم العينة",
+        COALESCE(g.group_name_ar, 'أخرى') as group_name,
+        COUNT(*) as group_count
+    FROM chemistry_tidy t
+    LEFT JOIN pesticide_groups g ON LOWER(t.pesticide_name) = g.pesticide_name
+    WHERE t.is_detected = 1
+    GROUP BY t."كود العينة", t."اسم العينة", group_name
+)
+SELECT 
+    "كود العينة", 
+    "اسم العينة",
+    SUM(group_count) as إجمالي_المبيدات,
+    STRING_AGG(group_count || ' ' || group_name, ' + ') as التصنيف_الكيميائي
+FROM sample_groups
+GROUP BY "كود العينة", "اسم العينة"
+HAVING إجمالي_المبيدات = 6;
 
 Generate ONLY the SQL query wrapped in ```sql``` markers:"""
 
@@ -2643,19 +2697,60 @@ def format_result_as_table(df: pd.DataFrame, query_type: str = "statistics") -> 
             df[col] = df[col].apply(lambda x: f"{float(x):.4f}" if pd.notnull(x) else "N/A")
     
     return df
+def load_chemical_groups_to_duckdb(con):
+    """
+    Load chemical classification data from JSON into a temporary DuckDB table.
+    This allows joining pesticide data with their chemical groups (e.g. Pyrethroids).
+    """
+    try:
+        # File is in src/LARS/scripts/chemical_classification.json
+        config_path = Path(__file__).parent.parent / 'scripts' / 'chemical_classification.json'
+        if not config_path.exists():
+            return
+            
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            
+        groups_data = []
+        for key, data in config.get('chemical_groups', {}).items():
+            name_en = data.get('name_en', key)
+            name_ar = data.get('name_ar', key)
+            for pesticide in data.get('pesticides', []):
+                groups_data.append({
+                    'pesticide_name': pesticide.lower().strip(),
+                    'group_name_en': name_en,
+                    'group_name_ar': name_ar,
+                    'group_key': key
+                })
+        
+        if groups_data:
+            groups_df = pd.DataFrame(groups_data)
+            # Create a temporary table in the current connection
+            con.execute("CREATE OR REPLACE TEMPORARY TABLE pesticide_groups AS SELECT * FROM groups_df")
+    except Exception as e:
+        print(f"Warning: Failed to load pesticide groups to DuckDB: {e}")
+
 def get_duckdb_connection():
-    """Get DuckDB connection to the LARS database"""
+    """Get DuckDB connection to the LARS database and load helper tables"""
     db_path = Path(__file__).parent.parent / 'data' / 'lars_data.duckdb'
     if not db_path.exists():
         return None
-    return duckdb.connect(str(db_path), read_only=True)
+        
+    con = duckdb.connect(str(db_path), read_only=True)
+    
+    # Load chemical classification into a temporary table for joins
+    load_chemical_groups_to_duckdb(con)
+    
+    return con
 
 def get_duckdb_connection_write():
     """Get DuckDB connection to the LARS database with write access"""
     db_path = Path(__file__).parent.parent / 'data' / 'lars_data.duckdb'
     if not db_path.exists():
         return None
-    return duckdb.connect(str(db_path), read_only=False)
+    con = duckdb.connect(str(db_path), read_only=False)
+    load_chemical_groups_to_duckdb(con)
+    return con
 
 def transform_pesticide_columns(df):
     """
@@ -2881,6 +2976,19 @@ def get_sql_schema_info(con) -> str:
             for _, row in sample_type_stats.iterrows():
                 schema_parts.append(f"- {row['sample_type']}: {row['samples']} samples ({row['violations']} violations)")
         
+        # NEW: Add information about pesticide groups (helper table)
+        try:
+            pg_columns = con.execute("DESCRIBE pesticide_groups").df()
+            schema_parts.append("\n**Table: pesticide_groups (Helper table for classifications)**")
+            schema_parts.append("| Column | Type | Description |")
+            schema_parts.append("|--------|------|-------------|")
+            schema_parts.append("| pesticide_name | VARCHAR | Pesticide name (joins with chemistry_tidy) |")
+            schema_parts.append("| group_name_en | VARCHAR | English group name (e.g., Pyrethroids) |")
+            schema_parts.append("| group_name_ar | VARCHAR | Arabic group name (e.g., بايرثرويدات) |")
+            schema_parts.append("| group_key | VARCHAR | Internal key indicator |")
+        except:
+            pass
+            
         # NEW: Add information about original structure for reference
         schema_parts.append("\n---")
         schema_parts.append("**Original Data Structure (for reference):**")
