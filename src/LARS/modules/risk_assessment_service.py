@@ -778,6 +778,124 @@ def calculate_iqr(concentration: float, mrl: float) -> float:
     return concentration / mrl
 
 
+def calculate_sample_iqr_summary(
+    residue_list: List[Dict[str, Any]],
+    commodity: str = "Total Vegetables"
+) -> Dict[str, Any]:
+    """
+    🆕 New Sample-Level IQR Calculation (as per user's diagram)
+    
+    Logic:
+    1. For each SAMPLE, sum the IQR of all pesticides detected in that sample
+       IQR_sample = Σ (concentration_i / MRL_i) for all pesticides i in sample
+    2. Classify each sample based on its total IQR:
+       - Excellent: IQR = 0 (no pesticides detected)
+       - Good: 0 < IQR <= 0.6
+       - Adequate: 0.6 < IQR <= 1
+       - Inadequate: IQR > 1
+    3. Return summary statistics for the commodity
+    
+    Parameters:
+        residue_list: List of dicts with keys:
+            - 'sample_code': Unique sample identifier
+            - 'name': pesticide name
+            - 'concentration': residue concentration mg/kg
+            - 'mrl': Maximum Residue Limit mg/kg
+        commodity: Commodity name (for reference)
+    
+    Returns:
+        Dictionary with:
+            - sample_iqr_details: List of {sample_code, total_iqr, category}
+            - category_counts: {Excellent, Good, Adequate, Inadequate}
+            - category_percentages: {Excellent, Good, Adequate, Inadequate}
+            - total_samples: Total number of unique samples
+    """
+    # Get risk service for MRL lookup if needed
+    service = get_risk_service()
+    
+    # Group residues by sample_code
+    samples = {}
+    for item in residue_list:
+        sample_code = item.get('sample_code', 'unknown')
+        if sample_code not in samples:
+            samples[sample_code] = []
+        samples[sample_code].append(item)
+    
+    # Calculate IQR for each sample
+    sample_iqr_details = []
+    
+    for sample_code, residues in samples.items():
+        total_iqr = 0.0
+        pesticide_details = []
+        
+        for res in residues:
+            p_name = res.get('name', '')
+            concentration = res.get('concentration', 0)
+            mrl = res.get('mrl', 0)
+            
+            # Skip if no valid data
+            if not p_name or p_name in ('NO DATA', 'NO DETECTION', ''):
+                continue
+            
+            # Calculate IQR for this pesticide
+            if mrl and mrl > 0:
+                iqr_val = concentration / mrl
+            else:
+                iqr_val = 0.0
+            
+            total_iqr += iqr_val
+            pesticide_details.append({
+                'pesticide': p_name,
+                'concentration': concentration,
+                'mrl': mrl,
+                'iqr': iqr_val
+            })
+        
+        # Classify sample
+        if total_iqr == 0:
+            category = "Excellent"
+        elif total_iqr <= 0.6:
+            category = "Good"
+        elif total_iqr <= 1.0:
+            category = "Adequate"
+        else:
+            category = "Inadequate"
+        
+        sample_iqr_details.append({
+            'sample_code': sample_code,
+            'total_iqr': total_iqr,
+            'category': category,
+            'pesticides': pesticide_details,
+            'pesticide_count': len(pesticide_details)
+        })
+    
+    # Count categories
+    category_counts = {
+        "Excellent": 0,
+        "Good": 0,
+        "Adequate": 0,
+        "Inadequate": 0
+    }
+    
+    for detail in sample_iqr_details:
+        category_counts[detail['category']] += 1
+    
+    total_samples = len(sample_iqr_details)
+    
+    # Calculate percentages
+    category_percentages = {}
+    for cat, count in category_counts.items():
+        category_percentages[cat] = (count / total_samples * 100) if total_samples > 0 else 0
+    
+    return {
+        "sample_iqr_details": sample_iqr_details,
+        "category_counts": category_counts,
+        "category_percentages": category_percentages,
+        "total_samples": total_samples,
+        "commodity": commodity
+    }
+
+
 def calculate_commodity_summary_metrics(
     residue_list: List[Dict[str, Any]],
     commodity: str = "Total Vegetables",

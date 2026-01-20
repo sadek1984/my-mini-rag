@@ -21,6 +21,7 @@ try:
     from modules.risk_assessment_service import (
         calculate_lars_metrics,
         calculate_commodity_summary_metrics,
+        calculate_sample_iqr_summary,
         detect_query_type,
         get_saudi_ir,
         SAUDI_IR_DATA,
@@ -699,53 +700,88 @@ def show_quality_index_window(
     
     # Calculate metrics
     if residue_data:
-        # Filter for summary metrics (only detected pesticides)
-        detected_only = [r for r in residue_data if r.get('is_detected', 1) == 1]
-        use_realtime = st.session_state.get('iqr_use_realtime', False)
-        analysis = calculate_lars_metrics(
-            detected_only, 
-            selected_commodity, 
-            "adult",
-            use_realtime_mrl=use_realtime
+        # Use the new sample-level IQR calculation
+        iqr_analysis = calculate_sample_iqr_summary(
+            residue_data,
+            commodity=selected_commodity
         )
         
         # Summary metrics
-        st.markdown("### 📊 Quality Summary / ملخص الجودة")
+        st.markdown(f"### 📊 Quality Summary for {selected_commodity} / ملخص الجودة")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            iqr_total = analysis["iqr_total"]
             st.metric(
-                "Total IqR",
-                f"{iqr_total:.4f}",
-                delta="⚠️ >1" if iqr_total >= 1 else "✅ OK",
-                delta_color="inverse" if iqr_total >= 1 else "normal"
+                "🥇 Excellent (IQR=0)",
+                f"{iqr_analysis['category_counts']['Excellent']}",
+                f"{iqr_analysis['category_percentages']['Excellent']:.1f}%"
             )
         
         with col2:
-            if analysis["iqr_driver"]:
-                driver_name = analysis["iqr_driver"].split(" (")[0]
-                st.metric(
-                    "🎯 Quality Driver",
-                    driver_name[:12] + "..." if len(driver_name) > 12 else driver_name,
-                    "Highest IqR"
-                )
-            else:
-                st.metric("Quality Driver", "N/A")
+            st.metric(
+                "✅ Good (0<IQR≤0.6)",
+                f"{iqr_analysis['category_counts']['Good']}",
+                f"{iqr_analysis['category_percentages']['Good']:.1f}%"
+            )
         
         with col3:
             st.metric(
-                "Pesticides",
-                len(analysis["individual_results"])
+                "⚠️ Adequate (0.6<IQR≤1)",
+                f"{iqr_analysis['category_counts']['Adequate']}",
+                f"{iqr_analysis['category_percentages']['Adequate']:.1f}%"
             )
         
-        # Quality interpretation
-        if iqr_total >= 1:
-            st.error(f"⚠️ **مشكلة جودة** - Total IqR = {iqr_total:.4f} (≥1)")
+        with col4:
+            st.metric(
+                "❌ Inadequate (IQR>1)",
+                f"{iqr_analysis['category_counts']['Inadequate']}",
+                f"{iqr_analysis['category_percentages']['Inadequate']:.1f}%"
+            )
+        
+        st.info(f"📊 Total Samples Analyzed: **{iqr_analysis['total_samples']}**")
+        
+        # Quality interpretation based on categories
+        inadequate_pct = iqr_analysis['category_percentages']['Inadequate']
+        if inadequate_pct > 10:
+            st.error(f"⚠️ **مشكلة جودة كبيرة** - {inadequate_pct:.1f}% من العينات غير ملائمة")
+        elif inadequate_pct > 0:
+            st.warning(f"⚡ **تحذير جودة** - {inadequate_pct:.1f}% من العينات غير ملائمة")
         else:
-            st.success(f"✅ **الجودة مقبولة** - Total IqR = {iqr_total:.4f} (<1)")
-            
+            st.success(f"✅ **الجودة ممتازة** - لا توجد عينات غير ملائمة")
+        
+        st.markdown("---")
+        
+        # Pie chart for category distribution
+        st.markdown("### 📈 Sample Quality Distribution / توزيع جودة العينات")
+        
+        chart_data = pd.DataFrame([
+            {"Category": "Excellent (IQR=0)", "Count": iqr_analysis['category_counts']['Excellent'], "Color": "#28a745"},
+            {"Category": "Good (0<IQR≤0.6)", "Count": iqr_analysis['category_counts']['Good'], "Color": "#17a2b8"},
+            {"Category": "Adequate (0.6<IQR≤1)", "Count": iqr_analysis['category_counts']['Adequate'], "Color": "#ffc107"},
+            {"Category": "Inadequate (IQR>1)", "Count": iqr_analysis['category_counts']['Inadequate'], "Color": "#dc3545"},
+        ])
+        
+        # Filter out zero counts
+        chart_data = chart_data[chart_data['Count'] > 0]
+        
+        if not chart_data.empty:
+            fig = px.pie(
+                chart_data,
+                names="Category",
+                values="Count",
+                title="Sample Quality Categories",
+                color="Category",
+                color_discrete_map={
+                    "Excellent (IQR=0)": "#28a745",
+                    "Good (0<IQR≤0.6)": "#17a2b8",
+                    "Adequate (0.6<IQR≤1)": "#ffc107",
+                    "Inadequate (IQR>1)": "#dc3545"
+                }
+            )
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig, use_container_width=True)
+        
         st.markdown("---")
         
         # NEW: Monthly IqR Trend Analysis
@@ -753,53 +789,41 @@ def show_quality_index_window(
         
         st.markdown("---")
         
-        # Chemical group statistics table
-        st.markdown("### 🧪 Statistics by Chemical Group / إحصائيات حسب المجموعة")
+        # Sample details table
+        st.markdown("### 📋 Sample IQR Details / تفاصيل مؤشر الجودة لكل عينة")
         
-        if analysis["stats"]:
-            stats_data = []
-            for group, data in analysis["stats"].items():
-                group_iqr = sum(
-                    r["iqr"] for r in analysis["individual_results"] 
-                    if r["chemical_group"] == group
-                )
-                stats_data.append({
-                    "Group": group,
-                    "Count": data["count"],
-                    "Min": f"{data['min']:.4f}",
-                    "Max": f"{data['max']:.4f}",
-                    "Mean": f"{data['mean']:.4f}",
-                    "Median": f"{data['median']:.4f}",
-                    "IqR Sum": f"{group_iqr:.4f}"
-                })
+        sample_details_df = pd.DataFrame([
+            {
+                "Sample Code": s['sample_code'],
+                "Pesticides": s['pesticide_count'],
+                "Total IQR": s['total_iqr'],
+                "Category": s['category']
+            }
+            for s in iqr_analysis['sample_iqr_details']
+        ])
+        
+        if not sample_details_df.empty:
+            sample_details_df = sample_details_df.sort_values("Total IQR", ascending=False)
             
-            stats_df = pd.DataFrame(stats_data)
-            st.dataframe(stats_df, use_container_width=True)
+            # Color coding for table
+            def highlight_category(row):
+                if row['Category'] == 'Inadequate':
+                    return ['background-color: #f8d7da'] * len(row)
+                elif row['Category'] == 'Adequate':
+                    return ['background-color: #fff3cd'] * len(row)
+                elif row['Category'] == 'Good':
+                    return ['background-color: #d4edda'] * len(row)
+                else:
+                    return ['background-color: #cce5ff'] * len(row)
             
-            # Pie chart
-            chart_data = pd.DataFrame([
-                {"Group": group, "IqR": sum(r["iqr"] for r in analysis["individual_results"] if r["chemical_group"] == group)}
-                for group in analysis["stats"].keys()
-            ])
-            
-            fig = px.pie(
-                chart_data,
-                names="Group",
-                values="IqR",
-                title="IqR Distribution by Chemical Group",
-                color_discrete_sequence=px.colors.qualitative.Set2
+            st.dataframe(
+                sample_details_df.style.apply(highlight_category, axis=1).format({
+                    "Total IQR": "{:.4f}"
+                }),
+                use_container_width=True,
+                hide_index=True
             )
-            st.plotly_chart(fig, use_container_width=True)
         
-        # Individual pesticide IqR table
-        with st.expander("📋 Individual IqR Data / بيانات مؤشر الجودة الفردية"):
-            individual_df = pd.DataFrame(analysis["individual_results"])
-            if not individual_df.empty:
-                individual_df = individual_df.sort_values("iqr", ascending=False)
-                display_cols = ["pesticide", "chemical_group", "concentration", "mrl", "iqr", "iqr_percent"]
-                individual_df = individual_df[[c for c in display_cols if c in individual_df.columns]]
-                individual_df.columns = ["Pesticide", "Group", "Conc", "MRL", "IqR", "IqR %"]
-                st.dataframe(individual_df, use_container_width=True)
     else:
         st.warning("No residue data available for analysis. / لا توجد بيانات متبقيات للتحليل")
 
