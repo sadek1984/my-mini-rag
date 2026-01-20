@@ -1008,14 +1008,38 @@ def detect_query_type(query: str) -> Optional[str]:
     query_lower = query.lower()
     
     # Health Risk keywords (Arabic and English)
-    risk_keywords = ['خطر', 'خطورة', 'hri', 'risk', 'health risk', 'hazard', 'هازارد']
-    if any(kw in query_lower for kw in risk_keywords):
+    # Use specific phrases to avoid false positives
+    # IMPORTANT: Use word boundaries for English keywords to prevent 'bifenthrin' matching 'hri'
+    import re
+    
+    # Arabic keywords (substring match is OK for Arabic)
+    arabic_risk_keywords = ['خطر صحي', 'خطورة', 'هازارد', 'تقييم خطر']
+    # English keywords (need word boundary matching)
+    english_risk_keywords = ['hri', 'health risk', 'hazard', 'risk assessment']
+    
+    # Check Arabic keywords
+    if any(kw in query_lower for kw in arabic_risk_keywords):
         return "[TRIGGER_UI: HEALTH_RISK_WINDOW]"
     
+    # Check English keywords with word boundaries
+    for kw in english_risk_keywords:
+        if re.search(r'\b' + re.escape(kw) + r'\b', query_lower):
+            return "[TRIGGER_UI: HEALTH_RISK_WINDOW]"
+    
     # Quality Index keywords (Arabic and English)
-    quality_keywords = ['جودة', 'iqr', 'pti', 'quality', 'index', 'مؤشر']
-    if any(kw in query_lower for kw in quality_keywords):
+    # IMPORTANT: Avoid 'جودة' alone because it matches 'الموجودة' (existing)
+    # Use specific phrases instead
+    arabic_quality_keywords = ['مؤشر جودة', 'مؤشر الجودة']
+    english_quality_keywords = ['iqr', 'pti', 'quality index', 'index of quality']
+    
+    # Check Arabic keywords
+    if any(kw in query_lower for kw in arabic_quality_keywords):
         return "[TRIGGER_UI: QUALITY_INDEX_WINDOW]"
+    
+    # Check English keywords with word boundaries
+    for kw in english_quality_keywords:
+        if re.search(r'\b' + re.escape(kw) + r'\b', query_lower):
+            return "[TRIGGER_UI: QUALITY_INDEX_WINDOW]"
     
     return None
 

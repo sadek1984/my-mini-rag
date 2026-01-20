@@ -356,14 +356,22 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
     🆕 Process data analysis queries using SQL + DuckDB
     Uses Schema-Only Prompting for privacy protection
     Enhanced to handle Arabic queries with sample types and pesticide counts
+    [Logic Version: 2.1 - Enhanced Multi-Count & Arabic Word Support]
     """
     
     with st.spinner("🔄 Generating SQL query..."):
         try:
             # ===== RISK KEYWORD DETECTION =====
             # Check for Health Risk or Quality Index keywords
+            # Check for Health Risk or Quality Index keywords
             if RISK_WINDOWS_AVAILABLE:
-                trigger = detect_query_type(query)
+                # PREVENT HIJACKING: Check if this is a simple "count above limit" query
+                # These should be handled by Pattern 0, NOT risk analysis
+                q_lower = query.lower()
+                is_simple_stat = any(x in q_lower for x in ['count', 'number', 'how many', 'عدد', 'كم', 'نسبة']) and \
+                                 any(x in q_lower for x in ['limit', 'above', 'below', 'allowed', 'حد', 'تجاوز', 'مخالف', 'راسب', 'ناجح'])
+                
+                trigger = detect_query_type(query) if not is_simple_stat else None
                 
                 if trigger:
                     # Import sample type detection
@@ -439,11 +447,15 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 st.error("❌ Database not found. Please run migrate_db.py first.")
                 return
             
-            # Arabic numeral conversion
-            arabic_to_english = {'٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', 
-                                 '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'}
+            # Arabic numeral and word conversion
+            num_map = {
+                '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', 
+                '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+                'واحد': '1', 'اثنين': '2', 'ثلاثة': '3', 'اربعة': '4', 'خمسة': '5',
+                'ستة': '6', 'سبعة': '7', 'ثمانية': '8', 'تسعة': '9', 'عشرة': '10'
+            }
             query_normalized = query
-            for ar, en in arabic_to_english.items():
+            for ar, en in num_map.items():
                 query_normalized = query_normalized.replace(ar, en)
             
             # Sample type mapping (Arabic to search patterns)
@@ -493,6 +505,9 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 'كمون': 'كمون',
                 'زعتر': 'زعتر',
                 'بهارات': 'بهارات',
+                'توابل': 'توابل',
+                'بهار': 'توابل',
+                'البهارات': 'توابل',
                 'قرنفل': 'قرنفل',
                 'هيل': 'هيل',
                 'يانسون': 'يانسون',
@@ -576,19 +591,61 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
             }
             
             # Detect sample type from query (Arabic first)
-            detected_sample_type = None
+            # CHANGE: Now detects MULTIPLE types
+            detected_sample_types = []
+            
             for ar_name, pattern in sample_types.items():
                 if ar_name in query:
-                    detected_sample_type = pattern
-                    break
+                    detected_sample_types.append(pattern)
             
             # If not found in Arabic, check English
-            if not detected_sample_type:
+            if not detected_sample_types:
                 query_lower_check = query.lower()
                 for en_name, ar_pattern in english_sample_types.items():
                     if en_name in query_lower_check:
-                        detected_sample_type = ar_pattern
-                        break
+                        detected_sample_types.append(ar_pattern)
+            
+            # Remove duplicates
+            detected_sample_types = list(set(detected_sample_types))
+            
+            # For backward compatibility with existing code, set 'detected_sample_type' to the first one
+            # BUT subsequent logic should use 'detected_sample_types' list if possible
+            detected_sample_type = detected_sample_types[0] if detected_sample_types else None
+            
+            # ===== NEIGHBORHOOD DETECTION =====
+            # Common Buraidah neighborhoods for detection
+            # IMPORTANT: Map to the EXACT value in the database (with hamza for الإسكان)
+            neighborhood_patterns = {
+                'الاسكان': 'الإسكان',  # Map to database value (with hamza)
+                'الإسكان': 'الإسكان',
+                'اسكان': 'الإسكان',
+                'الصفراء': 'الصفراء',
+                'صفراء': 'الصفراء',
+                'الموطأ': 'الموطأ',
+                'موطأ': 'الموطأ',
+                'الريان': 'الريان',
+                'النخيل': 'النخيل',
+                'الخليج': 'الخليج',
+                'الفيصلية': 'الفيصلية',
+                'النهضة': 'النهضة',
+                'السلام': 'السلام',
+                'الشفاء': 'الشفاء',
+                'المنتزه': 'المنتزه',
+                'العليا': 'العليا',
+                'الضاحي': 'الضاحي',
+                'الورود': 'الورود',
+                'المروج': 'المروج',
+                'البساتين': 'البساتين',
+                'الهلال': 'الهلال',
+            }
+            
+            detected_neighborhoods = []
+            for ar_name, pattern in neighborhood_patterns.items():
+                if ar_name in query:
+                    detected_neighborhoods.append(pattern)
+            
+            # Remove duplicates
+            detected_neighborhoods = list(set(detected_neighborhoods))
             
             # Check for specific query patterns
             query_lower = query_normalized.lower()
@@ -597,147 +654,393 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
             # Matches: "what are the count of tomato samples that reading more than limits?"
             # Matches: "how many cucumber samples exceeding limits"
             # Matches: "عدد عينات الطماطم فوق الحد"
-            count_phrases = ['count', 'how many', 'عدد', 'كم']
+            count_phrases = ['count', 'how many', 'عدد', 'كم', 'ماهي', 'ما هي', 'what is', 'give me']
             above_limit_phrases_p0 = ['more than limit', 'exceeding', 'above limit', 'over limit', 
-                                      'reading more', 'exceed', 'فوق الحد', 'تجاوز']
-            below_limit_phrases_p0 = ['below limit', 'under limit', 'within limit', 'تحت الحد']
+                                      'reading more', 'exceed', 'فوق', 'taja', 'تجاوز', 'مخالف', 'rasib', 'راسب']
+            below_limit_phrases_p0 = ['below limit', 'under limit', 'within limit', 'تحت', 'najeh', 'ناجح', 'سليم', 'مطابق']
             
-            is_count_query = any(phrase in query_lower for phrase in count_phrases) or any(phrase in query for phrase in ['عدد', 'كم'])
-            is_above_limit_query = any(phrase in query_lower for phrase in above_limit_phrases_p0) or any(phrase in query for phrase in ['فوق الحد', 'تجاوز'])
-            is_below_limit_query = any(phrase in query_lower for phrase in below_limit_phrases_p0) or 'تحت الحد' in query
+            is_count_query = any(phrase in query_lower for phrase in count_phrases)
+            is_above_limit_query = any(phrase in query_lower for phrase in above_limit_phrases_p0)
+            is_below_limit_query = any(phrase in query_lower for phrase in below_limit_phrases_p0)
             
             if is_count_query and detected_sample_type and (is_above_limit_query or is_below_limit_query):
                 limit_condition = "is_above_limit = 1" if is_above_limit_query else "is_above_limit = 0"
                 limit_label = "فوق الحد" if is_above_limit_query else "تحت الحد"
                 
-                st.info(f"🔍 Counting **{detected_sample_type}** samples **{limit_label}**...")
+                # Build sample filter (handle multiple) - check both اسم العينة and نوع العينة
+                sample_conditions = []
+                for t in detected_sample_types:
+                    sample_conditions.append(f"\"اسم العينة\" LIKE '%{t}%'")
+                    sample_conditions.append(f"\"نوع العينة\" LIKE '%{t}%'")
+                
+                sample_filter = f"AND ({' OR '.join(sample_conditions)})"
+                type_display = " + ".join(detected_sample_types)
+                
+                # Build neighborhood filter if neighborhoods are detected
+                neighborhood_filter = ""
+                if detected_neighborhoods:
+                    # Include Arabic character variants for neighborhoods
+                    all_hood_conditions = []
+                    for n in detected_neighborhoods:
+                        variants = [n]
+                        if 'ا' in n:
+                            variants.append(n.replace('ا', 'إ'))
+                            variants.append(n.replace('ا', 'أ'))
+                        if 'إ' in n:
+                            variants.append(n.replace('إ', 'ا'))
+                        if 'أ' in n:
+                            variants.append(n.replace('أ', 'ا'))
+                        for v in set(variants):
+                            all_hood_conditions.append(f"\"الحى\" LIKE '%{v}%'")
+                    neighborhood_filter = f"AND ({' OR '.join(all_hood_conditions)})"
+                    type_display += f" في {' + '.join(detected_neighborhoods)}"
+
+                st.info(f"🔍 Counting **{type_display}** samples (فوق/تحت الحد)...")
                 
                 sql_query = f"""
                 SELECT 
-                    '{detected_sample_type}' as نوع_العينة,
+                    "اسم العينة" as نوع_العينة,
                     COUNT(DISTINCT "كود العينة") as عدد_العينات,
                     SUM(CASE WHEN is_above_limit = 1 THEN 1 ELSE 0 END) as فوق_الحد,
                     SUM(CASE WHEN is_above_limit = 0 AND is_detected = 1 THEN 1 ELSE 0 END) as تحت_الحد
                 FROM chemistry_tidy
-                WHERE "اسم العينة" LIKE '%{detected_sample_type}%'
-                AND is_detected = 1
+                WHERE is_detected = 1
+                {sample_filter}
+                {neighborhood_filter}
+                GROUP BY "اسم العينة"
+                ORDER BY عدد_العينات DESC
                 """
                 
                 result = con.execute(sql_query).df()
                 
                 if not result.empty:
-                    total = result['عدد_العينات'].values[0]
-                    above = result['فوق_الحد'].values[0]
-                    below = result['تحت_الحد'].values[0]
+                    total_samples = result['عدد_العينات'].sum()
+                    total_above = result['فوق_الحد'].sum()
+                    total_below = result['تحت_الحد'].sum()
                     
-                    st.success(f"✅ **{detected_sample_type}**: إجمالي {total} عينة — {above} فوق الحد، {below} تحت الحد")
-                    st.dataframe(result, use_container_width=True)
+                    st.success(f"✅ إجمالي: {total_samples} عينة — {total_above} فوق الحد، {total_below} تحت الحد")
+                    st.dataframe(result, use_container_width=True, hide_index=True)
                 else:
-                    st.warning(f"⚠️ لم يتم العثور على عينات {detected_sample_type}")
+                    st.warning(f"⚠️ لم يتم العثور على عينات {type_display}")
+                
+                con.close()
+                return
+            
+            # Pattern 0.5: Neighborhood-based queries (pesticides in multiple neighborhoods)
+            # Matches: "ماهي المبيدات في حي الإسكان و الصفراء و الموطأ"
+            neighborhood_keywords = ['حي', 'أحياء', 'احياء', 'neighborhood', 'المنطقة']
+            pesticide_keywords = ['مبيد', 'مبيدات', 'pesticide', 'ملوث', 'ملوثات']
+            
+            is_neighborhood_query = any(kw in query for kw in neighborhood_keywords) or len(detected_neighborhoods) > 0
+            is_pesticide_query = any(kw in query for kw in pesticide_keywords)
+            
+            if is_neighborhood_query and detected_neighborhoods and is_pesticide_query:
+                # Build neighborhood filter with OR logic
+                # IMPORTANT: Include Arabic character variants (إ/ا, أ/ا, etc.)
+                all_conditions = []
+                for n in detected_neighborhoods:
+                    # Generate variants for common Arabic letter differences
+                    variants = [n]
+                    # Add variant with/without hamza
+                    if 'ا' in n:
+                        variants.append(n.replace('ا', 'إ'))
+                        variants.append(n.replace('ا', 'أ'))
+                    if 'إ' in n:
+                        variants.append(n.replace('إ', 'ا'))
+                    if 'أ' in n:
+                        variants.append(n.replace('أ', 'ا'))
+                    
+                    # Add LIKE conditions for all variants
+                    for v in set(variants):  # Use set to remove duplicates
+                        all_conditions.append(f"\"الحى\" LIKE '%{v}%'")
+                
+                neighborhood_filter = f"({' OR '.join(all_conditions)})"
+                neighborhoods_display = " + ".join(detected_neighborhoods)
+                
+                st.info(f"🔍 Searching pesticides in neighborhoods: **{neighborhoods_display}**...")
+                
+                sql_query = f"""
+                SELECT 
+                    "الحى" as الحي,
+                    pesticide_name as المبيد,
+                    COUNT(*) as عدد_الكشف,
+                    SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) as عدد_المخالفات,
+                    ROUND(AVG(concentration), 4) as متوسط_التركيز
+                FROM chemistry_tidy
+                WHERE is_detected = 1 
+                AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
+                AND {neighborhood_filter}
+                GROUP BY "الحى", pesticide_name
+                ORDER BY "الحى", عدد_الكشف DESC
+                """
+                
+                result = con.execute(sql_query).df()
+                
+                if not result.empty:
+                    st.success(f"✅ Found {len(result)} pesticide detections across {len(detected_neighborhoods)} neighborhoods")
+                    
+                    # Show summary by neighborhood
+                    summary_query = f"""
+                    SELECT 
+                        "الحى" as الحي,
+                        COUNT(DISTINCT "كود العينة") as عدد_العينات,
+                        COUNT(DISTINCT pesticide_name) as أنواع_المبيدات,
+                        SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) as عدد_المخالفات
+                    FROM chemistry_tidy
+                    WHERE is_detected = 1 
+                    AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
+                    AND {neighborhood_filter}
+                    GROUP BY "الحى"
+                    ORDER BY عدد_العينات DESC
+                    """
+                    summary_result = con.execute(summary_query).df()
+                    
+                    st.markdown("### 📊 ملخص حسب الحي")
+                    st.dataframe(summary_result, use_container_width=True, hide_index=True)
+                    
+                    st.markdown("### 🔬 تفاصيل المبيدات")
+                    st.dataframe(result, use_container_width=True, hide_index=True)
+                else:
+                    st.warning(f"⚠️ لم يتم العثور على مبيدات في الأحياء: {neighborhoods_display}")
+                    
+                    # DEBUG: Show available neighborhoods
+                    with st.expander("🔍 Debug: Available neighborhoods in database"):
+                        avail_query = """
+                        SELECT DISTINCT "الحى" as الحي, COUNT(*) as عدد_السجلات
+                        FROM chemistry_tidy
+                        WHERE "الحى" IS NOT NULL AND "الحى" != ''
+                        GROUP BY "الحى"
+                        ORDER BY عدد_السجلات DESC
+                        LIMIT 20
+                        """
+                        avail_result = con.execute(avail_query).df()
+                        st.dataframe(avail_result, hide_index=True)
+                        st.code(sql_query, language='sql')
+                
+                con.close()
+                return
+            
+            # Pattern 0.6: Samples containing specific pesticide
+            # Matches: "ما هي عينات الكوسه و الباذنجان التي تحتوي علي مبيد bifenthrin"
+            # Detect specific pesticide name in query (English names)
+            detected_pesticide = None
+            pesticide_names_common = [
+                'bifenthrin', 'chlorpyrifos', 'imidacloprid', 'deltamethrin', 'cypermethrin',
+                'abamectin', 'acetamiprid', 'thiamethoxam', 'carbendazim', 'buprofezin',
+                'profenofos', 'metalaxyl', 'fipronil', 'emamectin', 'pyriproxyfen',
+                'azoxystrobin', 'difenoconazole', 'lambda-cyhalothrin', 'spinosad'
+            ]
+            
+            query_lower_pest = query.lower()
+            for pest_name in pesticide_names_common:
+                if pest_name in query_lower_pest:
+                    detected_pesticide = pest_name
+                    break
+            
+            # If we have both sample types and a specific pesticide, handle directly
+            if detected_sample_types and detected_pesticide:
+                sample_conditions = [f"\"اسم العينة\" LIKE '%{t}%'" for t in detected_sample_types]
+                if len(sample_conditions) > 1:
+                    sample_filter = f"({' OR '.join(sample_conditions)})"
+                    samples_display = " + ".join(detected_sample_types)
+                else:
+                    sample_filter = sample_conditions[0]
+                    samples_display = detected_sample_types[0]
+                
+                st.info(f"🔍 Searching for **{samples_display}** containing **{detected_pesticide}**...")
+                
+                sql_query = f"""
+                SELECT 
+                    "كود العينة" as كود_العينة,
+                    "اسم العينة" as اسم_العينة,
+                    "الحى" as الحي,
+                    pesticide_name as المبيد,
+                    concentration as التركيز,
+                    limit_value as الحد_المسموح,
+                    ROUND(exceedance_ratio, 2) as نسبة_التجاوز,
+                    CASE WHEN is_compliant = 1 THEN 'مطابق' ELSE 'غير مطابق' END as الحالة
+                FROM chemistry_tidy
+                WHERE is_detected = 1 
+                AND pesticide_name ILIKE '%{detected_pesticide}%'
+                AND {sample_filter}
+                ORDER BY concentration DESC
+                """
+                
+                result = con.execute(sql_query).df()
+                
+                if not result.empty:
+                    st.success(f"✅ Found {len(result)} samples of **{samples_display}** containing **{detected_pesticide}**")
+                    st.dataframe(result, use_container_width=True, hide_index=True)
+                    
+                    # Show summary
+                    compliant = len(result[result['الحالة'] == 'مطابق'])
+                    non_compliant = len(result[result['الحالة'] == 'غير مطابق'])
+                    st.info(f"📊 Summary: {compliant} مطابق | {non_compliant} غير مطابق")
+                else:
+                    st.warning(f"⚠️ No {samples_display} samples found containing {detected_pesticide}")
                 
                 con.close()
                 return
             
             # Pattern 1: Find samples with exactly N pesticides (may include sample type filter)
-            # Matches: "عينات الخيار التي تحتوي علي عدد ٢ مبيد" or "samples with 2 pesticides"
-            # NEW: Also detects classification requests ("صنف", "تصنيف", "classification")
-            pesticide_count_pattern = r'(\d+)\s*(?:مبيد|pesticides?)'
-            match = re.search(pesticide_count_pattern, query_normalized)
+            # Matches: "عدد ٢ مبيد", "مبيد واحد", "2pesticides", "2 مبيدات"
+            # Enhanced regex: handles number before or after keywords, flexible spacing, explicit singular/plural
+            pesticide_count_pattern = r'(?:عدد\s*)?(\d+)\s*(?:مبيدات?|مبيد|pesticides?)|(?:مبيدات?|مبيد|pesticides?)\s*(?:عدد\s*)?(\d+)'
+            matches_raw = re.findall(pesticide_count_pattern, query_normalized, re.IGNORECASE)
+            matches = [m[0] or m[1] for m in matches_raw if m[0] or m[1]]
             
             # Check if user wants classification
             classification_keywords = ['صنف', 'تصنيف', 'classify', 'classification', 'مجموع', 'groups']
             wants_classification = any(kw in query.lower() or kw in query for kw in classification_keywords)
             
-            if match:
-                n_pesticides = int(match.group(1))
+            if matches:
+                n_list = sorted(list(set([int(m) for m in matches])))
+                n_str = ", ".join(map(str, n_list))
                 
-                # Build query with optional sample type filter
-                sample_filter = ""
-                if detected_sample_type:
-                    sample_filter = f"AND \"اسم العينة\" LIKE '%{detected_sample_type}%'"
-                    st.info(f"🔍 Looking for **{detected_sample_type}** samples with exactly {n_pesticides} pesticides...")
-                else:
-                    st.info(f"🔍 Looking for samples with exactly {n_pesticides} pesticides...")
-                
-                if wants_classification:
-                    st.info("📊 Including chemical group classification...")
-                
-                # Main query to find samples
-                query_sql = f"""
-                SELECT 
-                    "كود العينة" as sample_code,
-                    "اسم العينة" as sample_name,
-                    COUNT(*) as pesticide_count
-                FROM chemistry_tidy
-                WHERE is_detected = 1 AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
-                {sample_filter}
-                GROUP BY "كود العينة", "اسم العينة"
-                HAVING COUNT(*) = {n_pesticides}
-                ORDER BY "كود العينة" DESC
-                LIMIT 10
-                """
-                
-                result = con.execute(query_sql).df()
-                
-                if not result.empty:
-                    st.success(f"✅ Found {len(result)} samples with exactly {n_pesticides} pesticides:")
+                # If only one number, keep existing logic but support list
+                if len(n_list) == 1:
+                    n_pesticides = n_list[0]
+                    # Build query with optional sample type filter
+                    n_pesticides = n_list[0]
+                    # Build query with optional sample type filter
+                    sample_filter = ""
+                    if detected_sample_types:
+                        sample_conditions = [f"\"اسم العينة\" LIKE '%{t}%'" for t in detected_sample_types]
+                        if len(sample_conditions) > 1:
+                            sample_filter = f"AND ({' OR '.join(sample_conditions)})"
+                            type_label = " + ".join(detected_sample_types)
+                        else:
+                            sample_filter = f"AND {sample_conditions[0]}"
+                            type_label = detected_sample_types[0]
+                            
+                        st.info(f"🔍 Looking for **{type_label}** samples with exactly {n_pesticides} pesticides...")
+                    else:
+                        st.info(f"🔍 Looking for samples with exactly {n_pesticides} pesticides...")
                     
-                    # Display the samples
-                    st.dataframe(result, use_container_width=True)
-                    
-                    sample_codes = result['sample_code'].tolist()
-                    sample_codes_str = ','.join([str(code) for code in sample_codes])
-                    
-                    # NEW: If user wants classification, show group breakdown
                     if wants_classification:
-                        st.subheader("🧪 Chemical Group Classification / التصنيف الكيميائي")
-                        
-                        classification_query = f"""
-                        WITH sample_groups AS (
-                            SELECT 
-                                t."كود العينة" as sample_code, 
-                                t."اسم العينة" as sample_name,
-                                COALESCE(g.group_name_ar, 'أخرى') as group_name,
-                                COUNT(*) as group_count
-                            FROM chemistry_tidy t
-                            LEFT JOIN pesticide_groups g ON LOWER(t.pesticide_name) = g.pesticide_name
-                            WHERE t."كود العينة" IN ({sample_codes_str})
-                            AND t.is_detected = 1
-                            GROUP BY t."كود العينة", t."اسم العينة", group_name
-                        )
-                        SELECT 
-                            sample_code as كود_العينة, 
-                            sample_name as اسم_العينة,
-                            SUM(group_count) as إجمالي_المبيدات,
-                            STRING_AGG(CAST(group_count AS VARCHAR) || ' ' || group_name, ' + ' ORDER BY group_count DESC) as التصنيف_الكيميائي
-                        FROM sample_groups
-                        GROUP BY sample_code, sample_name
-                        ORDER BY sample_code DESC
-                        """
-                        
-                        classification_result = con.execute(classification_query).df()
-                        st.dataframe(classification_result, use_container_width=True)
+                        st.info("📊 Including chemical group classification...")
                     
-                    # Show detailed pesticide information for these samples
-                    st.subheader("🔬 Detailed Pesticide Information")
-                    
-                    detailed_query = f"""
+                    # Main query to find samples
+                    query_sql = f"""
                     SELECT 
                         "كود العينة" as sample_code,
                         "اسم العينة" as sample_name,
-                        pesticide_name,
-                        concentration,
-                        limit_value,
-                        ROUND(exceedance_ratio, 2) as ratio,
-                        CASE WHEN is_compliant = 1 THEN 'مطابق' ELSE 'غير مطابق' END as status
+                        COUNT(*) as pesticide_count
                     FROM chemistry_tidy
-                    WHERE "كود العينة" IN ({sample_codes_str})
-                    AND is_detected = 1
-                    ORDER BY "كود العينة", concentration DESC
+                    WHERE is_detected = 1 AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
+                    {sample_filter}
+                    GROUP BY "كود العينة", "اسم العينة"
+                    HAVING COUNT(*) = {n_pesticides}
+                    ORDER BY "كود العينة" DESC
+                    LIMIT 10
                     """
+                    result = con.execute(query_sql).df()
+                else:
+                    # MULTIPLE NUMBERS: Create a summary query
+                    st.info(f"🔍 Analyzing samples with {n_str} pesticides...")
+                    st.info(f"🔍 Analyzing samples with {n_str} pesticides...")
+                    sample_filter = ""
+                    if detected_sample_types:
+                        sample_conditions = [f"\"اسم العينة\" LIKE '%{t}%'" for t in detected_sample_types]
+                        if len(sample_conditions) > 1:
+                            sample_filter = f"AND ({' OR '.join(sample_conditions)})"
+                        else:
+                            sample_filter = f"AND {sample_conditions[0]}"
                     
-                    detailed_result = con.execute(detailed_query).df()
-                    st.dataframe(detailed_result, use_container_width=True)
+                    query_sql = f"""
+                    WITH sample_counts AS (
+                        SELECT 
+                            "كود العينة",
+                            COUNT(*) as p_count
+                        FROM chemistry_tidy
+                        WHERE is_detected = 1 AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
+                        {sample_filter}
+                        GROUP BY "كود العينة"
+                    )
+                    SELECT 
+                        p_count as عدد_المبيدات,
+                        COUNT(*) as عدد_العينات
+                    FROM sample_counts
+                    WHERE p_count IN ({n_str})
+                    GROUP BY p_count
+                    ORDER BY p_count ASC
+                    """
+                    result = con.execute(query_sql).df()
+                
+                if not result.empty:
+                    if len(n_list) == 1:
+                        st.success(f"✅ Found {len(result)} samples with exactly {n_pesticides} pesticides:")
+                        # Display the samples
+                        st.dataframe(result, use_container_width=True)
+                        
+                        sample_codes = result['sample_code'].tolist()
+                        sample_codes_str = ','.join([str(code) for code in sample_codes])
+                        
+                        # NEW: If user wants classification, show group breakdown
+                        if wants_classification:
+                            st.subheader("🧪 Chemical Group Classification / التصنيف الكيميائي")
+                            
+                            classification_query = f"""
+                            WITH sample_groups AS (
+                                SELECT 
+                                    t."كود العينة" as sample_code, 
+                                    t."اسم العينة" as sample_name,
+                                    COALESCE(g.group_name_ar, 'أخرى') as group_name,
+                                    COUNT(*) as group_count
+                                FROM chemistry_tidy t
+                                LEFT JOIN pesticide_groups g ON LOWER(t.pesticide_name) = g.pesticide_name
+                                WHERE t."كود العينة" IN ({sample_codes_str})
+                                AND t.is_detected = 1
+                                GROUP BY t."كود العينة", t."اسم العينة", group_name
+                            )
+                            SELECT 
+                                sample_code as كود_العينة, 
+                                sample_name as اسم_العينة,
+                                SUM(group_count) as إجمالي_المبيدات,
+                                STRING_AGG(CAST(group_count AS VARCHAR) || ' ' || group_name, ' + ' ORDER BY group_count DESC) as التصنيف_الكيميائي
+                            FROM sample_groups
+                            GROUP BY sample_code, sample_name
+                            ORDER BY sample_code DESC
+                            """
+                            
+                            classification_result = con.execute(classification_query).df()
+                            st.dataframe(classification_result, use_container_width=True)
+                        
+                        # Show detailed pesticide information for these samples
+                        st.subheader("🔬 Detailed Pesticide Information")
+                        
+                        detailed_query = f"""
+                        SELECT 
+                            "كود العينة" as sample_code,
+                            "اسم العينة" as sample_name,
+                            pesticide_name,
+                            concentration,
+                            limit_value,
+                            ROUND(exceedance_ratio, 2) as ratio,
+                            CASE WHEN is_compliant = 1 THEN 'مطابق' ELSE 'غير مطابق' END as status
+                        FROM chemistry_tidy
+                        WHERE "كود العينة" IN ({sample_codes_str})
+                        AND is_detected = 1
+                        ORDER BY "كود العينة", concentration DESC
+                        """
+                        
+                        detailed_result = con.execute(detailed_query).df()
+                        st.dataframe(detailed_result, use_container_width=True)
+                    else:
+                        st.success(f"✅ Summary for requested pesticide counts:")
+                        
+                        # Show as metrics for better visibility
+                        cols = st.columns(len(result))
+                        for i, row in result.iterrows():
+                            with cols[i % len(cols)]:
+                                st.metric(
+                                    label=f"Samples with {int(row['عدد_المبيدات'])} Pesticide(s)", 
+                                    value=int(row['عدد_العينات'])
+                                )
+                        
+                        # Also show the table for reference
+                        st.markdown("### 📊 Detailed Summary / ملخص تفصيلي")
+                        st.dataframe(result, use_container_width=True, hide_index=True)
                     
                     # Store in session state
                     st.session_state.last_query_result = result
@@ -746,7 +1049,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                     
                 else:
                     filter_msg = f" for {detected_sample_type}" if detected_sample_type else ""
-                    st.warning(f"⚠️ No samples found with exactly {n_pesticides} pesticides{filter_msg}")
+                    st.warning(f"⚠️ No samples found with {n_str} pesticides{filter_msg}")
                 
                 con.close()
                 return
@@ -770,6 +1073,15 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 'ابامكتين': 'abamectin',
                 'الفيبرونيل': 'fipronil',
                 'فيبرونيل': 'fipronil',
+                'الايثيون': 'ethion',
+                'الايثون': 'ethion',
+                'لامدا': 'lambda-cyhalothrin',
+                'سايهالوثرين': 'lambda-cyhalothrin',
+                'ديميثويت': 'dimethoate',
+                'ميثوميل': 'methomyl',
+                'بوبروفيزين': 'buprofezin',
+                'بروكونازول': 'propiconazole',
+                'تيبوكونازول': 'tebuconazole',
             }
             
             # All pesticide names from the database (135 unique)
@@ -833,6 +1145,9 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
             search_pattern = pesticide_pattern_map.get(detected_pesticide, detected_pesticide)
             
             if detected_pesticide:
+                # Check if this is a count query
+                is_count_request = any(phrase in query_lower for phrase in ['count', 'how many', 'عدد', 'كم'])
+                
                 # Check for ratio/multiplier filter (e.g., "more than 2 times", "أكثر من 3 أضعاف")
                 ratio_filter = ""
                 ratio_value = None
@@ -903,13 +1218,34 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 result = con.execute(sql_query).df()
                 
                 if not result.empty:
+                    # Count unique samples
+                    unique_samples = result['كود_العينة'].nunique()
+                    
                     # Count above/below limit
-                    above_limit = len(result[result['الحالة'] == 'فوق الحد'])
-                    below_limit = len(result[result['الحالة'] == 'تحت الحد'])
+                    above_limit_df = result[result['الحالة'] == 'فوق الحد']
+                    below_limit_df = result[result['الحالة'] == 'تحت الحد']
+                    above_limit = len(above_limit_df)
+                    below_limit = len(below_limit_df)
                     
                     filter_msg = f" في {detected_sample_type}" if detected_sample_type else ""
-                    st.success(f"✅ وجد {len(result)} نتيجة{filter_msg}: {above_limit} فوق الحد، {below_limit} تحت الحد")
-                    st.dataframe(result, use_container_width=True)
+                    
+                    if is_count_request:
+                        st.success(f"✅ إجمالي عدد العينات التي تحتوي على {detected_pesticide}{filter_msg}: **{unique_samples}** عينة")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("إجمالي العينات", unique_samples)
+                        with col2:
+                            st.metric("فوق الحد", above_limit)
+                        with col3:
+                            st.metric("تحت الحد", below_limit)
+                        
+                        with st.expander("🔍 عرض تفاصيل العينات"):
+                            st.dataframe(result, use_container_width=True, hide_index=True)
+                    else:
+                        st.success(f"✅ وجد {len(result)} نتيجة{filter_msg}: {above_limit} فوق الحد، {below_limit} تحت الحد")
+                        st.dataframe(result, use_container_width=True, hide_index=True)
+                        
                     st.session_state.last_query = query
                     st.session_state.last_query_type = 'pesticide_specific'
                 else:
@@ -1165,18 +1501,32 @@ DO NOT assume specific values exist. Write generic SQL based on column names onl
 9. **CASE-INSENSITIVE MATCHING:** Use ILIKE instead of LIKE for case-insensitive search
 10. **EXCEEDANCE:** Use exceedance_ratio > 1 to find violations, > 2 for 2x limit violations
 11. **CLASSIFICATION:** Join `chemistry_tidy` with `pesticide_groups` on `pesticide_name` to get chemical families (Pyrethroids, Carbamates, etc.)
-12. **ARABIC CHARACTER VARIANTS:** Arabic has interchangeable characters. For name searches, use multiple OR conditions.
+12. **ARABIC CHARACTER VARIANTS:** Arabic has interchangeable characters. For name searches, use multiple OR conditions:
+    - ى and ي are often interchangeable (e.g. الرشيدي = الرشيدي)
+    - ة and ه are often interchangeable (e.g. منشأة = منشاه)
+    - آ/أ/إ and ا are often interchangeable
+    - ة and ه are often interchangeable (e.g. منشأة = منشاه)
+    - آ/أ/إ and ا are often interchangeable
+    - Example: WHERE "اسم المستلم" LIKE '%الرشيده%' (use partial match to avoid ي/ى issue)
+13. **MULTIPLE ITEMS:** If the user lists multiple items (e.g. "Iskan, Safra and Mata"), use `OR` logic:
+    - `WHERE ("الحى" LIKE '%الاسكان%' OR "الحى" LIKE '%الصفراء%' OR "الحى" LIKE '%الموطأ%')`
+    - Do NOT use `AND` for mutually exclusive columns like Neighborhood or Sample Type.
 
-**COLUMN REFERENCE:**
-- **chemistry_tidy**:
-  - `"كود العينة"`: Sample code (unique ID)
-  - `"اسم العينة"`: Sample name (Arabic)
-  - `pesticide_name`: Pesticide name (English)
-  - `concentration`, `limit_value`, `is_compliant`, `is_detected`
-- **pesticide_groups**:
-  - `pesticide_name`: Pesticide name (joins with chemistry_tidy)
-  - `group_name_en`: Chemical group in English
-  - `group_name_ar`: Chemical group in Arabic (e.g., 'بايرثرويدات', 'كرباميت')
+**COLUMN REFERENCE (TIDY FORMAT - Separate columns for pesticide data!):**
+- `"كود العينة"`: Sample code (unique ID)
+- `"التاريخ"`: Sample date (TIMESTAMP)
+- `"اسم العينة"`: Sample name in Arabic (طماطم، بقدونس، كمون، etc.)
+- `"نوع العينة"`: Sample type (خضراوات، فواكه، توابل، مكسرات، حبوب، ورقيات)
+- `"تصنيف العينة"`: Sample classification (خدمية، تجارية، etc.)
+- `"نوع الاختبار"`: Test type (متبقيات مبيدات، افلاتوكسين، سموم فطرية)
+- `"الحى"`: Neighborhood name
+- `"اسم المنشاة"`: Establishment/facility name (NOTE: use ا not أ)
+- `"اسم البلدية"`: Municipality name (e.g. بلدية غرب بريدة)
+- `"رقم الرخصة"`: License number
+- `"حالة العينة"`: Sample condition/status
+- `pesticide_name`: Pesticide name in English
+- `concentration`, `limit_value`, `is_compliant`, `is_detected`, `exceedance_ratio`
+- **pesticide_groups** table: `pesticide_name`, `group_name_en`, `group_name_ar`
 
 **EXAMPLE QUERIES:**
 
@@ -1537,17 +1887,33 @@ Generate ONLY the SQL query wrapped in ```sql``` markers:"""
                     
                     elif 'عدد_العينات' in result.columns or 'عدد العينات' in result.columns:
                         col_name = 'عدد_العينات' if 'عدد_العينات' in result.columns else 'عدد العينات'
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("📊 Total Records", result[col_name].sum() if pd.api.types.is_numeric_dtype(result[col_name]) else len(result))
-                        with col2:
-                            if 'فوق_الحد' in result.columns or 'فوق الحد' in result.columns:
-                                above_col = 'فوق_الحد' if 'فوق_الحد' in result.columns else 'فوق الحد'
-                                st.metric("🔴 Above Limit", result[above_col].sum())
-                        with col3:
-                            if 'تحت_الحد' in result.columns or 'تحت الحد' in result.columns:
-                                below_col = 'تحت_الحد' if 'تحت_الحد' in result.columns else 'تحت الحد'
-                                st.metric("🟢 Below Limit", result[below_col].sum())
+                        
+                        # Check if this is a grouped result (multiple rows with category info)
+                        other_cols = [c for c in result.columns if c != col_name]
+                        
+                        if len(result) > 1 and len(result) <= 5 and other_cols:
+                            # Show as metrics for each group
+                            cat_col = other_cols[0]
+                            cols = st.columns(len(result))
+                            for i, row in result.iterrows():
+                                with cols[i]:
+                                    label = str(row[cat_col])
+                                    if 'مبيد' in label or 'pesticide' in label.lower() or pd.api.types.is_numeric_dtype(result[cat_col]):
+                                        label = f"{label} Pesticide(s)"
+                                    st.metric(label=label, value=int(row[col_name]))
+                        else:
+                            # Standard single metric or too many rows
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("📊 Total Records", result[col_name].sum() if pd.api.types.is_numeric_dtype(result[col_name]) else len(result))
+                            with col2:
+                                if 'فوق_الحد' in result.columns or 'فوق الحد' in result.columns:
+                                    above_col = 'فوق_الحد' if 'فوق_الحد' in result.columns else 'فوق الحد'
+                                    st.metric("🔴 Above Limit", result[above_col].sum())
+                            with col3:
+                                if 'تحت_الحد' in result.columns or 'تحت الحد' in result.columns:
+                                    below_col = 'تحت_الحد' if 'تحت_الحد' in result.columns else 'تحت الحد'
+                                    st.metric("🟢 Below Limit", result[below_col].sum())
                 
                 # Display results
                 st.dataframe(result, use_container_width=True)
@@ -3082,10 +3448,26 @@ def generate_map_chart(df: pd.DataFrame, query: str = ""):
         else:
             agg_data = df.groupby(neighborhood_col).size().reset_index(name='sample_count')
             agg_data['violation_count'] = 0
+            agg_data.columns = ['neighborhood', 'sample_count', 'violation_count']
         
         agg_data['violation_rate'] = agg_data.apply(lambda row: row['violation_count'] / row['sample_count'] if row['sample_count'] > 0 else 0, axis=1)
-        agg_data['lat'] = agg_data['neighborhood'].apply(lambda x: NEIGHBORHOOD_COORDS.get(str(x), DEFAULT_COORDS)[0])
-        agg_data['lon'] = agg_data['neighborhood'].apply(lambda x: NEIGHBORHOOD_COORDS.get(str(x), DEFAULT_COORDS)[1])
+        
+        def get_coords(name):
+            name_str = str(name).strip()
+            # Try exact match
+            if name_str in NEIGHBORHOOD_COORDS:
+                return NEIGHBORHOOD_COORDS[name_str]
+            
+            # Normalize (remove alif variants) and try again
+            norm_name = name_str.replace('إ', 'ا').replace('أ', 'ا').replace('آ', 'ا')
+            for k, v in NEIGHBORHOOD_COORDS.items():
+                if k.replace('إ', 'ا').replace('أ', 'ا').replace('آ', 'ا') == norm_name:
+                    return v
+            return DEFAULT_COORDS
+
+        agg_data['coords'] = agg_data['neighborhood'].apply(get_coords)
+        agg_data['lat'] = agg_data['coords'].apply(lambda x: x[0])
+        agg_data['lon'] = agg_data['coords'].apply(lambda x: x[1])
         
         fig = go.Figure()
         fig.add_trace(go.Scattermapbox(
