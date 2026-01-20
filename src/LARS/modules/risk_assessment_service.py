@@ -21,15 +21,17 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from functools import lru_cache
-
-
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
+import sys
 # Get the directory where this module is located
 MODULE_DIR = Path(__file__).parent
 SCRIPTS_DIR = MODULE_DIR.parent / 'scripts'
+
+# Add project root to sys.path to allow importing from helper
+project_root = str(MODULE_DIR.parent.parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from helper.risk_assessment_config import RiskAssessmentConfig
 
 # Default paths
 DEFAULT_ADI_FILE = SCRIPTS_DIR / 'pesticide_adi_simple_20260112_221046.xlsx'
@@ -102,48 +104,12 @@ POPULATION_CLASSES = {
 # Sources: National Nutrition Surveys & SFDA
 # ============================================================================
 
-SAUDI_IR_DATA = {
-    # Commodity name (English): IR in kg/day
-    "Total Vegetables": 0.1111,    # 111.1 g/day
-    "Total Fruits": 0.0709,        # 70.9 g/day
-    "Leafy Greens": 0.0165,        # 16.5 g/day
-    "Tomato": 0.045,               # 45.0 g/day
-    "Cucumber": 0.045,             # 45.0 g/day
-    "Pepper": 0.045,               # 45.0 g/day
-    "Root Vegetables": 0.025,      # 25.0 g/day
-    "Eggplant": 0.030,             # 30.0 g/day
-    "Zucchini": 0.025,             # 25.0 g/day
-    "Beans": 0.020,                # 20.0 g/day
-    "Okra": 0.015,                 # 15.0 g/day
-    "Squash": 0.020,               # 20.0 g/day
-    "Cabbage": 0.020,              # 20.0 g/day
-    "Lettuce": 0.015,              # 15.0 g/day
-    "Parsley": 0.005,              # 5.0 g/day
-    "Coriander": 0.005,            # 5.0 g/day
-    "Mint": 0.003,                 # 3.0 g/day
-    "Default": 0.1111,             # Default to total vegetables
-}
+# Saudi Arabia Ingestion Rates (IR) - Now handled by RiskAssessmentConfig
+SAUDI_IR_DATA = RiskAssessmentConfig.SAUDI_INGESTION_RATES
+SAUDI_COMMODITY_MAPPING = RiskAssessmentConfig.COMMODITY_MAPPING
 
-# Arabic to English commodity mapping for Saudi IR lookup
-SAUDI_COMMODITY_MAPPING = {
-    'طماطم': 'Tomato',
-    'خيار': 'Cucumber',
-    'فلفل': 'Pepper',
-    'باذنجان': 'Eggplant',
-    'كوسة': 'Zucchini',
-    'فاصوليا': 'Beans',
-    'بامية': 'Okra',
-    'قرع': 'Squash',
-    'ملفوف': 'Cabbage',
-    'كرنب': 'Cabbage',
-    'خس': 'Lettuce',
-    'بقدونس': 'Parsley',
-    'كزبرة': 'Coriander',
-    'نعناع': 'Mint',
-    'ورقيات': 'Leafy Greens',
-    'خضروات': 'Total Vegetables',
-    'فواكه': 'Total Fruits',
-}
+# Legacy mapping for compatibility
+SAUDI_COMMODITY_MAPPING = RiskAssessmentConfig.COMMODITY_MAPPING
 
 # EU Commodity Codes Mapping (Regulation (EC) No 396/2005)
 EU_COMMODITY_CODES = {
@@ -165,49 +131,30 @@ EU_COMMODITY_CODES = {
 
 def get_saudi_ir(commodity: str) -> float:
     """
-    Get Saudi ingestion rate for a commodity in kg/day.
-    
-    Parameters:
-        commodity: Commodity name in English or Arabic
-    
-    Returns:
-        Ingestion rate in kg/day
+    Get Saudi ingestion rate for a commodity in kg/day using RiskAssessmentConfig.
     """
-    # Try direct English lookup
-    if commodity in SAUDI_IR_DATA:
-        return SAUDI_IR_DATA[commodity]
-    
-    # Try Arabic mapping
-    mapped = SAUDI_COMMODITY_MAPPING.get(commodity)
-    if mapped and mapped in SAUDI_IR_DATA:
-        return SAUDI_IR_DATA[mapped]
-    
-    # Try case-insensitive match
-    commodity_lower = commodity.lower()
-    for key, value in SAUDI_IR_DATA.items():
-        if key.lower() == commodity_lower:
-            return value
-    
-    # Default
-    return SAUDI_IR_DATA["Default"]
+    return RiskAssessmentConfig.get_ingestion_rate(commodity)
 
 
 def get_population_weight(popclass: str) -> float:
-    """Get default body weight for a population class."""
-    return POPULATION_CLASSES.get(popclass, POPULATION_CLASSES['adults']).default_weight_kg
+    """Get default body weight for a population class from unified config."""
+    profile = RiskAssessmentConfig.POPULATION_PROFILES.get(popclass)
+    if profile:
+        return profile["bw"]
+    return RiskAssessmentConfig.get_population_bw(popclass)
 
 
 def get_population_options() -> List[Dict[str, str]]:
-    """Get list of population options for dropdown."""
+    """Get list of population options for dropdown from unified config."""
     return [
         {
-            'key': pc.key,
-            'label': f"{pc.name_en} ({pc.name_ar}) - {pc.default_weight_kg} kg",
-            'name_en': pc.name_en,
-            'name_ar': pc.name_ar,
-            'weight': pc.default_weight_kg
+            'key': key,
+            'label': f"{prof['name_en']} ({prof['name_ar']}) - {prof['bw']} kg",
+            'name_en': prof['name_en'],
+            'name_ar': prof['name_ar'],
+            'weight': prof['bw']
         }
-        for pc in POPULATION_CLASSES.values()
+        for key, prof in RiskAssessmentConfig.POPULATION_PROFILES.items()
     ]
 
 
@@ -831,6 +778,115 @@ def calculate_iqr(concentration: float, mrl: float) -> float:
     return concentration / mrl
 
 
+def calculate_commodity_summary_metrics(
+    residue_list: List[Dict[str, Any]],
+    commodity: str = "Total Vegetables",
+    target: str = "adult",
+    body_weight: Optional[float] = None,
+    ingestion_rate: Optional[float] = None,
+    use_realtime_mrl: bool = False
+) -> Dict[str, Any]:
+    """
+    🆕 New Aggregate Risk Calculation Logic (Chronic Risk by Commodity)
+    As requested:
+    1. Group by pesticide for all samples
+    2. Calculate min, max, median concentrations for EACH pesticide
+    3. Calculate HQ for each pesticide using its MEDIAN concentration
+    4. Total HIc = Sum of all individual pesticide HQs
+    
+    Formula:
+    EDI = (Concentration * IngestionRate) / BodyWeight
+    HQ = EDI / ADI
+    """
+    # Define body weight based on target OR use explicit parameter
+    bw = body_weight if body_weight is not None else RiskAssessmentConfig.get_population_bw(target)
+    
+    # Get ingestion rate for commodity OR use explicit parameter
+    ir = ingestion_rate if ingestion_rate is not None else RiskAssessmentConfig.get_ingestion_rate(commodity)
+    
+    # Get risk service for ADI lookup
+    service = get_risk_service()
+    
+    # Group detections by pesticide name
+    pesticide_groups = {}
+    for item in residue_list:
+        p_name = item.get('name', '')
+        # Handle cases where name might be NO DATA or empty
+        if not p_name or p_name in ('NO DATA', 'NO DETECTION'):
+            continue
+            
+        if p_name not in pesticide_groups:
+            pesticide_groups[p_name] = []
+        
+        concentration = item.get('concentration', 0)
+        pesticide_groups[p_name].append(concentration)
+    
+    # Calculate stats for each pesticide
+    pesticide_summary = []
+    total_hi_median = 0.0
+    
+    for p_name, concentrations in pesticide_groups.items():
+        if not concentrations:
+            continue
+            
+        min_val = float(np.min(concentrations))
+        max_val = float(np.max(concentrations))
+        median_val = float(np.median(concentrations))
+        
+        # Look up ADI
+        adi = None
+        adi_info = service.adi_lookup.get_adi(p_name)
+        if adi_info:
+            adi = adi_info['value']
+            
+        hqc_median = 0.0
+        edi_median = 0.0
+        if adi and adi > 0:
+            # HQ = (Median * IR / BW) / ADI
+            edi_median = (median_val * ir) / bw
+            hqc_median = edi_median / adi
+            total_hi_median += hqc_median
+            
+        # Get chemical group for classification
+        group = service.classifier.get_group(p_name) or "Other/Unknown"
+        group_info = service.classifier.get_group_info(group)
+        group_name = group_info.name_en if group_info else group
+        
+        pesticide_summary.append({
+            "pesticide": p_name,
+            "chemical_group": group_name,
+            "min": min_val,
+            "max": max_val,
+            "median": median_val,
+            "adi": adi,
+            "ir": ir,
+            "bw": bw,
+            "edi_median": edi_median,
+            "hqc": hqc_median,
+            "hqc_percent": hqc_median * 100
+        })
+        
+    # Sort summary by HQ descending
+    pesticide_summary = sorted(pesticide_summary, key=lambda x: x['hqc'], reverse=True)
+    
+    # Build result
+    analysis = {
+        "individual_results": pesticide_summary,
+        "hi_total": total_hi_median,
+        "total_pesticides": len(pesticide_summary),
+        "total_detections": len(residue_list),
+        "population": {
+            "target": target,
+            "body_weight_kg": bw,
+            "commodity": commodity,
+            "ingestion_rate_kg_day": ir
+        },
+        "hi_interpretation": "⚠️ Risk unacceptable" if total_hi_median >= 1 else "✅ Risk acceptable"
+    }
+    
+    return analysis
+
+
 def calculate_lars_metrics(
     residue_list: List[Dict[str, Any]],
     commodity: str = "Total Vegetables",
@@ -847,6 +903,10 @@ def calculate_lars_metrics(
     - HQc (Hazard Quotient) = EDI / ADI
     - Chemical group statistics (Min, Max, Mean, Median)
     - Risk Driver identification
+    
+    Formula:
+    EDI = (Concentration * IngestionRate) / BodyWeight
+    HQ = EDI / ADI
     
     Parameters:
         residue_list: List of dicts with keys:
@@ -869,16 +929,10 @@ def calculate_lars_metrics(
             - individual_results: Per-pesticide calculations
     """
     # Define body weight based on target OR use explicit parameter
-    if body_weight is not None:
-        bw = body_weight
-    else:
-        bw = 53.0 if target == "adult" else 16.0
+    bw = body_weight if body_weight is not None else RiskAssessmentConfig.get_population_bw(target)
     
     # Get ingestion rate for commodity OR use explicit parameter
-    if ingestion_rate is not None:
-        ir = ingestion_rate
-    else:
-        ir = get_saudi_ir(commodity)
+    ir = ingestion_rate if ingestion_rate is not None else RiskAssessmentConfig.get_ingestion_rate(commodity)
     
     # Get risk service for ADI lookup
     service = get_risk_service()
@@ -1013,9 +1067,9 @@ def detect_query_type(query: str) -> Optional[str]:
     import re
     
     # Arabic keywords (substring match is OK for Arabic)
-    arabic_risk_keywords = ['خطر صحي', 'خطورة', 'هازارد', 'تقييم خطر']
+    arabic_risk_keywords = ['خطر صحي', 'مؤشر الخطر', 'مؤشر خطر', 'خطورة', 'مؤشر الخطورة', 'هازارد', 'تقييم خطر', 'تقييم المخاطر']
     # English keywords (need word boundary matching)
-    english_risk_keywords = ['hri', 'health risk', 'hazard', 'risk assessment']
+    english_risk_keywords = ['hri', 'health risk', 'hazard', 'risk assessment', 'risk index']
     
     # Check Arabic keywords
     if any(kw in query_lower for kw in arabic_risk_keywords):

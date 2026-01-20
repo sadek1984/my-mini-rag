@@ -20,6 +20,7 @@ import re
 try:
     from modules.risk_assessment_service import (
         calculate_lars_metrics,
+        calculate_commodity_summary_metrics,
         detect_query_type,
         get_saudi_ir,
         SAUDI_IR_DATA,
@@ -443,7 +444,20 @@ def show_health_risk_window(
     # Calculate LARS metrics with selected parameters
     if filtered_data:
         target_type = "adult" if params['body_weight'] >= 50 else "child"
-        analysis = calculate_lars_metrics(
+        
+        # Use BOTH calculation methodologies:
+        # 1. New Median-based (Requested by user)
+        summary_analysis = calculate_commodity_summary_metrics(
+            filtered_data,
+            params['commodity'],
+            target_type,
+            body_weight=params['body_weight'],
+            ingestion_rate=params['ingestion_rate'],
+            use_realtime_mrl=params.get('use_realtime', False)
+        )
+        
+        # 2. Original Individual-based (For fallback/comparison)
+        original_analysis = calculate_lars_metrics(
             filtered_data, 
             params['commodity'], 
             target_type,
@@ -452,103 +466,143 @@ def show_health_risk_window(
             use_realtime_mrl=params.get('use_realtime', False)
         )
         
-        # Display summary metrics
-        st.markdown("### 📊 Health Risk Summary / ملخص الخطر الصحي")
+        # Display summary metrics (Using Median-based logic as primary)
+        st.markdown(f"### 📊 Health Risk Summary / ملخص الخطر الصحي ({params['commodity']})")
         
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            hi_total = analysis["hi_total"]
+            hi_total = summary_analysis["hi_total"]
             st.metric(
                 "Total HIc / مؤشر الخطر",
                 f"{hi_total:.4f}",
-                delta="⚠️ Exceeds 1" if hi_total >= 1 else "✅ Safe",
+                delta="⚠️ Unsafe" if hi_total >= 1 else "✅ Safe",
                 delta_color="inverse" if hi_total >= 1 else "normal"
             )
         
         with col2:
-            if analysis["risk_driver"]:
-                driver_name = analysis["risk_driver"].split(" (")[0]
+            # Most common pesticide
+            common_pests = pd.DataFrame(filtered_data)['name'].value_counts()
+            if not common_pests.empty:
+                top_p_name = common_pests.index[0]
                 st.metric(
-                    "🎯 Risk Driver",
-                    driver_name[:12] + "..." if len(driver_name) > 12 else driver_name,
-                    "Highest HQc"
+                    "Top Pesticide",
+                    top_p_name[:12] + "..." if len(top_p_name) > 12 else top_p_name,
+                    f"{common_pests.iloc[0]} detections"
                 )
-            else:
-                st.metric("Risk Driver", "N/A")
         
         with col3:
             st.metric(
-                "Pesticides Analyzed",
-                len(analysis["individual_results"])
+                "Unique Pesticides",
+                summary_analysis["total_pesticides"]
             )
         
         with col4:
-            # Show current commodity, not original detection
-            sample_info = params['commodity'] if params.get('commodity') else (detected_sample[0] if detected_sample else "All")
+            # Count of samples
+            sample_count = pd.DataFrame(filtered_data)['sample_code'].nunique()
             st.metric(
-                "Sample Type",
-                sample_info
+                "Total Samples",
+                sample_count
             )
         
         # Risk interpretation banner
         if hi_total >= 1:
-            st.error(f"⚠️ **مؤشر الخطر غير مقبول** - HIc = {hi_total:.4f} (≥1)")
+            st.error(f"⚠️ **مؤشر الخطر غير مقبول** - HIc (Median Sum) = {hi_total:.4f} (≥1)")
         elif hi_total >= 0.5:
-            st.warning(f"⚡ **خطر مرتفع** - HIc = {hi_total:.4f} (≥0.5)")
+            st.warning(f"⚡ **خطر مرتفع** - HIc (Median Sum) = {hi_total:.4f} (≥0.5)")
         else:
-            st.success(f"✅ **الخطر مقبول** - HIc = {hi_total:.4f} (<0.5)")
+            st.success(f"✅ **الخطر مقبول** - HIc (Median Sum) = {hi_total:.4f} (<0.5)")
         
-        # Chemical group statistics
-        st.markdown("### 🧪 Risk by Chemical Group / الخطر حسب المجموعة الكيميائية")
+        # ====================================================================
+        # NEW TABLE AS PER IMAGE: Grouped by Pesticide with Min, Max, Median, HQ
+        # ====================================================================
+        st.markdown("### 📋 Pesticide Risk Table / جدول مخاطر المبيدات")
+        st.caption("Calculation: HQ for each pesticide is calculated based on its MEDIAN concentration.")
         
-        if analysis["stats"]:
-            stats_data = []
-            for group, data in analysis["stats"].items():
-                group_hqc = sum(
-                    r["hqc"] for r in analysis["individual_results"] 
-                    if r["chemical_group"] == group
-                )
-                stats_data.append({
-                    "Group / المجموعة": group,
-                    "Count": data["count"],
-                    "Min": f"{data['min']:.4f}",
-                    "Max": f"{data['max']:.4f}",
-                    "Mean": f"{data['mean']:.4f}",
-                    "Median": f"{data['median']:.4f}",
-                    "HQc Sum": f"{group_hqc:.4f}"
-                })
+        if summary_analysis["individual_results"]:
+            risk_table_df = pd.DataFrame(summary_analysis["individual_results"])
             
-            stats_df = pd.DataFrame(stats_data)
-            st.dataframe(stats_df, use_container_width=True)
+            # Format columns
+            risk_table_df = risk_table_df.rename(columns={
+                "pesticide": "Pesticide / المبيد",
+                "chemical_group": "Group / المجموعة",
+                "min": "Min",
+                "max": "Max",
+                "median": "Median",
+                "adi": "ADI",
+                "ir": "IR",
+                "bw": "BW",
+                "hqc": "HQ"
+            })
             
-            # Bar chart
-            chart_data = pd.DataFrame([
-                {"Group": group, "HQc": sum(r["hqc"] for r in analysis["individual_results"] if r["chemical_group"] == group)}
-                for group in analysis["stats"].keys()
-            ])
-            chart_data = chart_data.sort_values("HQc", ascending=False)
+            # Reorder columns for transparency
+            display_cols = ["Pesticide / المبيد", "Min", "Max", "Median", "ADI", "IR", "BW", "HQ"]
+            risk_table_df = risk_table_df[display_cols]
             
-            fig = px.bar(
-                chart_data,
-                x="Group",
-                y="HQc",
-                color="HQc",
-                color_continuous_scale="Reds",
-                title="Hazard Quotient by Chemical Group"
+            # Highlighting and display
+            st.dataframe(
+                risk_table_df.style.format({
+                    "Min": "{:.4f}",
+                    "Max": "{:.4f}",
+                    "Median": "{:.4f}",
+                    "ADI": "{:.4f}",
+                    "IR": "{:.4f}",
+                    "BW": "{:.1f}",
+                    "HQ": "{:.5f}"
+                }).background_gradient(subset=["HQ"], cmap="OrRd"),
+                use_container_width=True,
+                hide_index=True
             )
-            fig.add_hline(y=1.0, line_dash="dash", line_color="red", annotation_text="Risk Threshold")
-            st.plotly_chart(fig, use_container_width=True)
+            
+            # Show the final HIc calculation below the table
+            st.markdown(f"""
+            <div style="text-align: right; padding: 10px; border-top: 2px solid #ddd; font-weight: bold; font-size: 1.2em;">
+                Total HIc (Sum of HQ) = {hi_total:.4f}
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Chemical group statistics
+        with st.expander("🧪 Statistics by Chemical Group / إحصائيات حسب المجموعة"):
+            if original_analysis["stats"]:
+                stats_data = []
+                for group, data in original_analysis["stats"].items():
+                    stats_data.append({
+                        "Group / المجموعة": group,
+                        "Count": data["count"],
+                        "Min": f"{data['min']:.4f}",
+                        "Max": f"{data['max']:.4f}",
+                        "Mean": f"{data['mean']:.4f}",
+                        "Median": f"{data['median']:.4f}"
+                    })
+                
+                stats_df = pd.DataFrame(stats_data)
+                st.dataframe(stats_df, use_container_width=True)
+                
+                # Bar chart
+                chart_data = pd.DataFrame([
+                    {"Group": r["chemical_group"], "HQc": r["hqc"]}
+                    for r in summary_analysis["individual_results"]
+                ])
+                if not chart_data.empty:
+                    chart_data = chart_data.groupby("Group").sum().reset_index()
+                    chart_data = chart_data.sort_values("HQc", ascending=False)
+                    
+                    fig = px.bar(
+                        chart_data,
+                        x="Group",
+                        y="HQc",
+                        color="HQc",
+                        color_continuous_scale="Reds",
+                        title="Aggregated Hazard Quotient (HQc) by Chemical Group"
+                    )
+                    fig.add_hline(y=1.0, line_dash="dash", line_color="red", annotation_text="Risk Threshold")
+                    st.plotly_chart(fig, use_container_width=True)
         
-        # Individual pesticide table
-        with st.expander("📋 Individual Pesticide Risk Data / بيانات المبيدات الفردية"):
-            individual_df = pd.DataFrame(analysis["individual_results"])
-            if not individual_df.empty:
-                individual_df = individual_df.sort_values("hqc", ascending=False)
-                display_cols = ["pesticide", "chemical_group", "concentration", "adi", "edi", "hqc", "hqc_percent"]
-                individual_df = individual_df[[c for c in display_cols if c in individual_df.columns]]
-                individual_df.columns = ["Pesticide", "Group", "Conc", "ADI", "EDI", "HQc", "HQc %"]
-                st.dataframe(individual_df, use_container_width=True)
+        # Detected samples detail
+        with st.expander("📜 Raw Detection Details / تفاصيل الاكتشافات الخام"):
+            raw_detections_df = pd.DataFrame(filtered_data)
+            if not raw_detections_df.empty:
+                st.dataframe(raw_detections_df, use_container_width=True)
     else:
         st.warning("No residue data available for analysis. / لا توجد بيانات متبقيات للتحليل")
 
