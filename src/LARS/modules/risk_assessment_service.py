@@ -145,6 +145,23 @@ SAUDI_COMMODITY_MAPPING = {
     'فواكه': 'Total Fruits',
 }
 
+# EU Commodity Codes Mapping (Regulation (EC) No 396/2005)
+EU_COMMODITY_CODES = {
+    'Tomato': '0211010',
+    'Cucumber': '0222010',
+    'Pepper': '0222000',
+    'Eggplant': '0212030',
+    'Zucchini': '0222030',
+    'Beans': '0260010',
+    'Okra': '0222020',
+    'Cabbage': '0241010',
+    'Lettuce': '0251010',
+    'Parsley': '0256030',
+    'Coriander': '0256020',
+    'Mint': '0256050',
+    'Leafy Greens': '0250000',
+}
+
 
 def get_saudi_ir(commodity: str) -> float:
     """
@@ -340,11 +357,34 @@ class EUMRLClient:
         self.timeout = timeout
         self._cache: Dict[str, Dict] = {}
     
+    def get_commodity_code(self, commodity_name: str) -> Optional[str]:
+        """Map commodity name to EU product code."""
+        # Clean name
+        name = commodity_name.strip()
+        
+        # Check direct mapping
+        if name in EU_COMMODITY_CODES:
+            return EU_COMMODITY_CODES[name]
+        
+        # Check Arabic mapping
+        mapped_en = SAUDI_COMMODITY_MAPPING.get(name)
+        if mapped_en and mapped_en in EU_COMMODITY_CODES:
+            return EU_COMMODITY_CODES[mapped_en]
+            
+        # Try case-insensitive
+        name_lower = name.lower()
+        for key, code in EU_COMMODITY_CODES.items():
+            if key.lower() == name_lower:
+                return code
+                
+        return None
+
     def fetch_mrl(
         self, 
         pesticide_name: Optional[str] = None,
         pesticide_code: Optional[str] = None,
-        commodity_code: Optional[str] = None
+        commodity_code: Optional[str] = None,
+        commodity_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Fetch MRL value from EU Pesticides Database API.
@@ -353,10 +393,15 @@ class EUMRLClient:
             pesticide_name: Name of the active substance (e.g., "Chlorpyrifos")
             pesticide_code: Official code of the substance (more accurate)
             commodity_code: Product code per Regulation (EC) No 396/2005
+            commodity_name: Name of commodity (will attempt to map to code)
         
         Returns:
             Dictionary with MRL information or error
         """
+        # Resolve commodity code
+        if not commodity_code and commodity_name:
+            commodity_code = self.get_commodity_code(commodity_name)
+            
         # Check cache first
         cache_key = f"{pesticide_name}:{pesticide_code}:{commodity_code}"
         if cache_key in self._cache:
@@ -376,24 +421,29 @@ class EUMRLClient:
             params['productCode'] = commodity_code
         
         try:
-            response = requests.get(
-                f"{EU_MRL_API_BASE}/activeSubstances",
-                params=params,
-                timeout=self.timeout
-            )
+            # Use the specific endpoint for active substances as suggested
+            url = f"{EU_MRL_API_BASE}/activeSubstances"
+            response = requests.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
             
             if data and isinstance(data, list) and len(data) > 0:
+                # Find the best match if multiple results (usually first is best)
                 mrl_info = data[0]
-                mrl_value_str = str(mrl_info.get('mrl', ''))
                 
-                # Parse MRL value (handle * for LOQ)
+                # If we have a product code, try to find exact match in results if they are expanded
+                # Actually for this endpoint, it usually returns MRL for the specific product if productCode is provided
+                
+                mrl_value_str = str(mrl_info.get('mrl', 'Not specified'))
+                
+                # Parse MRL value (handle * for LOQ and other non-numeric chars)
                 try:
-                    mrl_value = float(mrl_value_str.rstrip('*'))
+                    # Remove * and handle potential ranges or non-numeric strings
+                    clean_str = mrl_value_str.replace('*', '').strip()
+                    mrl_value = float(clean_str)
                     is_at_loq = '*' in mrl_value_str
                 except ValueError:
-                    mrl_value = None
+                    mrl_value = mrl_value_str # Keep as string if failed
                     is_at_loq = False
                 
                 result = {
@@ -402,7 +452,7 @@ class EUMRLClient:
                     "mrl": mrl_value,
                     "is_at_loq": is_at_loq,
                     "unit": mrl_info.get('unit', 'mg/kg'),
-                    "source": "EU Pesticides Database"
+                    "source": "EU Pesticides Database (Real-time)"
                 }
                 self._cache[cache_key] = result
                 return result
@@ -440,6 +490,14 @@ class RiskAssessmentService:
         self.classifier = ChemicalClassifier(classification_file_path)
         self.mrl_client = EUMRLClient()
     
+    def get_mrl(self, pesticide: str, commodity: str) -> Optional[float]:
+        """Fetch MRL from EU API for a pesticide and commodity."""
+        result = self.mrl_client.fetch_mrl(pesticide_name=pesticide, commodity_name=commodity)
+        if "error" not in result:
+            mrl = result.get('mrl')
+            return float(mrl) if isinstance(mrl, (int, float)) else None
+        return None
+
     def calculate_edi(
         self,
         residue_concentration: float,
@@ -582,7 +640,9 @@ class RiskAssessmentService:
         self,
         sample_results: List[Dict[str, Any]],
         population_class: str = 'adults',
-        consumption_rate: float = 0.1  # Default consumption in kg/day
+        consumption_rate: float = 0.1,  # Default consumption in kg/day
+        use_realtime_mrl: bool = False,
+        commodity_name: str = "Total Vegetables"
     ) -> Dict[str, Any]:
         """
         Perform complete risk analysis for a sample with multiple pesticide residues.
@@ -591,6 +651,8 @@ class RiskAssessmentService:
             sample_results: List of dicts with 'pesticide' and 'concentration' keys
             population_class: Population class for body weight
             consumption_rate: Food consumption rate in kg/day
+            use_realtime_mrl: If True, fetch MRLs from EU API
+            commodity_name: Name of the commodity for MRL lookup
         
         Returns:
             Comprehensive risk analysis results
@@ -615,6 +677,13 @@ class RiskAssessmentService:
                 )
                 
                 if hqc_result:
+                    # Enrich with MRL if requested
+                    if use_realtime_mrl:
+                        mrl = self.get_mrl(pesticide, commodity_name)
+                        if mrl is not None:
+                            hqc_result['mrl'] = mrl
+                            hqc_result['mrl_ratio'] = concentration / mrl if mrl > 0 else float('inf')
+                    
                     hqc_result['concentration'] = concentration
                     hqc_results.append(hqc_result)
                 else:
@@ -767,7 +836,8 @@ def calculate_lars_metrics(
     commodity: str = "Total Vegetables",
     target: str = "adult",
     body_weight: Optional[float] = None,
-    ingestion_rate: Optional[float] = None
+    ingestion_rate: Optional[float] = None,
+    use_realtime_mrl: bool = False
 ) -> Dict[str, Any]:
     """
     Calculate comprehensive LARS metrics for a list of pesticide residues.
@@ -837,7 +907,14 @@ def calculate_lars_metrics(
     for item in residue_list:
         p_name = item.get('name', '')
         concentration = item.get('concentration', 0)
-        mrl = item.get('mrl', 0)
+        
+        # Determine MRL source
+        if use_realtime_mrl:
+            mrl_api = service.get_mrl(p_name, commodity)
+            mrl = mrl_api if mrl_api is not None else item.get('mrl', 0)
+        else:
+            mrl = item.get('mrl', 0)
+            
         adi = item.get('adi')
         
         # Get chemical group

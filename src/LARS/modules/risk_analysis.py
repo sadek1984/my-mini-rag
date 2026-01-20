@@ -12,12 +12,162 @@ try:
         RiskAssessmentService,
         get_population_options,
         get_population_weight,
-        POPULATION_CLASSES
+        POPULATION_CLASSES,
+        EU_COMMODITY_CODES,
+        EUMRLClient
     )
     RISK_SERVICE_AVAILABLE = True
 except ImportError as e:
     RISK_SERVICE_AVAILABLE = False
     print(f"⚠️ Risk assessment service not available: {e}")
+
+
+def show_eu_mrl_lookup_section(df: pd.DataFrame):
+    """
+    Show a dedicated EU MRL lookup tool using local database.
+    Uses pre-downloaded EU MRL data for instant lookups.
+    """
+    import sqlite3
+    from pathlib import Path
+    
+    st.markdown("---")
+    st.subheader("🌐 EU MRL Lookup Tool / أداة البحث عن الحدود الأوروبية")
+    
+    # Check if database exists
+    db_path = Path(__file__).parent.parent / "scripts" / "eu_mrl_data" / "eu_mrl.db"
+    
+    if not db_path.exists():
+        st.warning("⚠️ EU MRL database not found. Run `scripts/download_eu_mrl.py` to download the data.")
+        st.link_button(
+            "🔗 Open EU Pesticides Database Online",
+            "https://ec.europa.eu/food/plant/pesticides/eu-pesticides-database/start/screen/mrls",
+            type="secondary"
+        )
+        return
+    
+    st.markdown("""
+    Look up the official **Maximum Residue Limit (MRL)** from the EU Pesticides Database.
+    Data is stored locally for instant lookups (239,000+ records).
+    """)
+    
+    col1, col2, col3 = st.columns([2, 2, 1])
+    
+    with col1:
+        # Get unique pesticides from data
+        if 'pesticide' in df.columns:
+            pesticides = sorted(df['pesticide'].dropna().unique().tolist())
+        else:
+            pesticides = ["Chlorpyrifos", "Imidacloprid", "Cypermethrin", "Fipronil", "Atrazine"]
+        
+        selected_pesticide = st.selectbox(
+            "🧪 Select Pesticide / اختر المبيد",
+            pesticides,
+            index=0,
+            key="eu_mrl_pesticide"
+        )
+    
+    with col2:
+        # Common commodities for vegetables
+        commodities = [
+            "Tomatoes", "Cucumbers", "Peppers", "Aubergines/eggplants",
+            "Lettuce", "Spinach", "Carrots", "Potatoes", "Beans",
+            "Courgettes", "Okra", "Cabbages", "Cauliflower"
+        ]
+        selected_commodity = st.selectbox(
+            "🥦 Select Commodity / اختر المنتج",
+            commodities,
+            index=0,
+            key="eu_mrl_commodity"
+        )
+    
+    with col3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        search_clicked = st.button("🔍 Lookup MRL", type="primary", key="eu_mrl_search")
+    
+    # Perform search
+    if search_clicked:
+        with st.spinner("Searching EU MRL database..."):
+            try:
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # Search with LIKE for flexibility
+                cursor.execute('''
+                    SELECT pesticide, product, mrl_value, mrl_text, is_loq
+                    FROM eu_mrl
+                    WHERE pesticide_lower LIKE ? AND product_lower LIKE ?
+                    ORDER BY mrl_value ASC
+                    LIMIT 20
+                ''', (f'%{selected_pesticide.lower()}%', f'%{selected_commodity.lower()}%'))
+                
+                results = [dict(row) for row in cursor.fetchall()]
+                conn.close()
+                
+                if results:
+                    st.success(f"✅ Found {len(results)} MRL entries!")
+                    
+                    # Display primary result
+                    primary = results[0]
+                    mrl_val = primary['mrl_value'] if primary['mrl_value'] else primary['mrl_text']
+                    is_loq = primary['is_loq']
+                    
+                    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                    
+                    with col_m1:
+                        st.metric("📊 EU MRL", f"{mrl_val} mg/kg")
+                    
+                    with col_m2:
+                        st.metric("🧪 Pesticide", primary['pesticide'][:25])
+                    
+                    with col_m3:
+                        st.metric("🥦 Product", primary['product'][:20])
+                    
+                    with col_m4:
+                        st.metric("⚠️ At LOQ?", "✅ Yes" if is_loq else "❌ No")
+                    
+                    # Show comparison with dataset if available
+                    if 'pesticide' in df.columns and 'limits' in df.columns:
+                        matching = df[df['pesticide'].str.lower() == selected_pesticide.lower()]
+                        if not matching.empty:
+                            dataset_mrl = matching['limits'].iloc[0]
+                            st.info(f"📝 **Your Dataset MRL:** {dataset_mrl} mg/kg | **EU MRL:** {mrl_val} mg/kg")
+                    
+                    # Show all results in expander
+                    if len(results) > 1:
+                        with st.expander(f"📋 All {len(results)} matching entries"):
+                            results_df = pd.DataFrame(results)
+                            results_df['LOQ'] = results_df['is_loq'].apply(lambda x: '✅' if x else '')
+                            st.dataframe(
+                                results_df[['pesticide', 'product', 'mrl_value', 'LOQ']],
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                    
+                    st.caption("Source: EU Pesticides Database (local copy)")
+                else:
+                    st.warning(f"❌ No MRL found for '{selected_pesticide}' in '{selected_commodity}'")
+                    st.info("💡 Try different spellings or broader product categories.")
+            
+            except Exception as e:
+                st.error(f"Database error: {e}")
+    
+    # Database info
+    with st.expander("📚 Database Info & Quick Links"):
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM eu_mrl")
+            count = cursor.fetchone()[0]
+            conn.close()
+            
+            st.markdown(f"""
+            - **Total Records:** {count:,} MRL entries
+            - **Source:** [EU Pesticides Database](https://ec.europa.eu/food/plant/pesticides/eu-pesticides-database/start/screen/mrls)
+            - **Update:** Run `python scripts/download_eu_mrl.py` to refresh data
+            """)
+        except:
+            st.markdown("Database info unavailable")
 
 
 def show_dietary_exposure_section(df: pd.DataFrame, risk_service: RiskAssessmentService):
@@ -66,6 +216,9 @@ def show_dietary_exposure_section(df: pd.DataFrame, risk_service: RiskAssessment
             f"({POPULATION_CLASSES[selected_population].name_ar}) - "
             f"Body weight: {body_weight} kg")
     
+    # Note about EU MRL Lookup
+    st.caption("💡 To look up real-time EU MRLs for specific pesticides, use the **EU MRL Lookup Tool** below.")
+    
     # Analyze data
     if 'pesticide' in df.columns and 'reading' in df.columns:
         # Get unique pesticide-concentration pairs
@@ -79,7 +232,7 @@ def show_dietary_exposure_section(df: pd.DataFrame, risk_service: RiskAssessment
                 for _, row in pesticide_data.iterrows()
             ]
             
-            # Run risk analysis
+            # Run risk analysis (uses dataset MRLs for batch analysis)
             with st.spinner("Analyzing dietary exposure..."):
                 analysis = risk_service.analyze_sample_risk(
                     sample_results,
@@ -219,11 +372,24 @@ def show_dietary_exposure_section(df: pd.DataFrame, risk_service: RiskAssessment
                 
                 # Full table
                 with st.expander("📋 Complete Pesticide Risk Data"):
-                    display_risk_df = risk_df[['pesticide', 'concentration', 'adi', 'edi', 'hqc', 'hqc_percent', 'chemical_group', 'interpretation']].copy()
-                    display_risk_df.columns = ['Pesticide', 'Conc (mg/kg)', 'ADI', 'EDI', 'HQc', 'HQc %', 'Chemical Group', 'Risk Level']
-                    display_risk_df['HQc'] = display_risk_df['HQc'].apply(lambda x: f"{x:.6f}" if pd.notna(x) else "N/A")
-                    display_risk_df['EDI'] = display_risk_df['EDI'].apply(lambda x: f"{x:.8f}" if pd.notna(x) else "N/A")
-                    display_risk_df['HQc %'] = display_risk_df['HQc %'].apply(lambda x: f"{x:.4f}%" if pd.notna(x) else "N/A")
+                    base_cols = ['pesticide', 'concentration', 'adi', 'edi', 'hqc', 'hqc_percent', 'chemical_group', 'interpretation']
+                    col_names = ['Pesticide', 'Conc (mg/kg)', 'ADI', 'EDI', 'HQc', 'HQc %', 'Chemical Group', 'Risk Level']
+                    
+                    # Only include columns that exist
+                    available_cols = [c for c in base_cols if c in risk_df.columns]
+                    available_names = [col_names[base_cols.index(c)] for c in available_cols]
+                    
+                    display_risk_df = risk_df[available_cols].copy()
+                    display_risk_df.columns = available_names
+                    
+                    # Format numeric columns
+                    if 'HQc' in display_risk_df.columns:
+                        display_risk_df['HQc'] = display_risk_df['HQc'].apply(lambda x: f"{x:.6f}" if pd.notna(x) else "N/A")
+                    if 'EDI' in display_risk_df.columns:
+                        display_risk_df['EDI'] = display_risk_df['EDI'].apply(lambda x: f"{x:.8f}" if pd.notna(x) else "N/A")
+                    if 'HQc %' in display_risk_df.columns:
+                        display_risk_df['HQc %'] = display_risk_df['HQc %'].apply(lambda x: f"{x:.4f}%" if pd.notna(x) else "N/A")
+                         
                     st.dataframe(display_risk_df, use_container_width=True)
             
             # Missing ADI warning
@@ -332,6 +498,10 @@ def show_risk_analysis_page(api_client):
     else:
         st.info("💡 Dietary exposure analysis requires the risk assessment service. "
                 "Please ensure `risk_assessment_service.py` is properly installed.")
+    
+    # ===== EU MRL LOOKUP TOOL =====
+    if RISK_SERVICE_AVAILABLE:
+        show_eu_mrl_lookup_section(df)
     
     st.markdown("---")
     

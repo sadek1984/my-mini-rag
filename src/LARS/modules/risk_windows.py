@@ -363,6 +363,17 @@ def show_risk_input_form(
         st.markdown(f"### {ir_gday:.1f} g/day")
         st.caption(f"({ir_kgday:.4f} kg/day)")
     
+    # Real-time MRL Toggle
+    st.markdown("---")
+    use_realtime = st.checkbox(
+        "🌐 Use Real-time EU MRLs / استخدام حدود الاتحاد الأوروبي المباشرة", 
+        value=st.session_state.get('risk_use_realtime', False),
+        key="hri_realtime_toggle",
+        help="Fetch MRL data directly from the EU Pesticides Database API."
+    )
+    if use_realtime != st.session_state.get('risk_use_realtime'):
+        st.session_state['risk_use_realtime'] = use_realtime
+        
     # Show selected parameters summary
     st.info(f"""
     **Selected Parameters:**
@@ -370,6 +381,7 @@ def show_risk_input_form(
     - ⚖️ Body Weight: {body_weight} kg
     - 🥬 Commodity: {selected_commodity}
     - 📊 Ingestion Rate: {ir_gday:.1f} g/day
+    - 🌐 MRL Source: {"EU API (Real-time)" if use_realtime else "Original Dataset"}
     """)
     
     return {
@@ -377,7 +389,8 @@ def show_risk_input_form(
         'body_weight': body_weight,
         'commodity': selected_commodity,
         'ingestion_rate': ir_kgday,
-        'detected_sample': detected_sample
+        'detected_sample': detected_sample,
+        'use_realtime': use_realtime
     }
 
 
@@ -435,7 +448,8 @@ def show_health_risk_window(
             params['commodity'], 
             target_type,
             body_weight=params['body_weight'],
-            ingestion_rate=params['ingestion_rate']
+            ingestion_rate=params['ingestion_rate'],
+            use_realtime_mrl=params.get('use_realtime', False)
         )
         
         # Display summary metrics
@@ -616,6 +630,16 @@ def show_quality_index_window(
     with col2:
         # Show current selected commodity as the filter
         st.info(f"🔍 Sample Filter: **{selected_commodity}**")
+        
+        # Real-time MRL Toggle for IqR
+        use_realtime = st.checkbox(
+            "🌐 Use Real-time EU MRLs", 
+            value=st.session_state.get('iqr_use_realtime', False),
+            key="iqr_realtime_toggle"
+        )
+        if use_realtime != st.session_state.get('iqr_use_realtime'):
+            st.session_state['iqr_use_realtime'] = use_realtime
+            st.rerun()
     
     st.markdown("---")
     
@@ -623,7 +647,13 @@ def show_quality_index_window(
     if residue_data:
         # Filter for summary metrics (only detected pesticides)
         detected_only = [r for r in residue_data if r.get('is_detected', 1) == 1]
-        analysis = calculate_lars_metrics(detected_only, selected_commodity, "adult")
+        use_realtime = st.session_state.get('iqr_use_realtime', False)
+        analysis = calculate_lars_metrics(
+            detected_only, 
+            selected_commodity, 
+            "adult",
+            use_realtime_mrl=use_realtime
+        )
         
         # Summary metrics
         st.markdown("### 📊 Quality Summary / ملخص الجودة")
