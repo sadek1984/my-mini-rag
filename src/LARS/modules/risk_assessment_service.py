@@ -89,7 +89,7 @@ POPULATION_CLASSES = {
     'toddlers': PopulationClass('toddlers', 'Toddlers', 'صغار الأطفال', '1-<3', 12.0),
     'other_children': PopulationClass('other_children', 'Other Children', 'أطفال آخرون', '3-<10', 23.0),
     'adolescents': PopulationClass('adolescents', 'Adolescents', 'مراهقون', '10-<18', 53.0),
-    'adults': PopulationClass('adults', 'Adults', 'بالغون', '18-<65', 70.0),
+    'adult': PopulationClass('adult', 'Adults', 'بالغون', '18-<65', 70.0),
     'elderly': PopulationClass('elderly', 'Elderly', 'كبار السن', '65-<75', 68.0),
     'very_elderly': PopulationClass('very_elderly', 'Very Elderly', 'كبار السن جداً', '>=75', 65.0),
     'pregnant_women': PopulationClass('pregnant_women', 'Pregnant Women', 'نساء حوامل', '15-45', 65.0),
@@ -97,6 +97,7 @@ POPULATION_CLASSES = {
     # Saudi-specific population classes
     'saudi_adults': PopulationClass('saudi_adults', 'Adults (Saudi)', 'بالغون (سعودي)', '18+', 53.0),
     'saudi_children': PopulationClass('saudi_children', 'Children 2-6 (Saudi)', 'أطفال 2-6 (سعودي)', '2-6', 16.0),
+    'child': PopulationClass('child', 'Child', 'طفل', '2-6', 16.0),
 }
 
 
@@ -588,7 +589,7 @@ class RiskAssessmentService:
     def analyze_sample_risk(
         self,
         sample_results: List[Dict[str, Any]],
-        population_class: str = 'adults',
+        population_class: str = 'adult',
         consumption_rate: float = 0.1,  # Default consumption in kg/day
         use_realtime_mrl: bool = False,
         commodity_name: str = "Total Vegetables"
@@ -607,7 +608,7 @@ class RiskAssessmentService:
             Comprehensive risk analysis results
         """
         body_weight = get_population_weight(population_class)
-        pop_info = POPULATION_CLASSES.get(population_class, POPULATION_CLASSES['adults'])
+        pop_info = POPULATION_CLASSES.get(population_class, POPULATION_CLASSES.get('adult'))
         
         # Calculate HQc for each pesticide
         hqc_results = []
@@ -679,7 +680,7 @@ class RiskAssessmentService:
         df: pd.DataFrame,
         pesticide_col: str = 'pesticide',
         concentration_col: str = 'reading',
-        population_class: str = 'adults',
+        population_class: str = 'adult',
         consumption_rate: float = 0.1
     ) -> pd.DataFrame:
         """
@@ -742,7 +743,7 @@ def get_risk_service() -> RiskAssessmentService:
 def quick_hqc(
     pesticide: str,
     concentration: float,
-    population: str = 'adults',
+    population: str = 'adult',
     consumption: float = 0.1
 ) -> Optional[Dict[str, Any]]:
     """

@@ -3004,8 +3004,8 @@ def show_chat_page(api_client):
         
         model_choice = st.radio(
             "Select AI Model",
-            ["🟢 OpenAI (gpt-4o-mini)", "🔵 Ollama (mistral:7b-instruct)"],
-            help="Choose between OpenAI API or local Ollama model"
+            ["🟢 OpenAI (gpt-4o-mini)", "🔵 Ollama (qwen2.5-coder:1.5b)"],
+            help="Choose between OpenAI API or local Ollama model (qwen is fast & optimized for SQL)"
         )
         
         if model_choice == "🟢 OpenAI (gpt-4o-mini)":
@@ -3049,7 +3049,7 @@ def show_chat_page(api_client):
                 base_url="http://localhost:11434/v1",
                 api_key="ollama"  # Ollama doesn't need real API key
             )
-            model_name = "mistral:7b-instruct"
+            model_name = "qwen2.5-coder:1.5b"
             
             # Test if Ollama is running
             try:
@@ -3065,7 +3065,7 @@ def show_chat_page(api_client):
                 st.info("""
                 **How to fix:**
                 1. Install Ollama: https://ollama.ai
-                2. Run: `ollama pull mistral:7b-instruct`
+                2. Run: `ollama pull qwen2.5-coder:1.5b`
                 3. Ollama should auto-start, or run: `ollama serve`
                 """)
                 return

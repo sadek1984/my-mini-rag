@@ -194,11 +194,12 @@ def show_dietary_exposure_section(df: pd.DataFrame, risk_service: RiskAssessment
             "🧑‍🤝‍🧑 Population Class / الفئة السكانية",
             range(len(pop_labels)),
             format_func=lambda i: pop_labels[i],
-            index=pop_keys.index('adults') if 'adults' in pop_keys else 0,
+            index=pop_keys.index('adult') if 'adult' in pop_keys else 0,
             help="Select population group for body weight. Based on PRIMo 4 methodology."
         )
-        selected_population = pop_keys[selected_idx]
-        body_weight = get_population_weight(selected_population)
+        selected_pop_data = pop_options[selected_idx]
+        selected_population = selected_pop_data['key']
+        body_weight = selected_pop_data['weight']
     
     with col2:
         # Consumption rate
@@ -212,8 +213,8 @@ def show_dietary_exposure_section(df: pd.DataFrame, risk_service: RiskAssessment
         )
     
     # Display selected parameters
-    st.info(f"**Selected:** {POPULATION_CLASSES[selected_population].name_en} "
-            f"({POPULATION_CLASSES[selected_population].name_ar}) - "
+    st.info(f"**Selected:** {selected_pop_data['name_en']} "
+            f"({selected_pop_data['name_ar']}) - "
             f"Body weight: {body_weight} kg")
     
     # Note about EU MRL Lookup
