@@ -62,6 +62,7 @@ class ChemicalGroup:
     name_en: str
     name_ar: str
     pesticides: List[str]
+    primary_use: Optional[str] = None
 
 
 @dataclass
@@ -184,7 +185,8 @@ class ChemicalClassifier:
                         key=key,
                         name_en=data.get('name_en', key),
                         name_ar=data.get('name_ar', key),
-                        pesticides=data.get('pesticides', [])
+                        pesticides=data.get('pesticides', []),
+                        primary_use=data.get('primary_use')
                     )
                     self._groups[key] = group
                     

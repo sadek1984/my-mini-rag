@@ -650,6 +650,139 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
             # Check for specific query patterns
             query_lower = query_normalized.lower()
             
+            # ============================================================
+            # PATTERN -1: COMPREHENSIVE SAMPLE TYPE ANALYSIS
+            # Matches: "تحليل شامل للطماطم", "تقرير الطماطم", "احصائيات عينات الخيار"
+            # EXCLUDES: Health risk queries (Hazard Index, EDI, HQ, etc.)
+            # ============================================================
+            comprehensive_keywords = ['تحليل شامل', 'تقرير شامل', 'احصائيات', 'تفصيل', 'ملخص شامل', 
+                                       'comprehensive', 'full analysis', 'detailed report', 'statistics']
+            is_comprehensive_query = any(kw in query.lower() or kw in query for kw in comprehensive_keywords)
+            
+            # Also trigger for "كم عدد العينات التي تحتوي على X مبيدات" with sample type + failing keywords
+            failing_keywords = ['رسوب', 'راسب', 'راسبة', 'تجاوز', 'متجاوز', 'فوق الحد', 'مخالف', 'غير مطابق', 'exceed', 'failing']
+            wants_failing_analysis = any(kw in query.lower() or kw in query for kw in failing_keywords)
+            
+            # IMPORTANT: Exclude health risk queries from comprehensive analysis
+            # These should be handled by the risk assessment system separately
+            health_risk_keywords = ['hazard index', 'hazard quotient', 'health risk', 'risk assessment', 
+                                     'edi', 'hq', 'hi', 'تقييم المخاطر', 'مخاطر صحية', 'خطورة صحية',
+                                     'معامل الخطر', 'مؤشر الخطر', 'الجرعة اليومية']
+            is_health_risk_query = any(kw in query.lower() or kw in query for kw in health_risk_keywords)
+            
+            if detected_sample_type and (is_comprehensive_query or wants_failing_analysis) and not is_health_risk_query:
+                sample_filter_conditions = []
+                for t in detected_sample_types:
+                    sample_filter_conditions.append(f"\"اسم العينة\" LIKE '%{t}%'")
+                sample_filter = f"({' OR '.join(sample_filter_conditions)})"
+                type_display = " + ".join(detected_sample_types)
+                
+                st.info(f"📊 **تحليل شامل لعينات {type_display}** / Comprehensive Analysis")
+                
+                # ========================================
+                # TABLE 1: Pesticide Count Distribution
+                # ========================================
+                st.subheader("📋 توزيع العينات حسب عدد المبيدات / Sample Distribution by Pesticide Count")
+                
+                # First, get the distribution of samples by pesticide count
+                distribution_query = f"""
+                WITH sample_pesticide_counts AS (
+                    SELECT 
+                        "كود العينة" as sample_code,
+                        COUNT(CASE WHEN is_detected = 1 AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA') THEN 1 END) as pesticide_count,
+                        SUM(CASE WHEN is_above_limit = 1 THEN 1 ELSE 0 END) as failing_count
+                    FROM chemistry_tidy
+                    WHERE {sample_filter}
+                    GROUP BY "كود العينة"
+                )
+                SELECT 
+                    pesticide_count as عدد_المبيدات,
+                    COUNT(*) as عدد_العينات,
+                    SUM(CASE WHEN failing_count = 0 THEN 1 ELSE 0 END) as لم_تتجاوز,
+                    SUM(CASE WHEN failing_count > 0 THEN 1 ELSE 0 END) as تجاوزت,
+                    SUM(CASE WHEN failing_count = 1 THEN 1 ELSE 0 END) as بسبب_1_مبيد,
+                    SUM(CASE WHEN failing_count = 2 THEN 1 ELSE 0 END) as بسبب_2_مبيد,
+                    SUM(CASE WHEN failing_count = 3 THEN 1 ELSE 0 END) as بسبب_3_مبيد,
+                    SUM(CASE WHEN failing_count >= 4 THEN 1 ELSE 0 END) as بسبب_4_او_اكثر
+                FROM sample_pesticide_counts
+                GROUP BY pesticide_count
+                ORDER BY pesticide_count ASC
+                """
+                
+                distribution_result = con.execute(distribution_query).df()
+                
+                if not distribution_result.empty:
+                    # Calculate totals
+                    total_samples = int(distribution_result['عدد_العينات'].sum())
+                    total_not_exceeded = int(distribution_result['لم_تتجاوز'].sum())
+                    total_exceeded = int(distribution_result['تجاوزت'].sum())
+                    
+                    # Show summary metrics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("📊 إجمالي العينات", total_samples)
+                    with col2:
+                        st.metric("✅ لم تتجاوز", total_not_exceeded)
+                    with col3:
+                        st.metric("🔴 تجاوزت", total_exceeded)
+                    
+                    # Rename columns for display
+                    display_df = distribution_result.rename(columns={
+                        'عدد_المبيدات': 'Pesticide Count',
+                        'عدد_العينات': 'Number of Samples',
+                        'لم_تتجاوز': 'Not Exceeded',
+                        'تجاوزت': 'Exceeded',
+                        'بسبب_1_مبيد': 'Due to 1',
+                        'بسبب_2_مبيد': 'Due to 2',
+                        'بسبب_3_مبيد': 'Due to 3',
+                        'بسبب_4_او_اكثر': 'Due to 4+'
+                    })
+                    
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    
+                    # Add totals row info
+                    st.info(f"**Total:** {total_samples} samples | **Not Exceeded:** {total_not_exceeded} | **Exceeded:** {total_exceeded}")
+                
+                # ========================================
+                # TABLE 2: Pesticide Statistics Table
+                # ========================================
+                st.subheader("🧪 إحصائيات المبيدات المكتشفة / Detected Pesticide Statistics")
+                
+                pesticide_stats_query = f"""
+                SELECT 
+                    pesticide_name as المبيد,
+                    COUNT(*) as Frequency,
+                    ROUND(MAX(limit_value), 4) as MRL,
+                    SUM(CASE WHEN is_above_limit = 1 THEN 1 ELSE 0 END) as "≥MRL",
+                    ROUND(MEDIAN(concentration), 4) as median,
+                    ROUND(MIN(concentration), 4) as min,
+                    ROUND(MAX(concentration), 4) as max
+                FROM chemistry_tidy
+                WHERE {sample_filter}
+                AND is_detected = 1
+                AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
+                GROUP BY pesticide_name
+                ORDER BY Frequency DESC
+                """
+                
+                pesticide_stats = con.execute(pesticide_stats_query).df()
+                
+                if not pesticide_stats.empty:
+                    # Highlight rows where ≥MRL > 0 (pesticides that caused exceedance)
+                    st.dataframe(pesticide_stats, use_container_width=True, hide_index=True)
+                    
+                    # Show failing pesticides specifically
+                    failing_pesticides = pesticide_stats[pesticide_stats['≥MRL'] > 0]
+                    if not failing_pesticides.empty:
+                        st.warning(f"🔴 **المبيدات المتسببة في الرسوب ({len(failing_pesticides)} نوع):** {', '.join(failing_pesticides['المبيد'].tolist())}")
+                    else:
+                        st.success("✅ لا توجد مبيدات متجاوزة للحد المسموح")
+                
+                con.close()
+                return
+            
+
+            
             # Pattern 0: Count of samples above/below limit for a sample type
             # Matches: "what are the count of tomato samples that reading more than limits?"
             # Matches: "how many cucumber samples exceeding limits"
@@ -663,7 +796,12 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
             is_above_limit_query = any(phrase in query_lower for phrase in above_limit_phrases_p0)
             is_below_limit_query = any(phrase in query_lower for phrase in below_limit_phrases_p0)
             
-            if is_count_query and detected_sample_type and (is_above_limit_query or is_below_limit_query):
+            # Check if query requests a specific number of pesticides (e.g., "contains 10 pesticides")
+            # If so, we should skip Pattern 0 and let the full SQL generation handle it
+            has_specific_pesticide_count = any(word in query_lower for word in ['مبيد', 'مبيدات', 'pesticide', 'pesticides']) and \
+                                           re.search(r'\d+', query_normalized) is not None
+
+            if is_count_query and detected_sample_type and (is_above_limit_query or is_below_limit_query) and not has_specific_pesticide_count:
                 limit_condition = "is_above_limit = 1" if is_above_limit_query else "is_above_limit = 0"
                 limit_label = "فوق الحد" if is_above_limit_query else "تحت الحد"
                 
@@ -893,6 +1031,10 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
             classification_keywords = ['صنف', 'تصنيف', 'classify', 'classification', 'مجموع', 'groups']
             wants_classification = any(kw in query.lower() or kw in query for kw in classification_keywords)
             
+            # Check if user wants failing/exceeding pesticides info
+            failing_keywords = ['رسوب', 'راسب', 'راسبة', 'تجاوز', 'متجاوز', 'متجاوزة', 'فوق الحد', 'مخالف', 'مخالفة', 'غير مطابق', 'failing', 'exceeded', 'above limit', 'non-compliant']
+            wants_failing_pesticides = any(kw in query.lower() or kw in query for kw in failing_keywords)
+            
             if matches:
                 n_list = sorted(list(set([int(m) for m in matches])))
                 n_str = ", ".join(map(str, n_list))
@@ -932,7 +1074,6 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                     GROUP BY "كود العينة", "اسم العينة"
                     HAVING COUNT(*) = {n_pesticides}
                     ORDER BY "كود العينة" DESC
-                    LIMIT 10
                     """
                     result = con.execute(query_sql).df()
                 else:
@@ -970,6 +1111,16 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 if not result.empty:
                     if len(n_list) == 1:
                         st.success(f"✅ Found {len(result)} samples with exactly {n_pesticides} pesticides:")
+                        
+                        # NEW: Breakdown summary for types
+                        if 'sample_name' in result.columns and len(result) > 1:
+                            # Normalize names for grouping (remove spaces and normalize Arabic letters)
+                            normalized_names = result['sample_name'].astype(str).str.strip()
+                            normalized_names = normalized_names.str.replace('[أإآ]', 'ا', regex=True).str.replace('ة', 'ه')
+                            counts = normalized_names.value_counts()
+                            breakdown = " + ".join([f"{count} {name}" for name, count in counts.items()])
+                            st.info(f"📋 **ملخص الأنواع:** {breakdown}")
+                            
                         # Display the samples
                         st.dataframe(result, use_container_width=True)
                         
@@ -985,7 +1136,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                                 SELECT 
                                     t."كود العينة" as sample_code, 
                                     t."اسم العينة" as sample_name,
-                                    COALESCE(g.group_name_ar, 'أخرى') as group_name,
+                                    COALESCE(g.group_name_en, 'Other') as group_name,
                                     COUNT(*) as group_count
                                 FROM chemistry_tidy t
                                 LEFT JOIN pesticide_groups g ON LOWER(t.pesticide_name) = g.pesticide_name
@@ -1026,6 +1177,101 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                         
                         detailed_result = con.execute(detailed_query).df()
                         st.dataframe(detailed_result, use_container_width=True)
+                        
+                        # NEW: Show failing pesticides summary if requested
+                        if wants_failing_pesticides:
+                            st.subheader("🔴 المبيدات المتسببة في الرسوب / Failing Pesticides")
+                            
+                            # Query 1: Group samples by number of failing pesticides they have
+                            samples_by_failing_count_query = f"""
+                            WITH sample_failing_counts AS (
+                                SELECT 
+                                    "كود العينة" as sample_code,
+                                    "اسم العينة" as sample_name,
+                                    SUM(CASE WHEN is_above_limit = 1 THEN 1 ELSE 0 END) as failing_count
+                                FROM chemistry_tidy
+                                WHERE "كود العينة" IN ({sample_codes_str})
+                                AND is_detected = 1
+                                GROUP BY "كود العينة", "اسم العينة"
+                            )
+                            SELECT 
+                                failing_count as عدد_المبيدات_الراسبة,
+                                COUNT(*) as عدد_العينات,
+                                STRING_AGG(sample_name, ', ' ORDER BY sample_code) as أسماء_العينات
+                            FROM sample_failing_counts
+                            WHERE failing_count > 0
+                            GROUP BY failing_count
+                            ORDER BY failing_count ASC
+                            """
+                            
+                            samples_by_failing = con.execute(samples_by_failing_count_query).df()
+                            
+                            # Query 2: Get all unique failing pesticide names
+                            failing_names_query = f"""
+                            SELECT DISTINCT pesticide_name
+                            FROM chemistry_tidy
+                            WHERE "كود العينة" IN ({sample_codes_str})
+                            AND is_detected = 1
+                            AND is_above_limit = 1
+                            ORDER BY pesticide_name
+                            """
+                            
+                            failing_names_result = con.execute(failing_names_query).df()
+                            
+                            if not samples_by_failing.empty:
+                                # Build the breakdown text
+                                total_samples_with_failures = int(samples_by_failing['عدد_العينات'].sum())
+                                breakdown_parts = []
+                                for _, row in samples_by_failing.iterrows():
+                                    count = int(row['عدد_العينات'])
+                                    failing = int(row['عدد_المبيدات_الراسبة'])
+                                    breakdown_parts.append(f"**{count}** عينة بسبب **{failing}** مبيد")
+                                
+                                breakdown_text = " + ".join(breakdown_parts)
+                                
+                                # Get failing pesticide names
+                                failing_names = failing_names_result['pesticide_name'].tolist() if not failing_names_result.empty else []
+                                total_failing_types = len(failing_names)
+                                
+                                # Display summary
+                                st.success(f"📊 **إجمالي العينات الراسبة:** {total_samples_with_failures} عينة")
+                                st.info(f"📋 **التفصيل:** {breakdown_text}")
+                                
+                                # Show metrics
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.metric("🔴 عدد أنواع المبيدات الراسبة", total_failing_types)
+                                with col2:
+                                    st.metric("📊 إجمالي العينات المتأثرة", total_samples_with_failures)
+                                
+                                # Show failing pesticide names
+                                if failing_names:
+                                    st.warning(f"🧪 **أسماء المبيدات المتسببة في الرسوب:** {', '.join(failing_names)}")
+                                
+                                # Show detailed breakdown table
+                                st.markdown("### 📊 جدول تفصيلي")
+                                st.dataframe(samples_by_failing, use_container_width=True, hide_index=True)
+                                
+                                # Show detailed per-pesticide stats
+                                st.markdown("### 🧪 إحصائيات كل مبيد راسب")
+                                failing_pesticide_stats_query = f"""
+                                SELECT 
+                                    pesticide_name as المبيد,
+                                    COUNT(*) as عدد_العينات_المتأثرة,
+                                    ROUND(AVG(concentration), 4) as متوسط_التركيز,
+                                    ROUND(AVG(limit_value), 4) as الحد_المسموح,
+                                    ROUND(AVG(exceedance_ratio), 2) as نسبة_التجاوز
+                                FROM chemistry_tidy
+                                WHERE "كود العينة" IN ({sample_codes_str})
+                                AND is_detected = 1
+                                AND is_above_limit = 1
+                                GROUP BY pesticide_name
+                                ORDER BY عدد_العينات_المتأثرة DESC
+                                """
+                                failing_stats = con.execute(failing_pesticide_stats_query).df()
+                                st.dataframe(failing_stats, use_container_width=True, hide_index=True)
+                            else:
+                                st.success("✅ لا توجد عينات راسبة - جميع العينات مطابقة للحد المسموح")
                     else:
                         st.success(f"✅ Summary for requested pesticide counts:")
                         
@@ -1495,7 +1741,7 @@ DO NOT assume specific values exist. Write generic SQL based on column names onl
 3. For Arabic text matching, use: WHERE "column" LIKE '%طماطم%'
 4. For compliance check: use is_compliant = 1 (compliant) or is_compliant = 0 (violation)
 5. Always include ORDER BY for sorted results
-6. Use LIMIT 100 for large result sets
+6. Use LIMIT 1000 for large result sets
 7. For Arabic output column names, use AS: SELECT COUNT(*) AS عدد_العينات
 8. Filter by year using: WHERE YEAR("التاريخ") = 2024
 9. **CASE-INSENSITIVE MATCHING:** Use ILIKE instead of LIKE for case-insensitive search
@@ -1785,7 +2031,7 @@ WITH sample_groups AS (
     SELECT 
         t."كود العينة", 
         t."اسم العينة",
-        COALESCE(g.group_name_ar, 'أخرى') as group_name,
+        COALESCE(g.group_name_en, 'Other') as group_name,
         COUNT(*) as group_count
     FROM chemistry_tidy t
     LEFT JOIN pesticide_groups g ON LOWER(t.pesticide_name) = g.pesticide_name
@@ -1800,6 +2046,23 @@ SELECT
 FROM sample_groups
 GROUP BY "كود العينة", "اسم العينة"
 HAVING إجمالي_المبيدات = 6;
+
+-- 22. **Samples with N pesticides and identifying specific failing pesticides**
+-- Example: "كم عدد العينات التي تحتوي علي ١٠مبيدات و ماهي المبيدات المتسببة في الرسوب"
+SELECT 
+    COUNT(DISTINCT "كود العينة") as عدد_العينات,
+    SUM(is_above_limit) as فوق_الحد,
+    STRING_AGG(DISTINCT CASE WHEN is_above_limit = 1 THEN pesticide_name ELSE NULL END, ', ') as أسماء_المبيدات_الراسبة
+FROM chemistry_tidy
+WHERE "كود العينة" IN (
+    SELECT "كود العينة" 
+    FROM chemistry_tidy 
+    WHERE is_detected = 1 
+    GROUP BY "كود العينة" 
+    HAVING COUNT(*) = 10
+) AND is_detected = 1;
+
+**IMPORTANT RULE:** Always use `group_name_en` for chemical classifications (e.g. Pyrethroids, Organophosphates) instead of Arabic, even when answering in Arabic.
 
 Generate ONLY the SQL query wrapped in ```sql``` markers:"""
 
@@ -1914,6 +2177,32 @@ Generate ONLY the SQL query wrapped in ```sql``` markers:"""
                                 if 'تحت_الحد' in result.columns or 'تحت الحد' in result.columns:
                                     below_col = 'تحت_الحد' if 'تحت_الحد' in result.columns else 'تحت الحد'
                                     st.metric("🟢 Below Limit", result[below_col].sum())
+                
+                # NEW: Specific summary for multi-type queries
+                # Show breakdown by type if we have a sample name column and multiple rows
+                try:
+                    name_cols = [c for c in result.columns if any(x in str(c).lower() for x in ['اسم العينة', 'نوع العينة', 'sample_name', 'commodity', 'product'])]
+                    if name_cols and len(result) > 1:
+                        name_col = name_cols[0]
+                        # Only show if there's actually more than one type or if specifically requested
+                        unique_types = result[name_col].nunique()
+                        if unique_types > 0:
+                            # Normalize names for grouping (remove spaces and normalize Arabic letters)
+                            normalized_names = result[name_col].astype(str).str.strip()
+                            normalized_names = normalized_names.str.replace('[أإآ]', 'ا', regex=True).str.replace('ة', 'ه')
+                            counts = normalized_names.value_counts()
+                            
+                            # Limit to top 10 types to avoid clutter if there are many
+                            top_counts = counts.head(10)
+                            breakdown_parts = [f"{count} {name}" for name, count in top_counts.items()]
+                            if len(counts) > 10:
+                                breakdown_parts.append(f"... (+{len(counts)-10} types)")
+                            
+                            breakdown = " + ".join(breakdown_parts)
+                            st.info(f"📋 **ملخص الأنواع:** {breakdown}")
+                except Exception as summ_err:
+                    # Silent fail for summary to avoid breaking the main UI
+                    pass
                 
                 # Display results
                 st.dataframe(result, use_container_width=True)
@@ -3081,12 +3370,14 @@ def load_chemical_groups_to_duckdb(con):
         for key, data in config.get('chemical_groups', {}).items():
             name_en = data.get('name_en', key)
             name_ar = data.get('name_ar', key)
+            primary_use = data.get('primary_use', 'N/A')
             for pesticide in data.get('pesticides', []):
                 groups_data.append({
                     'pesticide_name': pesticide.lower().strip(),
                     'group_name_en': name_en,
                     'group_name_ar': name_ar,
-                    'group_key': key
+                    'group_key': key,
+                    'primary_use': primary_use
                 })
         
         if groups_data:
@@ -3352,6 +3643,7 @@ def get_sql_schema_info(con) -> str:
             schema_parts.append("| group_name_en | VARCHAR | English group name (e.g., Pyrethroids) |")
             schema_parts.append("| group_name_ar | VARCHAR | Arabic group name (e.g., بايرثرويدات) |")
             schema_parts.append("| group_key | VARCHAR | Internal key indicator |")
+            schema_parts.append("| primary_use | VARCHAR | Primary use (Insecticide, Fungicide, etc.) |")
         except:
             pass
             

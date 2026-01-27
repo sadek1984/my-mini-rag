@@ -3,216 +3,140 @@
     "pyrethroids": {
       "name_en": "Pyrethroids",
       "name_ar": "بايرثرويدات",
-      "pesticides": [
-        "lambda-cyhalothrin", "cyhalothrin", "cypermethrin", "deltamethrin",
-        "bifenthrin", "cyfluthrin", "permethrin", "fenvalerate", "esfenvalerate",
-        "fenpropathrin", "tefluthrin", "cyflulthrin"
-      ]
-    },
-    "organophosphates": {
-      "name_en": "Organophosphates",
-      "name_ar": "فوسفات عضوية",
-      "pesticides": [
-        "chlorpyrifos", "chlorpyriphos", "chlorpyrifos-methyl", "malathion",
-        "diazinon", "profenofos", "pirimiphos", "pirimiphos-methyl", "phoxim",
-        "omethoate", "ometheoate", "ethion", "dimethoate"
-      ]
-    },
-    "carbamates": {
-      "name_en": "Carbamates",
-      "name_ar": "كرباميت",
-      "pesticides": [
-        "carbendazim", "carbaryl", "carbofuran", "methomyl", "thiophanate-methyl",
-        "thiophonat-methyl", "thiophonat methyl", "thiophonate"
-      ]
+      "pesticides": ["bifenthrin", "cyfluthrin", "cyhalothrin", "cypermethrin", "deltamethrin"],
+      "primary_use": "Insecticide"
     },
     "neonicotinoids": {
       "name_en": "Neonicotinoids",
       "name_ar": "نيونيكوتينويدات",
-      "pesticides": [
-        "imidacloprid", "imidaclopride", "acetamiprid", "aceatamiprid",
-        "thiamethoxam", "clothianidin", "dinotefuran", "thiacloprid"
-      ]
+      "pesticides": ["acetamiprid", "clothianidin", "dinotefuran", "imidacloprid", "thiamethoxam"],
+      "primary_use": "Insecticide"
     },
-    "triazoles": {
-      "name_en": "Triazole Fungicides",
-      "name_ar": "مبيدات ترايازول",
-      "pesticides": [
-        "tebuconazole", "propiconazole", "difenoconazole", "myclobutanil",
-        "penconazole", "flutriafol", "cyproconazole", "epoxiconazole"
-      ]
+    "organophosphates": {
+      "name_en": "Organophosphates",
+      "name_ar": "فوسفات عضوية",
+      "pesticides": ["chlorpyrifos", "diazinon", "ethion", "malathion", "omethoate", "phoxim", "pirimiphos", "pirimiphos-methyl", "profenofos"],
+      "primary_use": "Insecticide"
     },
     "strobilurins": {
-      "name_en": "Strobilurin Fungicides",
+      "name_en": "Strobilurins",
       "name_ar": "ستروبيلورينات",
-      "pesticides": [
-        "azoxystrobin", "pyraclostrobin", "trifloxystrobin", "kresoxim-methyl",
-        "famoxadone", "famoxadon", "picoxystrobin"
-      ]
+      "pesticides": ["azoxystrobin", "pyraclostrobin", "trifloxystrobin"],
+      "primary_use": "Fungicide"
+    },
+    "triazoles_dmi": {
+      "name_en": "Triazoles (DMI)",
+      "name_ar": "ترايازول (DMI)",
+      "pesticides": ["difenoconazole", "myclobutanil", "penconazole", "propiconazole", "tebuconazole"],
+      "primary_use": "Fungicide"
+    },
+    "carbamates": {
+      "name_en": "Carbamates",
+      "name_ar": "كرباميت",
+      "pesticides": ["carbaryl", "carbofuran", "methomyl", "propamocarb"],
+      "primary_use": "Insecticide/Fungicide"
+    },
+    "benzimidazoles": {
+      "name_en": "Benzimidazoles",
+      "name_ar": "بنزيميدازول",
+      "pesticides": ["carbendazim", "thiabendazole", "thiophanate", "thiophanate-methyl", "thiopendazole"],
+      "primary_use": "Fungicide"
     },
     "diamides": {
-      "name_en": "Diamide Insecticides",
+      "name_en": "Diamides",
       "name_ar": "دياميدات",
-      "pesticides": [
-        "chlorantraniliprole", "cyantraniliprole", "cyanantraniliprole",
-        "flubendiamide"
-      ]
+      "pesticides": ["chlorantraniliprole", "cyanantraniliprole"],
+      "primary_use": "Insecticide"
+    },
+    "sdhis_amides": {
+      "name_en": "SDHIs (Amides)",
+      "name_ar": "SDHIs (أميدات)",
+      "pesticides": ["boscalid", "fluopyram"],
+      "primary_use": "Fungicide"
+    },
+    "anilinopyrimidines": {
+      "name_en": "Anilinopyrimidines",
+      "name_ar": "أنيلينوبيريميدين",
+      "pesticides": ["cyprodinil", "pyrimethanil"],
+      "primary_use": "Fungicide"
+    },
+    "tetramic_tetronic_acids": {
+      "name_en": "Tetramic/Tetronic acids",
+      "name_ar": "أحماض تيتراميك وتيترونيك",
+      "pesticides": ["spiromesifen", "spirotetramate"],
+      "primary_use": "Insecticide/Acaricide"
     },
     "spinosyns": {
       "name_en": "Spinosyns",
       "name_ar": "سبينوسينات",
-      "pesticides": [
-        "spinosad", "spinosad a", "spinosad d", "spinetoram"
-      ]
-    },
-    "benzoylureas": {
-      "name_en": "Benzoylurea Insecticides",
-      "name_ar": "بنزويل يوريا",
-      "pesticides": [
-        "diflubenzuron", "diflubenzoran", "lufenuron", "hexaflumuron",
-        "triflumuron"
-      ]
-    },
-    "mite_growth_regulators": {
-      "name_en": "Mite Growth Regulators",
-      "name_ar": "منظمات نمو الحلم",
-      "pesticides": [
-        "hexythiazox", "etoxazole", "clofentezine", "bifenazate"
-      ]
-    },
-    "ketoenols": {
-      "name_en": "Ketoenol Insecticides",
-      "name_ar": "كيتوينول",
-      "pesticides": [
-        "spiromesifen", "spiromesfin", "spirotetramat", "spirodiclofen"
-      ]
-    },
-    "sulfoximines": {
-      "name_en": "Sulfoximine Insecticides",
-      "name_ar": "سلفوكسيمينات",
-      "pesticides": [
-        "sulfoxaflor"
-      ]
-    },
-    "phenylpyrazoles": {
-      "name_en": "Phenylpyrazoles",
-      "name_ar": "فينيل بيرازول",
-      "pesticides": [
-        "fipronil"
-      ]
-    },
-    "pyrroles": {
-      "name_en": "Pyrrole Insecticides",
-      "name_ar": "بيرولات",
-      "pesticides": [
-        "chlorfenapyr"
-      ]
+      "pesticides": ["spinosad a", "spinosad d"],
+      "primary_use": "Insecticide"
     },
     "avermectins": {
       "name_en": "Avermectins",
       "name_ar": "أفيرميكتينات",
-      "pesticides": [
-        "abamectin"
-      ]
+      "pesticides": ["abamectin"],
+      "primary_use": "Insecticide/Acaricide"
     },
-    "benzimidazoles": {
-      "name_en": "Benzimidazole Fungicides",
-      "name_ar": "بنزيميدازول",
-      "pesticides": [
-        "thiabendazole", "thiopendazole"
-      ]
+    "phenylpyrazoles": {
+      "name_en": "Phenylpyrazoles",
+      "name_ar": "فينيل بيرازول",
+      "pesticides": ["fipronil"],
+      "primary_use": "Insecticide"
+    },
+    "specific_acaricides": {
+      "name_en": "Specific Acaricides",
+      "name_ar": "مبيدات أكاروسية متخصصة",
+      "pesticides": ["bifenazate", "fenazaquin", "fenpyroximate", "hexythiazox", "etoxazole"],
+      "primary_use": "Acaricide"
     },
     "morpholines": {
-      "name_en": "Morpholine Fungicides",
+      "name_en": "Morpholines",
       "name_ar": "مورفولين",
-      "pesticides": [
-        "dimethomorph"
-      ]
+      "pesticides": ["dimethomorph"],
+      "primary_use": "Fungicide"
     },
-    "oxazolidinediones": {
-      "name_en": "Oxazolidinedione Insecticides",
-      "name_ar": "أوكسازوليدينيديون",
-      "pesticides": [
-        "indoxacarb"
-      ]
-    },
-    "carboxamides": {
-      "name_en": "Carboxamide Fungicides",
-      "name_ar": "كربوكساميدات",
-      "pesticides": [
-        "boscalid", "fluopyram", "fluxapyroxad"
-      ]
-    },
-    "anilinopyrimidines": {
-      "name_en": "Anilinopyrimidine Fungicides",
-      "name_ar": "أنيلينوبيريميدين",
-      "pesticides": [
-        "cyprodinil", "cyprodianil", "pyrimethanil"
-      ]
+    "phenylamides": {
+      "name_en": "Phenylamides",
+      "name_ar": "فينيل أميدات",
+      "pesticides": ["metalaxyl"],
+      "primary_use": "Fungicide"
     },
     "phenylpyrroles": {
-      "name_en": "Phenylpyrrole Fungicides",
+      "name_en": "Phenylpyrroles",
       "name_ar": "فينيل بيرول",
-      "pesticides": [
-        "fludioxonil"
-      ]
+      "pesticides": ["fludioxonil"],
+      "primary_use": "Fungicide"
     },
-    "hydroxyanilides": {
-      "name_en": "Hydroxyanilide Fungicides",
-      "name_ar": "هيدروكسي أنيلايد",
-      "pesticides": [
-        "fenhexamid"
-      ]
-    },
-    "insect_growth_regulators": {
-      "name_en": "Insect Growth Regulators",
-      "name_ar": "منظمات نمو الحشرات",
-      "pesticides": [
-        "buprofezin", "pyriproxyfen", "methoxyfenozide", "mrthoxyfenoxide"
-      ]
-    },
-    "meti_acaricides": {
-      "name_en": "METI Acaricides",
-      "name_ar": "مبيدات ميتي",
-      "pesticides": [
-        "fenpyroximate", "pyridaben", "fenazaquin", "cyflumetofen"
-      ]
-    },
-    "carbamoylphosphonates": {
-      "name_en": "Carbamoylphosphonate Fungicides",
-      "name_ar": "كاربامويل فوسفونات",
-      "pesticides": [
-        "propamocarb"
-      ]
-    },
-    "acylalanines": {
-      "name_en": "Acylalanine Fungicides",
-      "name_ar": "أسيل ألانين",
-      "pesticides": [
-        "metalaxyl"
-      ]
-    },
-    "synergists": {
-      "name_en": "Synergists",
-      "name_ar": "محسنات",
-      "pesticides": [
-        "piperonyl butoxide", "pipronyl butoxide"
-      ]
-    },
-    "ureas": {
+    "urea_herbicides": {
       "name_en": "Urea Herbicides",
       "name_ar": "يوريا",
-      "pesticides": [
-        "linuron"
-      ]
+      "pesticides": ["linuron"],
+      "primary_use": "Herbicide"
     },
-    "other": {
-      "name_en": "Other",
-      "name_ar": "أخرى",
-      "pesticides": [
-        "tricyclazole", "metrafenone", "mandipropamid", "cyflufenamid",
-        "ethofumesate", "ethofumesite", "flumetaquin"
-      ]
+    "benzofurans": {
+      "name_en": "Benzofurans",
+      "name_ar": "بنزوفيوران",
+      "pesticides": ["ethofumesite"],
+      "primary_use": "Herbicide"
+    },
+    "growth_regulators": {
+      "name_en": "Others/Growth Regulators",
+      "name_ar": "منظمات نمو / أخرى",
+      "pesticides": ["buprofezin", "diflubenzuron", "pyriproxyfen"],
+      "primary_use": "IGR/Insecticide"
+    },
+    "miscellaneous": {
+      "name_en": "Miscellaneous",
+      "name_ar": "متنوع",
+      "pesticides": ["chlorfenapyr", "cyflufenamid", "cyflumetofen", "famoxadone", "fenhexamide", "flumetaquin", "flutriafol", "indoxacarb", "mandipropamid", "metrafenon", "pyridaben", "sulfoxaflor", "tricyclazole"],
+      "primary_use": "Mixed Uses"
+    },
+    "synergists_mycotoxins": {
+      "name_en": "Synergists/Mycotoxins",
+      "name_ar": "محسنات / سموم فطرية",
+      "pesticides": ["piperonyl butoxide", "afla"],
+      "primary_use": "Support/Natural"
     }
   },
   "population_classes": {
