@@ -146,7 +146,21 @@ def get_schema_info():
         columns = ", ".join([f"{row['column_name']} ({row['column_type']})" 
                            for _, row in df.iterrows()])
         con.close()
-        return columns
+        
+        schema_note = f"""
+Table: chemistry_tidy
+Columns: {columns}
+
+⚠️ IMPORTANT COLUMN NAMES (use exactly as shown):
+- "التاريخ" (NOT "تاريخ") - for dates
+- "كود العينة" (NOT "كود") - for sample code
+- "اسم العينة" (NOT "العينة") - for sample name
+- "pesticide_name" - for pesticide names (English)
+- "concentration" - for concentration values
+- "is_detected" - 1 if detected, 0 if not
+- "sample_result" - 'مطابق' or 'غير مطابق'
+"""
+        return schema_note
     except Exception as e:
         return "Error getting schema: " + str(e)
 
