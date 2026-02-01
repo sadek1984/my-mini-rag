@@ -21,8 +21,8 @@ stt_model = WhisperModel(
 )
 print("✅ Whisper model loaded!")
 
-client = OpenAI(base_url="http://localhost:1234/v1", api_key="not-needed")
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "lars_data.duckdb")
+client = OpenAI(base_url="http://localhost:11434/v1", api_key="not-needed")
+DB_PATH = "/Users/a12/Buraidah_lars/src/LARS/data/lars_data.duckdb"
 
 # ============================================================
 # Constants & Dictionaries
@@ -569,43 +569,60 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text("🎧 سمعتك، جاري التحليل...")
     
-    # Enhanced transcription
-    raw_text, corrected_text, confidence = transcribe_audio(file_path)
+    try:
+        # Enhanced transcription
+        raw_text, corrected_text, confidence = transcribe_audio(file_path)
+        
+        # Show transcription (with correction if applied)
+        if corrected_text != raw_text:
+            await update.message.reply_text(
+                f"📝 النص المسموع: {raw_text}\n"
+                f"✅ بعد التصحيح: {corrected_text}\n"
+                f"🎯 الدقة: {confidence*100:.1f}%"
+            )
+        else:
+            await update.message.reply_text(f"📝 النص: {corrected_text}")
+        
+        # Detect persona for response style
+        persona = detect_user_persona(corrected_text)
+        
+        # Always execute as QUERY
+        await update.message.reply_text("🔍 جاري البحث...")
+        
+        try:
+            text_response, excel_file, needs_dashboard = answer_database_question(
+                corrected_text, 
+                persona
+            )
+            
+            # Send text response
+            await update.message.reply_text(text_response, parse_mode='Markdown')
+            
+            # Send Excel file if generated
+            if excel_file:
+                await update.message.reply_document(
+                    document=excel_file,
+                    filename="lars_report.xlsx",
+                    caption="📎 التقرير الكامل"
+                )
+        except Exception as query_error:
+            await update.message.reply_text(
+                f"⚠️ عذراً، حدث خطأ أثناء معالجة الاستعلام:\n"
+                f"`{str(query_error)[:200]}`\n\n"
+                f"الرجاء المحاولة مرة أخرى أو إعادة صياغة السؤال.",
+                parse_mode='Markdown'
+            )
     
-    # Show transcription (with correction if applied)
-    if corrected_text != raw_text:
+    except Exception as e:
         await update.message.reply_text(
-            f"📝 النص المسموع: {raw_text}\n"
-            f"✅ بعد التصحيح: {corrected_text}\n"
-            f"🎯 الدقة: {confidence*100:.1f}%"
-        )
-    else:
-        await update.message.reply_text(f"📝 النص: {corrected_text}")
-    
-    # Detect persona for response style
-    persona = detect_user_persona(corrected_text)
-    
-    # Always execute as QUERY
-    await update.message.reply_text("🔍 جاري البحث...")
-    
-    text_response, excel_file, needs_dashboard = answer_database_question(
-        corrected_text, 
-        persona
-    )
-    
-    # Send text response
-    await update.message.reply_text(text_response, parse_mode='Markdown')
-    
-    # Send Excel file if generated
-    if excel_file:
-        await update.message.reply_document(
-            document=excel_file,
-            filename="lars_report.xlsx",
-            caption="📎 التقرير الكامل"
+            f"⚠️ عذراً، حدث خطأ:\n`{str(e)[:200]}`",
+            parse_mode='Markdown'
         )
     
-    # Cleanup
-    os.remove(file_path)
+    finally:
+        # Cleanup
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -615,15 +632,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text("🔍 جاري البحث...")
     
-    text_response, excel_file, needs_dashboard = answer_database_question(text, persona)
-    
-    await update.message.reply_text(text_response, parse_mode='Markdown')
-    
-    if excel_file:
-        await update.message.reply_document(
-            document=excel_file,
-            filename="lars_report.xlsx",
-            caption="📎 التقرير الكامل"
+    try:
+        text_response, excel_file, needs_dashboard = answer_database_question(text, persona)
+        
+        await update.message.reply_text(text_response, parse_mode='Markdown')
+        
+        if excel_file:
+            await update.message.reply_document(
+                document=excel_file,
+                filename="lars_report.xlsx",
+                caption="📎 التقرير الكامل"
+            )
+    except Exception as e:
+        await update.message.reply_text(
+            f"⚠️ عذراً، حدث خطأ أثناء معالجة الاستعلام:\n"
+            f"`{str(e)[:200]}`\n\n"
+            f"الرجاء المحاولة مرة أخرى أو إعادة صياغة السؤال.",
+            parse_mode='Markdown'
         )
 
 
