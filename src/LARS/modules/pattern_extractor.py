@@ -53,6 +53,7 @@ class PatternExtractor:
                 'keywords': ['مبيد', 'pesticide', 'عدد', 'count']
             },
 
+
             # Pattern 2: Extract specific pesticide readings
             'pattern_2': {
                 'regex': [
@@ -63,6 +64,7 @@ class PatternExtractor:
                 'pesticides': ['بيفنثرين', 'كلوربيريفوس', 'إيميداكلوبريد', 'فيبرونيل'],
                 'keywords': ['ابحث', 'find', 'مبيد', 'pesticide']
             },
+
 
             # Pattern 3: List all pesticides for a sample type
             'pattern_3': {
