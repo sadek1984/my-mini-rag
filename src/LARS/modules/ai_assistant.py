@@ -2513,7 +2513,7 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
             try:
                 # Check if it looks like an OpenAI/DeepSeek client
                 if hasattr(model, 'chat') and hasattr(model.chat, 'completions'):
-                    # Get model name from session state (either gpt-4o-mini or qwen2.5-coder:1.5b)
+                    # Get model name from session state (either gpt-4o-mini or qwen2.5:7b)
                     model_name = st.session_state.get('model_name', 'gpt-4o-mini')
                     
                     response = model.chat.completions.create(
@@ -3004,7 +3004,7 @@ def show_chat_page(api_client):
         
         model_choice = st.radio(
             "Select AI Model",
-            ["🟢 OpenAI (gpt-4o-mini)", "🔵 Ollama (qwen2.5-coder:1.5b)"],
+            ["🟢 OpenAI (gpt-4o-mini)", "🔵 Ollama (qwen2.5:7b)"],
             help="Choose between OpenAI API or local Ollama model (qwen is fast & optimized for SQL)"
         )
         
@@ -3049,7 +3049,7 @@ def show_chat_page(api_client):
                 base_url="http://localhost:11434/v1",
                 api_key="ollama"  # Ollama doesn't need real API key
             )
-            model_name = "qwen2.5-coder:1.5b"
+            model_name = "qwen2.5:7b"
             
             # Test if Ollama is running
             try:
@@ -3065,7 +3065,7 @@ def show_chat_page(api_client):
                 st.info("""
                 **How to fix:**
                 1. Install Ollama: https://ollama.ai
-                2. Run: `ollama pull qwen2.5-coder:1.5b`
+                2. Run: `ollama pull qwen2.5:7b`
                 3. Ollama should auto-start, or run: `ollama serve`
                 """)
                 return

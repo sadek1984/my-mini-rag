@@ -376,7 +376,7 @@ Respond with just: Intent: <name>, Confidence: <0-1>"""
         
         try:
             response = self.llm.chat.completions.create(
-                model="qwen2.5-coder:3b",
+                model="qwen2.5:7b",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
                 max_tokens=50
@@ -472,7 +472,7 @@ Generate ONLY the SQL:"""
         
         try:
             response = self.llm.chat.completions.create(
-                model="qwen2.5-coder:3b",
+                model="qwen2.5:7b",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
                 max_tokens=500
