@@ -55,7 +55,7 @@ class UnifiedQueryProcessor:
         # Initialize LLM if not provided
         if self.llm is None and HAS_OPENAI:
             try:
-                self.llm = OpenAI(base_url="http://localhost:1234/v1", api_key="not-needed")
+                self.llm = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
             except:
                 self.llm = None
         
@@ -130,6 +130,9 @@ class UnifiedQueryProcessor:
     
     def _compile_pattern_matchers(self) -> List[Dict]:
         """تجميع أنماط الكشف السريع"""
+        # IMPORTANT: Order matters! More specific patterns should come first.
+        # 'samples_with_n_pesticides' must come before 'count_samples_limit'
+        # because both can match queries with "عدد" but the former is more specific.
         return [
             {
                 'name': 'find_pesticide_in_sample',
@@ -137,14 +140,16 @@ class UnifiedQueryProcessor:
                 'handler': self._handle_find_pesticide
             },
             {
+                # More specific: queries about N pesticides (e.g., "عينات بـ 6 مبيدات")
+                'name': 'samples_with_n_pesticides',
+                'pattern': r'(?:عدد|عينات|samples?|تحتوي|contain).*?(\d+)\s*(?:مبيد|مبيدات|pesticide)',
+                'handler': self._handle_n_pesticides
+            },
+            {
+                # Less specific: count samples above/below limit (no pesticide count)
                 'name': 'count_samples_limit',
                 'pattern': self._create_count_pattern(),
                 'handler': self._handle_count_samples
-            },
-            {
-                'name': 'samples_with_n_pesticides',
-                'pattern': r'(?:عدد|عينات|samples?).*?(\d+)\s*(?:مبيد|مبيدات|pesticide)',
-                'handler': self._handle_n_pesticides
             },
             {
                 'name': 'list_pesticides',
@@ -376,7 +381,7 @@ Respond with just: Intent: <name>, Confidence: <0-1>"""
         
         try:
             response = self.llm.chat.completions.create(
-                model="qwen2.5:7b",
+                model="gemma3:4b",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
                 max_tokens=50
@@ -472,7 +477,7 @@ Generate ONLY the SQL:"""
         
         try:
             response = self.llm.chat.completions.create(
-                model="qwen2.5:7b",
+                model="gemma3:4b",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
                 max_tokens=500

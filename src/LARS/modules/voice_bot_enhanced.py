@@ -10,7 +10,7 @@ from faster_whisper import WhisperModel
 from io import BytesIO
 import pandas as pd
 
-from enhanced_patterns_adapter import EnhancedPatternsAdapter
+from core_query_engine import CoreQueryEngine
 
 
 # ============================================================
@@ -27,12 +27,42 @@ stt_model = WhisperModel(
 )
 print("✅ Whisper model loaded!")
 
-DB_PATH = os.environ.get("DB_PATH", "/Users/a12/Buraidah_lars/src/LARS/data/lars_data.duckdb")
-adapter = EnhancedPatternsAdapter(DB_PATH)
+DB_PATH = "/Users/a12/Buraidah_lars/src/LARS/data/lars_data.duckdb"
+# Using CoreQueryEngine - same logic as ai_assistant.py without Streamlit dependencies
+processor = CoreQueryEngine(DB_PATH)
+print("✅ CoreQueryEngine initialized!")
 
 # Common pesticide names for STT prompting
 PESTICIDE_NAMES_AR = """مبيدات حشرية: البايفنثرن، الفيبرونيل، الكلوربيريفوس، 
 الايميداكلوبريد، البابروفيزن، الايثيون، دلتامثرين، سيبرمثرين"""
+
+
+def sanitize_for_telegram(text: str) -> str:
+    """
+    تنظيف النص من الـ Markdown غير المتوافق مع Telegram
+    Telegram لا يدعم جداول Markdown، لذا نحولها لنص عادي
+    """
+    import re
+    
+    # Remove markdown table formatting (| and --- lines)
+    lines = text.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        # Skip separator lines like |---|---|
+        if re.match(r'^[\|\s\-:]+$', line.strip()):
+            continue
+        
+        # Convert table rows to simple text
+        if '|' in line and line.strip().startswith('|'):
+            # Remove leading/trailing pipes and split by |
+            cells = [c.strip() for c in line.strip('|').split('|')]
+            # Join with tabs or spaces
+            cleaned_lines.append('  '.join(cells))
+        else:
+            cleaned_lines.append(line)
+    
+    return '\n'.join(cleaned_lines)
 
 
 # ============================================================
@@ -71,17 +101,28 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Process query
         await update.message.reply_text("🔍 جاري البحث...")
         
-        response, df = adapter.match_and_execute(query)
+        response, df = processor.process(query)
         
         if response:
-            # Send text response
-            # Split if too long
-            if len(response) > 4000:
-                parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
-                for part in parts:
-                    await update.message.reply_text(part, parse_mode='Markdown')
-            else:
-                await update.message.reply_text(response, parse_mode='Markdown')
+            # Sanitize response for Telegram (remove markdown tables)
+            clean_response = sanitize_for_telegram(response)
+            
+            # Send text response - try with Markdown, fallback to plain text
+            try:
+                if len(clean_response) > 4000:
+                    parts = [clean_response[i:i+4000] for i in range(0, len(clean_response), 4000)]
+                    for part in parts:
+                        await update.message.reply_text(part, parse_mode='Markdown')
+                else:
+                    await update.message.reply_text(clean_response, parse_mode='Markdown')
+            except Exception as e:
+                # Fallback: send as plain text
+                if len(clean_response) > 4000:
+                    parts = [clean_response[i:i+4000] for i in range(0, len(clean_response), 4000)]
+                    for part in parts:
+                        await update.message.reply_text(part)
+                else:
+                    await update.message.reply_text(clean_response)
             
             # Send Excel if results are large
             if df is not None and len(df) > 10:
@@ -130,16 +171,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔍 جاري البحث...")
     
     try:
-        response, df = adapter.match_and_execute(query)
+        response, df = processor.process(query)
         
         if response:
-            # Send response
-            if len(response) > 4000:
-                parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
-                for part in parts:
-                    await update.message.reply_text(part, parse_mode='Markdown')
-            else:
-                await update.message.reply_text(response, parse_mode='Markdown')
+            # Sanitize response for Telegram
+            clean_response = sanitize_for_telegram(response)
+            
+            # Send response - try with Markdown, fallback to plain text
+            try:
+                if len(clean_response) > 4000:
+                    parts = [clean_response[i:i+4000] for i in range(0, len(clean_response), 4000)]
+                    for part in parts:
+                        await update.message.reply_text(part, parse_mode='Markdown')
+                else:
+                    await update.message.reply_text(clean_response, parse_mode='Markdown')
+            except Exception:
+                # Fallback: send as plain text
+                if len(clean_response) > 4000:
+                    parts = [clean_response[i:i+4000] for i in range(0, len(clean_response), 4000)]
+                    for part in parts:
+                        await update.message.reply_text(part)
+                else:
+                    await update.message.reply_text(clean_response)
             
             # Send Excel if needed
             if df is not None and len(df) > 10:

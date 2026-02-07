@@ -218,7 +218,7 @@ Text: "{text}"
 Answer with one word only: QUERY or ENTRY"""
     
     response = client.chat.completions.create(
-        model="qwen2.5:7b",
+        model="gemma3:4b",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=5,
         temperature=0
@@ -445,7 +445,7 @@ User persona: {persona}
 - Analyst: needs detailed breakdowns"""
         
         response = client.chat.completions.create(
-            model="qwen2.5:7b",
+            model="gemma3:4b",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question}
@@ -510,7 +510,7 @@ def extract_lab_data(user_text):
 أجب بـ JSON فقط."""
     
     response = client.chat.completions.create(
-        model="qwen2.5:7b",
+        model="gemma3:4b",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_text}

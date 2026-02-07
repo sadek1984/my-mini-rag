@@ -42,10 +42,10 @@ DB_PATH = os.environ.get("DB_PATH", "/Users/a12/Buraidah_lars/src/LARS/data/lars
 llm_client = None
 if HAS_OPENAI:
     try:
-        llm_client = OpenAI(base_url="http://localhost:1234/v1", api_key="not-needed")
-        print("✅ LLM client connected!")
+        llm_client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+        print("✅ Ollama LLM client connected (gemma3:4b)!")
     except Exception as e:
-        print(f"⚠️ LLM client not available: {e}")
+        print(f"⚠️ Ollama LLM client not available: {e}")
 
 # Initialize unified processor
 processor = UnifiedQueryProcessor(DB_PATH, llm_client)
