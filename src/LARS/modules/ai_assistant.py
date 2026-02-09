@@ -27,6 +27,13 @@ try:
 except ImportError:
     RISK_WINDOWS_AVAILABLE = False
 
+# Import semantic pattern recognizer (optional - for improved query understanding)
+try:
+    from modules.semantic_pattern_recognizer import get_semantic_recognizer
+    SEMANTIC_RECOGNIZER = get_semantic_recognizer()
+except ImportError:
+    SEMANTIC_RECOGNIZER = None
+
 
 
 def generate_bar_chart(df: pd.DataFrame, query: str):

@@ -17,6 +17,15 @@ import pandas as pd
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 import os
+import logging
+
+# Semantic pattern recognizer (optional - graceful fallback if not available)
+try:
+    from semantic_pattern_recognizer import get_semantic_recognizer
+    HAS_SEMANTIC = True
+except ImportError:
+    HAS_SEMANTIC = False
+    get_semantic_recognizer = lambda: None
 
 # Database path
 DB_PATH = Path(__file__).parent.parent / "data" / "lars_data.duckdb"
@@ -56,6 +65,13 @@ class CoreQueryEngine:
         
         self._load_mappings()
         self._load_schema_info()
+        
+        # Initialize semantic pattern recognizer (optional)
+        self.semantic_recognizer = get_semantic_recognizer() if HAS_SEMANTIC else None
+        if self.semantic_recognizer:
+            print("✅ Semantic Pattern Recognizer loaded!")
+        else:
+            print("ℹ️ Semantic Pattern Recognizer not available, using keyword matching only")
     
     def _init_llm(self):
         """Initialize LLM client for fallback queries"""
@@ -394,6 +410,88 @@ class CoreQueryEngine:
                 return en_pattern
         return None
     
+    def _route_by_semantic_pattern(self, pattern_type: str, query: str, query_normalized: str,
+                                   query_lower: str, detected_samples: List[str],
+                                   detected_neighborhoods: List[str], 
+                                   detected_pesticide: Optional[str]) -> Optional[Tuple[str, pd.DataFrame]]:
+        """
+        Route query to appropriate handler based on semantic pattern type.
+        Returns None if pattern cannot be handled (falls back to keyword matching).
+        """
+        try:
+            # Check for 'كل على حده' (show separately)
+            show_separately = any(phrase in query for phrase in ['كل علي حده', 'كل على حده', 'بشكل منفصل'])
+            
+            # Determine above/below limit from query
+            is_above = None  # None = both
+            above_keywords = ['فوق', 'above', 'exceed', 'تجاوز', 'غير مطابق', 'راسب', 'مخالف', 'فاشل']
+            below_keywords = ['تحت', 'below', 'within', 'مطابق', 'ناجح', 'سليم']
+            
+            if any(kw in query for kw in above_keywords) and not any(kw in query_lower for kw in ['مطابق', 'تحت']):
+                is_above = True
+            elif any(kw in query for kw in below_keywords) and not any(kw in query for kw in above_keywords):
+                is_above = False
+            
+            # Route based on pattern type
+            if pattern_type == 'count_above_limit':
+                # _handle_count_samples_limit(samples: List, neighborhoods: List, is_above: bool)
+                samples = detected_samples if detected_samples else ['']
+                return self._handle_count_samples_limit(samples, detected_neighborhoods, True)
+            
+            elif pattern_type == 'count_below_limit':
+                samples = detected_samples if detected_samples else ['']
+                return self._handle_count_samples_limit(samples, detected_neighborhoods, False)
+            
+            elif pattern_type == 'simple_count':
+                if detected_samples:
+                    # Return both above and below (is_above=None means show both)
+                    return self._handle_count_samples_limit(detected_samples, detected_neighborhoods, None)
+            
+            elif pattern_type == 'comprehensive_analysis':
+                if detected_samples:
+                    return self._handle_comprehensive_analysis(detected_samples[0])
+            
+            elif pattern_type == 'pesticide_specific':
+                if detected_pesticide and detected_samples:
+                    return self._handle_find_pesticide_in_sample(detected_pesticide, detected_samples)
+            
+            elif pattern_type == 'pesticide_limit_specific':
+                if detected_pesticide and detected_samples:
+                    # Check for non-compliant keywords
+                    non_compliant_keywords = ['غير مطابق', 'الغير مطابقة', 'راسب', 'مخالف']
+                    is_non_compliant = any(kw in query for kw in non_compliant_keywords)
+                    return self._handle_sample_pesticide_limit(
+                        detected_samples, detected_pesticide, query, query_normalized, is_non_compliant
+                    )
+            
+            elif pattern_type == 'list_pesticides':
+                if detected_samples:
+                    return self._handle_list_pesticides(detected_samples)
+            
+            elif pattern_type == 'neighborhood_pesticides':
+                if detected_neighborhoods:
+                    return self._handle_neighborhood_pesticides(detected_neighborhoods, show_separately)
+            
+            elif pattern_type == 'samples_with_n_pesticides':
+                # Extract number from query
+                import re
+                numbers = re.findall(r'\d+', query)
+                if numbers:
+                    n_pesticides = int(numbers[0])
+                    if 1 <= n_pesticides <= 50:
+                        return self._handle_n_pesticides(n_pesticides, detected_samples)
+            
+            elif pattern_type == 'statistics':
+                if detected_samples:
+                    return self._handle_statistics(detected_samples[0], query)
+            
+            # Pattern recognized but couldn't be handled - fall back to keyword matching
+            return None
+            
+        except Exception as e:
+            logging.warning(f"Error in semantic routing: {e}")
+            return None
+    
     def process(self, query: str) -> Tuple[str, Optional[pd.DataFrame]]:
         """
         معالجة الاستعلام وإرجاع (نص الاستجابة, DataFrame)
@@ -404,6 +502,26 @@ class CoreQueryEngine:
         detected_samples = self._detect_sample_types(query)
         detected_neighborhoods = self._detect_neighborhoods(query)
         detected_pesticide = self._detect_pesticide(query)
+        
+        # ============================================================
+        # NEW: Semantic Pattern Recognition (First Priority)
+        # Uses embeddings to understand query intent semantically
+        # Falls back to keyword matching if confidence is low
+        # ============================================================
+        if self.semantic_recognizer:
+            semantic_result = self.semantic_recognizer.recognize(query)
+            if semantic_result and semantic_result['confidence'] >= 0.75:
+                pattern_type = semantic_result['pattern_type']
+                logging.debug(f"Semantic match: {pattern_type} ({semantic_result['confidence']:.2f})")
+                
+                # Route to appropriate handler based on semantic pattern
+                result = self._route_by_semantic_pattern(
+                    pattern_type, query, query_normalized, query_lower,
+                    detected_samples, detected_neighborhoods, detected_pesticide
+                )
+                if result is not None:
+                    return result
+        
         
         # ============================================================
         # Pattern 0: Comprehensive neighborhood + sample type analysis
