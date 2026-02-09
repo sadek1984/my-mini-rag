@@ -106,7 +106,7 @@ class CoreQueryEngine:
         # ============================================================
         self.dialect_synonyms = {
             # Egyptian "اديني/عايز" = "أعطني/أريد"
-            'اديني': 'أعطني', 'ادني': 'أعطني', 'هاتلي': 'أعطني',
+            'اديني': 'أعطني', 'ادني': 'أعطني', 'هاتلي': 'أعطني', 'الديني': 'أعطني', 
             'عايز': 'أريد', 'عاوز': 'أريد', 'عاوزه': 'أريد',
             'ازاي': 'كيف', 'ازي': 'كيف', 'يعني ايه': 'ما معنى',
             'فين': 'أين', 'ايه': 'ما', 'إيه': 'ما',
@@ -558,6 +558,7 @@ class CoreQueryEngine:
         if any(p in query for p in pesticide_list_patterns) and detected_samples:
             return self._handle_list_pesticides(detected_samples)
         
+
         # ============================================================
         # Pattern 4: Pesticides in neighborhoods
         # "ماهي المبيدات في حي الإسكان"
