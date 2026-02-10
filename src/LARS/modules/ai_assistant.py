@@ -2230,7 +2230,7 @@ DO NOT assume specific values exist. Write generic SQL based on column names onl
 4. For compliance check: use is_compliant = 1 (compliant) or is_compliant = 0 (violation)
 5. Always include ORDER BY for sorted results
 6. Use LIMIT 1000 for large result sets
-7. For Arabic output column names, use AS: SELECT COUNT(*) AS عدد_العينات
+7. For Arabic output column names, use AS: SELECT COUNT(DISTINCT "كود العينة") AS عدد_العينات
 8. Filter by year using: WHERE YEAR("التاريخ") = 2024
 9. **CASE-INSENSITIVE MATCHING:** Use ILIKE instead of LIKE for case-insensitive search
 10. **EXCEEDANCE:** Use exceedance_ratio > 1 to find violations, > 2 for 2x limit violations
@@ -2245,6 +2245,12 @@ DO NOT assume specific values exist. Write generic SQL based on column names onl
 13. **MULTIPLE ITEMS:** If the user lists multiple items (e.g. "Iskan, Safra and Mata"), use `OR` logic:
     - `WHERE ("الحى" LIKE '%الاسكان%' OR "الحى" LIKE '%الصفراء%' OR "الحى" LIKE '%الموطأ%')`
     - Do NOT use `AND` for mutually exclusive columns like Neighborhood or Sample Type.
+14. **COUNTING SAMPLES:** ALWAYS use `COUNT(DISTINCT "كود العينة")` when counting samples.
+    - Each sample (كود العينة) can have MULTIPLE rows (one per detected pesticide).
+    - `COUNT(*)` counts PESTICIDE RECORDS, not unique samples!
+    - Example: Cucumber has 51 unique samples but 99 pesticide detection records.
+    - CORRECT: `SELECT COUNT(DISTINCT "كود العينة") AS عدد_العينات`
+    - WRONG: `SELECT COUNT(*) AS عدد_العينات`
 
 **COLUMN REFERENCE (TIDY FORMAT - Separate columns for pesticide data!):**
 - `"كود العينة"`: Sample code (unique ID)
@@ -2276,16 +2282,16 @@ WHERE is_compliant = 0
 ORDER BY exceedance_ratio DESC
 LIMIT 20;
 
--- 2. Count violations by sample type
+-- 2. Count samples by sample type (USE DISTINCT to count unique samples!)
 SELECT 
     "نوع العينة" AS sample_type,
-    COUNT(*) AS total,
+    COUNT(DISTINCT "كود العينة") AS عدد_العينات,
     SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) AS violations,
-    ROUND(SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS violation_rate
+    ROUND(SUM(CASE WHEN is_compliant = 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(DISTINCT "كود العينة"), 2) AS violation_rate
 FROM chemistry_tidy
 WHERE is_detected = 1
 GROUP BY "نوع العينة"
-ORDER BY violations DESC;
+ORDER BY عدد_العينات DESC;
 
 -- 3. Most common pesticides
 SELECT 
@@ -2325,7 +2331,8 @@ LIMIT 20;
 -- 6. Average concentration by pesticide
 SELECT 
     pesticide_name,
-    COUNT(*) AS samples,
+    COUNT(DISTINCT "كود العينة") AS عدد_العينات,
+    COUNT(*) AS عدد_الاكتشافات,
     ROUND(AVG(concentration), 4) AS avg_concentration,
     ROUND(AVG(limit_value), 4) AS avg_limit,
     ROUND(AVG(exceedance_ratio), 2) AS avg_ratio
@@ -2358,8 +2365,17 @@ GROUP BY "الحى"
 ORDER BY عدد_المخالفات DESC;
 
 
--- 8. Total record count
+-- 8. Total record count (this counts RECORDS not samples!)
 SELECT COUNT(*) AS total_records FROM chemistry_tidy;
+
+-- 10. Count unique samples per sample name (e.g. "ما عدد عينات الطماطم و الخيار كل على حده")
+SELECT 
+    "اسم العينة" AS نوع_العينة,
+    COUNT(DISTINCT "كود العينة") AS عدد_العينات
+FROM chemistry_tidy
+WHERE ("اسم العينة" LIKE '%طماطم%' OR "اسم العينة" LIKE '%خيار%' OR "اسم العينة" LIKE '%كوسة%')
+GROUP BY "اسم العينة"
+ORDER BY عدد_العينات DESC;
 
 -- 9. Samples with multiple pesticides count
 SELECT 
