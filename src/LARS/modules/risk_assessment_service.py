@@ -131,13 +131,6 @@ EU_COMMODITY_CODES = {
 }
 
 
-def get_saudi_ir(commodity: str) -> float:
-    """
-    Get Saudi ingestion rate for a commodity in kg/day using RiskAssessmentConfig.
-    """
-    return RiskAssessmentConfig.get_ingestion_rate(commodity)
-
-
 def get_population_weight(popclass: str) -> float:
     """Get default body weight for a population class from unified config."""
     profile = RiskAssessmentConfig.POPULATION_PROFILES.get(popclass)
@@ -899,6 +892,47 @@ def calculate_sample_iqr_summary(
     }
 
 
+
+"""
+INSTRUCTIONS FOR UPDATING risk_assessment_service.py
+
+The following changes need to be made to utilize the new population-specific 
+ingestion rates:
+
+1. Update the get_saudi_ir() function to support population parameter
+2. Update calculate_commodity_summary_metrics() to use population-specific rates
+3. Update calculate_lars_metrics() to use population-specific rates
+4. Update analyze_sample_risk() to use population-specific rates
+
+Below are the updated functions:
+"""
+
+# ============================================================================
+# UPDATED FUNCTION 1: get_saudi_ir() with population support
+# ============================================================================
+
+def get_saudi_ir(commodity: str, population: str = "saudi_adults") -> float:
+    """
+    Get Saudi ingestion rate for a commodity in g/kg bw/day using RiskAssessmentConfig.
+    
+    Parameters:
+        commodity: Commodity name (English or Arabic)
+        population: Population class (default: saudi_adults)
+    
+    Returns:
+        Ingestion rate in g/kg bw/day
+    """
+    return RiskAssessmentConfig.get_ingestion_rate(
+        commodity, 
+        population=population,
+        use_detailed=True  # Returns g/kg bw/day
+    )
+
+
+# ============================================================================
+# UPDATED FUNCTION 2: calculate_commodity_summary_metrics()
+# ============================================================================
+
 def calculate_commodity_summary_metrics(
     residue_list: List[Dict[str, Any]],
     commodity: str = "Total Vegetables",
@@ -909,21 +943,28 @@ def calculate_commodity_summary_metrics(
 ) -> Dict[str, Any]:
     """
     🆕 New Aggregate Risk Calculation Logic (Chronic Risk by Commodity)
-    As requested:
-    1. Group by pesticide for all samples
-    2. Calculate min, max, median concentrations for EACH pesticide
-    3. Calculate HQ for each pesticide using its MEDIAN concentration
-    4. Total HIc = Sum of all individual pesticide HQs
+    
+    UPDATED to use population-specific ingestion rates in g/kg bw/day
     
     Formula:
-    EDI = (Concentration * IngestionRate) / BodyWeight
+    EDI = (Concentration_mg/kg * IngestionRate_g/kg_bw/day) / 1000
     HQ = EDI / ADI
     """
     # Define body weight based on target OR use explicit parameter
     bw = body_weight if body_weight is not None else RiskAssessmentConfig.get_population_bw(target)
     
-    # Get ingestion rate for commodity OR use explicit parameter
-    ir = ingestion_rate if ingestion_rate is not None else RiskAssessmentConfig.get_ingestion_rate(commodity)
+    # Get ingestion rate for commodity and population
+    # UPDATED: Now gets population-specific rate in g/kg bw/day
+    if ingestion_rate is not None:
+        # If explicit rate provided, use it (assume it's in kg/day, convert to g/kg bw/day)
+        ir = (ingestion_rate * 1000) / bw
+    else:
+        # Get detailed population-specific rate (already in g/kg bw/day)
+        ir = RiskAssessmentConfig.get_ingestion_rate(
+            commodity, 
+            population=target,
+            use_detailed=True
+        )
     
     # Get risk service for ADI lookup
     service = get_risk_service()
@@ -932,7 +973,6 @@ def calculate_commodity_summary_metrics(
     pesticide_groups = {}
     for item in residue_list:
         p_name = item.get('name', '')
-        # Handle cases where name might be NO DATA or empty
         if not p_name or p_name in ('NO DATA', 'NO DETECTION'):
             continue
             
@@ -963,8 +1003,9 @@ def calculate_commodity_summary_metrics(
         hqc_median = 0.0
         edi_median = 0.0
         if adi and adi > 0:
-            # HQ = (Median * IR / BW) / ADI
-            edi_median = (median_val * ir) / bw
+            # UPDATED FORMULA: EDI = (Concentration_mg/kg * IR_g/kg_bw/day) / 1000
+            # This gives EDI in mg/kg bw/day
+            edi_median = (median_val * ir) / 1000
             hqc_median = edi_median / adi
             total_hi_median += hqc_median
             
@@ -980,7 +1021,7 @@ def calculate_commodity_summary_metrics(
             "max": max_val,
             "median": median_val,
             "adi": adi,
-            "ir": ir,
+            "ir": ir,  # Now in g/kg bw/day
             "bw": bw,
             "edi_median": edi_median,
             "hqc": hqc_median,
@@ -1000,13 +1041,17 @@ def calculate_commodity_summary_metrics(
             "target": target,
             "body_weight_kg": bw,
             "commodity": commodity,
-            "ingestion_rate_kg_day": ir
+            "ingestion_rate_g_kg_bw_day": ir  # UPDATED: Now shows g/kg bw/day
         },
         "hi_interpretation": "⚠️ Risk unacceptable" if total_hi_median >= 1 else "✅ Risk acceptable"
     }
     
     return analysis
 
+
+# ============================================================================
+# UPDATED FUNCTION 3: calculate_lars_metrics()
+# ============================================================================
 
 def calculate_lars_metrics(
     residue_list: List[Dict[str, Any]],
@@ -1019,41 +1064,27 @@ def calculate_lars_metrics(
     """
     Calculate comprehensive LARS metrics for a list of pesticide residues.
     
-    Implements Saudi-specific calculations with:
-    - IqR (Index of Quality) = concentration / MRL
-    - HQc (Hazard Quotient) = EDI / ADI
-    - Chemical group statistics (Min, Max, Mean, Median)
-    - Risk Driver identification
+    UPDATED to use population-specific ingestion rates in g/kg bw/day
     
     Formula:
-    EDI = (Concentration * IngestionRate) / BodyWeight
+    EDI = (Concentration_mg/kg * IngestionRate_g/kg_bw/day) / 1000
     HQ = EDI / ADI
-    
-    Parameters:
-        residue_list: List of dicts with keys:
-            - 'name': pesticide name
-            - 'concentration': residue concentration mg/kg
-            - 'mrl': Maximum Residue Limit mg/kg
-            - 'adi': Acceptable Daily Intake mg/kg bw/day (optional)
-        commodity: Commodity name for IR lookup (e.g., "Tomato", "Cucumber")
-        target: "adult" (53kg) or "child" (16kg)
-        body_weight: Override body weight (uses exact value if provided)
-        ingestion_rate: Override ingestion rate in kg/day (uses exact value if provided)
-    
-    Returns:
-        Dictionary with:
-            - stats: Group statistics {group: {min, max, mean, median, concentrations}}
-            - iqr_total: Total IqR sum
-            - hi_total: Total Hazard Index
-            - risk_driver: Pesticide with highest HQc
-            - iqr_driver: Pesticide with highest IqR
-            - individual_results: Per-pesticide calculations
     """
     # Define body weight based on target OR use explicit parameter
     bw = body_weight if body_weight is not None else RiskAssessmentConfig.get_population_bw(target)
     
-    # Get ingestion rate for commodity OR use explicit parameter
-    ir = ingestion_rate if ingestion_rate is not None else RiskAssessmentConfig.get_ingestion_rate(commodity)
+    # Get ingestion rate for commodity and population
+    # UPDATED: Now gets population-specific rate in g/kg bw/day
+    if ingestion_rate is not None:
+        # If explicit rate provided, use it (assume it's in kg/day, convert to g/kg bw/day)
+        ir = (ingestion_rate * 1000) / bw
+    else:
+        # Get detailed population-specific rate (already in g/kg bw/day)
+        ir = RiskAssessmentConfig.get_ingestion_rate(
+            commodity,
+            population=target,
+            use_detailed=True
+        )
     
     # Get risk service for ADI lookup
     service = get_risk_service()
@@ -1070,7 +1101,7 @@ def calculate_lars_metrics(
             "target": target,
             "body_weight_kg": bw,
             "commodity": commodity,
-            "ingestion_rate_kg_day": ir
+            "ingestion_rate_g_kg_bw_day": ir  # UPDATED: Now shows g/kg bw/day
         }
     }
     
@@ -1116,7 +1147,8 @@ def calculate_lars_metrics(
                 adi = adi_info['value']
         
         if adi and adi > 0:
-            edi = (concentration * ir) / bw
+            # UPDATED FORMULA: EDI = (Concentration_mg/kg * IR_g/kg_bw/day) / 1000
+            edi = (concentration * ir) / 1000
             hqc = edi / adi
             analysis["hi_total"] += hqc
             
@@ -1158,7 +1190,7 @@ def calculate_lars_metrics(
                 "mean": float(np.mean(vals)),
                 "median": float(np.median(vals)),
                 "count": len(vals),
-                "concentrations": vals  # Keep raw data
+                "concentrations": vals
             }
     
     # Add risk interpretations

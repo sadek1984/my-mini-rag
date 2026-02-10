@@ -293,12 +293,31 @@ COMMODITY_TO_ARABIC = {
 }
 
 
+"""
+INSTRUCTIONS FOR UPDATING risk_windows.py
+
+The following changes need to be made to properly display and use
+the new population-specific ingestion rates:
+
+1. Update show_risk_input_form() to display rates in correct units
+2. Update parameter passing to risk calculation functions
+3. Add information about which rates are being used
+
+Below are the key updates:
+"""
+
+# ============================================================================
+# UPDATED FUNCTION: show_risk_input_form()
+# ============================================================================
+
 def show_risk_input_form(
     query: str,
     detected_sample: Optional[tuple] = None
 ) -> Dict[str, Any]:
     """
     Show input form for risk assessment parameters.
+    
+    UPDATED to show population-specific ingestion rates and their sources.
     
     Returns:
         Dictionary with selected parameters
@@ -325,7 +344,7 @@ def show_risk_input_form(
             options=list(pop_options.keys()),
             format_func=lambda x: pop_options[x],
             index=list(pop_options.keys()).index('saudi_adults') if 'saudi_adults' in pop_options else 4,
-            help="Select population for body weight."
+            help="Select population for body weight and ingestion rates."
         )
         
         body_weight = POPULATION_CLASSES[selected_pop].default_weight_kg
@@ -351,19 +370,37 @@ def show_risk_input_form(
             # Re-query database for new sample type
             arabic_sample = COMMODITY_TO_ARABIC.get(selected_commodity, '')
             new_data = get_residue_data_for_sample(arabic_sample)
-            # Update data (even if empty)
             st.session_state['risk_residue_data'] = new_data
             st.rerun()
     
     with col3:
-        # Get IR for selected commodity - ALWAYS use fresh value
-        ir_kgday = get_saudi_ir(selected_commodity)
-        ir_gday = ir_kgday * 1000
+        # UPDATED: Get population-specific IR in g/kg bw/day
+        from modules.risk_assessment_service import RiskAssessmentConfig
         
-        # Show IR as read-only display
+        # Check if detailed rates are available
+        has_detailed = RiskAssessmentConfig.has_detailed_rates(selected_commodity)
+        
+        # Get ingestion rate for selected population and commodity
+        ir_g_kg_bw_day = RiskAssessmentConfig.get_ingestion_rate(
+            selected_commodity,
+            population=selected_pop,
+            use_detailed=True
+        )
+        
+        # Also show equivalent kg/day for reference
+        ir_kg_day = (ir_g_kg_bw_day * body_weight) / 1000
+        ir_g_day = ir_kg_day * 1000
+        
+        # Show IR with source indicator
         st.markdown(f"**📊 Ingestion Rate:**")
-        st.markdown(f"### {ir_gday:.1f} g/day")
-        st.caption(f"({ir_kgday:.4f} kg/day)")
+        if has_detailed:
+            st.markdown(f"### {ir_g_kg_bw_day:.3f} g/kg bw/day")
+            st.caption(f"✓ Population-specific rate")
+            st.caption(f"≈ {ir_g_day:.1f} g/day for {body_weight} kg person")
+        else:
+            st.markdown(f"### {ir_g_day:.1f} g/day")
+            st.caption(f"⚠️ Using standard rate")
+            st.caption(f"({ir_g_kg_bw_day:.3f} g/kg bw/day)")
     
     # Real-time MRL Toggle
     st.markdown("---")
@@ -375,14 +412,17 @@ def show_risk_input_form(
     )
     if use_realtime != st.session_state.get('risk_use_realtime'):
         st.session_state['risk_use_realtime'] = use_realtime
-        
+    
     # Show selected parameters summary
+    rate_source = "Population-specific (IESTI/WHO)" if has_detailed else "Standard rate"
+    
     st.info(f"""
     **Selected Parameters:**
     - 👥 Population: {POPULATION_CLASSES[selected_pop].name_en} ({POPULATION_CLASSES[selected_pop].name_ar})
     - ⚖️ Body Weight: {body_weight} kg
     - 🥬 Commodity: {selected_commodity}
-    - 📊 Ingestion Rate: {ir_gday:.1f} g/day
+    - 📊 Ingestion Rate: {ir_g_kg_bw_day:.3f} g/kg bw/day (≈{ir_g_day:.1f} g/day)
+    - 📚 Rate Source: {rate_source}
     - 🌐 MRL Source: {"EU API (Real-time)" if use_realtime else "Original Dataset"}
     """)
     
@@ -390,9 +430,10 @@ def show_risk_input_form(
         'population': selected_pop,
         'body_weight': body_weight,
         'commodity': selected_commodity,
-        'ingestion_rate': ir_kgday,
+        'ingestion_rate_g_kg_bw_day': ir_g_kg_bw_day,  # UPDATED: Now in g/kg bw/day
         'detected_sample': detected_sample,
-        'use_realtime': use_realtime
+        'use_realtime': use_realtime,
+        'has_detailed_rates': has_detailed
     }
 
 
@@ -446,27 +487,32 @@ def show_health_risk_window(
     if filtered_data:
         target_type = "adult" if params['body_weight'] >= 50 else "child"
         
-        # Use BOTH calculation methodologies:
-        # 1. New Median-based (Requested by user)
+        
         summary_analysis = calculate_commodity_summary_metrics(
             filtered_data,
             params['commodity'],
-            target_type,
+            params['population'],  # UPDATED: Use selected population
             body_weight=params['body_weight'],
-            ingestion_rate=params['ingestion_rate'],
+            ingestion_rate=None,  # UPDATED: Let function get population-specific rate
             use_realtime_mrl=params.get('use_realtime', False)
         )
         
-        # 2. Original Individual-based (For fallback/comparison)
         original_analysis = calculate_lars_metrics(
             filtered_data, 
             params['commodity'], 
-            target_type,
+            params['population'],  # UPDATED: Use selected population
             body_weight=params['body_weight'],
-            ingestion_rate=params['ingestion_rate'],
+            ingestion_rate=None,  # UPDATED: Let function get population-specific rate
             use_realtime_mrl=params.get('use_realtime', False)
         )
-        
+        # UPDATED: Show ingestion rate units in display
+        st.caption(f"""
+        **Calculation Details:**
+        - Population-specific ingestion rate: {params['ingestion_rate_g_kg_bw_day']:.3f} g/kg bw/day
+        - EDI = (Concentration × IR) / 1000
+        - HQ = EDI / ADI
+        """)
+
         # Display summary metrics (Using Median-based logic as primary)
         st.markdown(f"### 📊 Health Risk Summary / ملخص الخطر الصحي ({params['commodity']})")
         
@@ -683,18 +729,25 @@ def show_quality_index_window(
             st.rerun()
     
     with col2:
-        # Show current selected commodity as the filter
+        # UPDATED: Show if population-specific rates are available for this commodity
+        from modules.risk_assessment_service import RiskAssessmentConfig
+        
+        has_detailed = RiskAssessmentConfig.has_detailed_rates(selected_commodity)
+        
         st.info(f"🔍 Sample Filter: **{selected_commodity}**")
         
-        # Real-time MRL Toggle for IqR
-        use_realtime = st.checkbox(
-            "🌐 Use Real-time EU MRLs", 
-            value=st.session_state.get('iqr_use_realtime', False),
-            key="iqr_realtime_toggle"
-        )
-        if use_realtime != st.session_state.get('iqr_use_realtime'):
-            st.session_state['iqr_use_realtime'] = use_realtime
-            st.rerun()
+        if has_detailed:
+            st.success("✓ Population-specific rates available")
+            
+            # Show available populations
+            available_pops = RiskAssessmentConfig.get_available_populations(selected_commodity)
+            if available_pops:
+                st.caption(f"Data for: {', '.join(available_pops[:3])}...")
+        else:
+            st.warning("⚠️ Using standard rates")
+        
+
+
     
     st.markdown("---")
     
