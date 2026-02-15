@@ -106,7 +106,7 @@ docker compose down
 docker compose up --build
 
 
-streamlit run src/LARS/app.py
+streamlit run src/LARS/app_new.py
 
 
 
@@ -134,7 +134,7 @@ find non compliant samples with bifenthrin in cucumber samples
 
 ما عدد عينات الطماطم التي تكون فيها القراءة اكبر من الحدود
 
-ما هي الخضروات التي يشملها مبيد البايفنثرن و ماهي العينات تحت الحد و فوق الحد المسموح
+ما هي الخضروات التي يشملها مبيد البايفنثرن
 
 ما هي عينات الكوسه و الباذنجان التي تحتوي علي مبيد bifenthrin 
 

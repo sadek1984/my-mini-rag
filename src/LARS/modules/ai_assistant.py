@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional
 from openai import OpenAI
 import google.generativeai as genai
 import random
+from modules.mappings import PESTICIDE_AR_TO_EN, translate_pesticide
 
 # Import risk window components
 try:
@@ -915,28 +916,10 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 fuzzy_condition = ""
                 english_pesticide_name = None
                 
-                # Inline pesticide mapping (fallback if query_engine not available)
-                local_pesticide_map = {
-                    'البابروفيزن': 'buprofezin', 'بابروفيزن': 'buprofezin', 'بوبروفيزين': 'buprofezin',
-                    'البايفنثرن': 'bifenthrin', 'بايفنثرين': 'bifenthrin', 'بايفنثرن': 'bifenthrin',
-                    'الكلوربيريفوس': 'chlorpyrifos', 'كلوربيريفوس': 'chlorpyrifos',
-                    'الايميداكلوبريد': 'imidacloprid', 'إيميداكلوبريد': 'imidacloprid', 
-                    'ايميداكلوبرايد': 'imidacloprid', 'اميداكلوبريد': 'imidacloprid',
-                    'الاسيتاميبريد': 'acetamiprid', 'اسيتاميبريد': 'acetamiprid',
-                    'الدلتاميثرين': 'deltamethrin', 'دلتاميثرين': 'deltamethrin',
-                    'السايبرمثرين': 'cypermethrin', 'سايبرمثرين': 'cypermethrin',
-                    'الثياميثوكسام': 'thiamethoxam', 'ثياميثوكسام': 'thiamethoxam',
-                    'البروفينوفوس': 'profenofos', 'بروفينوفوس': 'profenofos',
-                    'الميتالاكسيل': 'metalaxyl', 'ميتالاكسيل': 'metalaxyl',
-                    'الكاربندازيم': 'carbendazim', 'كاربندازيم': 'carbendazim',
-                    'الابامكتين': 'abamectin', 'ابامكتين': 'abamectin',
-                    'الفيبرونيل': 'fipronil', 'فيبرونيل': 'fipronil',
-                }
-                
+            
                 # Try to translate Arabic to English
-                mapping = local_pesticide_map
-                if hasattr(st.session_state, 'query_engine') and hasattr(st.session_state.query_engine, 'arabic_pesticide_map'):
-                     mapping = st.session_state.query_engine.arabic_pesticide_map
+                english_pesticide_name = translate_pesticide(detected_pesticide_name)
+
                 
                 # Try exact match
                 if detected_pesticide_name in mapping:
@@ -1789,34 +1772,6 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 return
             
             # Pattern 2: Extract specific pesticide readings with sample type filter
-            # Arabic pesticide name to English mapping
-            arabic_pesticide_map = {
-                'بابروفيزن': 'bupro',
-                'بايفنثرين': 'bifenthrin',
-                'كلوربيريفوس': 'chlorpyrifos',
-                'إيميداكلوبريد': 'imidacloprid',
-                'اميداكلوبريد': 'imidacloprid',
-                'اسيتاميبريد': 'acetamiprid',
-                'ازوكسيستروبين': 'azoxystrobin',
-                'دلتاميثرين': 'deltamethrin',
-                'سايبرمثرين': 'cypermethrin',
-                'ثياميثوكسام': 'thiamethoxam',
-                'بروفينوفوس': 'profenofos',
-                'ميتالاكسيل': 'metalaxyl',
-                'كاربندازيم': 'carbendazim',
-                'ابامكتين': 'abamectin',
-                'الفيبرونيل': 'fipronil',
-                'فيبرونيل': 'fipronil',
-                'الايثيون': 'ethion',
-                'الايثون': 'ethion',
-                'لامدا': 'lambda-cyhalothrin',
-                'سايهالوثرين': 'lambda-cyhalothrin',
-                'ديميثويت': 'dimethoate',
-                'ميثوميل': 'methomyl',
-                'بوبروفيزين': 'buprofezin',
-                'بروكونازول': 'propiconazole',
-                'تيبوكونازول': 'tebuconazole',
-            }
             
             # All pesticide names from the database (135 unique)
             pesticide_names = [
@@ -1854,7 +1809,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
             
             # Check for Arabic pesticide names first
             detected_pesticide = None
-            for ar_name, en_pattern in arabic_pesticide_map.items():
+            for ar_name, en_pattern in PESTICIDE_AR_TO_EN.items():
                 if ar_name in query:
                     detected_pesticide = en_pattern
                     st.info(f"🔍 البحث عن مبيد **{ar_name}** ({en_pattern})...")
@@ -3049,30 +3004,12 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                 else:
                     generated_code = generated_text.strip()
             
-            # Create pesticide name mapping for Arabic queries
-            pesticide_mapping = {
-                'البايفنثرن': 'Bifenthrin',
-                'الكلوربيريفوس': 'Chlorpyrifos',
-                'الديمثويت': 'Dimethoate',
-                'اللامبدا': 'Lambda-cyhalothrin',
-                'الميثوميل': 'Methomyl',
-                'الكاربندزيم': 'Carbendazim',
-                'الإيماميكتين': 'Emamectin',
-                'الأيميداكلوبريد': 'Imidacloprid',
-                'الثيامثوكسام': 'Thiamethoxam',
-                'البروفيزين': 'Buprofezin',
-                'الأباميكتين': 'Abamectin',
-                'الأسيتامبريد': 'Acetamiprid',
-                'الدلتامثرين': 'Deltamethrin',
-                'السيبرمثرين': 'Cypermethrin'
-            }
-            
             exec_globals = {
                 'df': df.copy(),
                 'pd': pd,
                 'np': np,
                 'query': query,
-                'pesticide_mapping': pesticide_mapping,  # Add mapping to globals
+                'pesticide_mapping': PESTICIDE_AR_TO_EN,
                 'result': None
             }
             

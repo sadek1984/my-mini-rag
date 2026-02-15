@@ -19,6 +19,15 @@ from pathlib import Path
 import os
 import logging
 
+# ── Centralized mappings (replaces local dictionaries) ──
+from modules.mappings import (
+    SAMPLE_CORRECTIONS,
+    SAMPLE_EN_TO_AR,
+    NEIGHBORHOOD_CORRECTIONS,
+    PESTICIDE_AR_TO_EN,
+    normalize_arabic_query,
+)
+
 # Semantic pattern recognizer (optional - graceful fallback if not available)
 try:
     from semantic_pattern_recognizer import get_semantic_recognizer
@@ -114,15 +123,19 @@ class CoreQueryEngine:
             self.available_neighborhoods = []
     
     def _load_mappings(self):
-        """تحميل الخرائط"""
-        
+        \"\"\"Load query mappings.
+
+        Dialect synonyms and action/limit keywords are defined here
+        because they are specific to the query engine. All entity
+        dictionaries (samples, pesticides, neighborhoods) come from
+        the centralized ``modules.mappings`` module.
+        \"\"\"
         # ============================================================
-        # Egyptian & Saudi Arabic Dialect Synonyms
-        # اللهجات المصرية والسعودية
+        # Egyptian & Saudi Arabic Dialect Synonyms (KEEP — engine-specific)
         # ============================================================
         self.dialect_synonyms = {
-            # Egyptian "اديني/عايز" = "أعطني/أريد"
-            'اديني': 'أعطني', 'ادني': 'أعطني', 'هاتلي': 'أعطني', 'الديني': 'أعطني', 
+            # Egyptian
+            'اديني': 'أعطني', 'ادني': 'أعطني', 'هاتلي': 'أعطني', 'الديني': 'أعطني',
             'عايز': 'أريد', 'عاوز': 'أريد', 'عاوزه': 'أريد',
             'ازاي': 'كيف', 'ازي': 'كيف', 'يعني ايه': 'ما معنى',
             'فين': 'أين', 'ايه': 'ما', 'إيه': 'ما',
@@ -131,35 +144,30 @@ class CoreQueryEngine:
             'ورني': 'أرني', 'وريني': 'أرني',
             'طلعلي': 'أخرج لي', 'جيبلي': 'أحضر لي',
             'مش فاهم': 'لا أفهم', 'مفهمتش': 'لم أفهم',
-            
-            # Saudi "ابغى/ابي/وش" = "أريد/ما"
+            # Saudi
             'ابغى': 'أريد', 'ابغي': 'أريد', 'ابي': 'أريد', 'أبي': 'أريد',
             'ابيها': 'أريدها', 'ابغاها': 'أريدها', 'ابيه': 'أريده',
             'وش': 'ما', 'ويش': 'ما', 'ايش': 'ما', 'إيش': 'ما',
             'وين': 'أين', 'فيين': 'أين',
-            'كيف': 'كيف',  # same
             'يعني وش': 'ما معنى', 'شلون': 'كيف',
             'طيب': 'حسناً', 'زين': 'جيد', 'تمام': 'حسناً',
             'اعطني': 'أعطني', 'عطني': 'أعطني', 'اعطيني': 'أعطني',
             'ورني': 'أرني', 'وريني': 'أرني',
             'دور لي': 'ابحث عن', 'بحث': 'ابحث', 'لقني': 'ابحث عن',
-            
             # Common verbs/actions
             'اوجد': 'ابحث عن', 'أوجد': 'ابحث عن', 'اعثر': 'ابحث عن',
             'احصل': 'ابحث عن', 'طلع': 'اعرض', 'اظهر': 'اعرض', 'أظهر': 'اعرض',
             'بين': 'اعرض', 'بينلي': 'اعرض لي',
-            
             # Query keywords
             'كل على حده': 'كل علي حده', 'كل واحد لوحده': 'كل علي حده',
             'بشكل منفصل': 'كل علي حده', 'each separately': 'كل علي حده',
             'separately': 'كل علي حده',
         }
-        
+
         # ============================================================
-        # Query Action Keywords (verbs/question words)
+        # Action keywords (KEEP — engine-specific)
         # ============================================================
         self.action_keywords = {
-            # Search/Find
             'search': ['ابحث', 'دور', 'اوجد', 'اعثر', 'find', 'search', 'locate'],
             'show': ['اعرض', 'اظهر', 'ورني', 'طلع', 'show', 'display', 'list'],
             'give': ['اديني', 'اعطني', 'عطني', 'هاتلي', 'جيبلي', 'give', 'provide'],
@@ -167,218 +175,44 @@ class CoreQueryEngine:
             'count': ['عدد', 'كم', 'كام', 'count', 'how many', 'number'],
             'what': ['ماهي', 'ما هي', 'ماهو', 'ما هو', 'ايه', 'ايش', 'وش', 'what', 'which'],
         }
-        
+
         # ============================================================
-        # Limit/Compliance Keywords
+        # Limit/Compliance keywords (KEEP — engine-specific)
         # ============================================================
         self.above_limit_keywords = [
             'فوق الحد', 'تجاوز', 'مخالف', 'راسب', 'راسبة', 'غير مطابق',
             'مخالفة', 'المخالفات', 'الراسبة', 'الراسبين', 'متجاوز', 'متجاوزة',
-            'above limit', 'exceeding', 'over limit', 'violations', 'failed',
-            'more than limit', 'exceed', 'non-compliant',
+            'above limit', 'exceeding', 'over limit', 'violation',
+            'non-compliant', 'الغير مطابقة',
         ]
-        
         self.below_limit_keywords = [
-            'تحت الحد', 'ناجح', 'ناجحة', 'مطابق', 'مطابقة', 'سليم', 'سليمة',
-            'ضمن الحد', 'المطابقة', 'الناجحة', 'السليمة',
-            'below limit', 'within limit', 'compliant', 'passed', 'under limit',
+            'تحت الحد', 'ضمن الحد', 'مطابق', 'مطابقة', 'ناجح', 'سليم',
+            'below limit', 'within limit', 'compliant', 'passing', 'safe',
         ]
-        
+
         # ============================================================
-        # Statistics Keywords
+        # Entity dictionaries — FROM CENTRALIZED MAPPINGS
         # ============================================================
-        self.stats_keywords = {
-            'max': ['اعلى', 'أعلى', 'اكبر', 'أكبر', 'max', 'maximum', 'highest'],
-            'min': ['اقل', 'أقل', 'اصغر', 'أصغر', 'min', 'minimum', 'lowest'],
-            'avg': ['متوسط', 'المتوسط', 'معدل', 'average', 'mean', 'avg'],
-            'median': ['الوسيط', 'وسيط', 'median'],
-            'range': ['المدى', 'المدي', 'نطاق', 'range', 'spread'],
-            'count': ['عدد', 'تكرار', 'count', 'frequency'],
-            'unique': ['فريدة', 'فريد', 'مميزة', 'unique', 'distinct'],
-        }
-        
-        # ============================================================
-        # Sample Types (Expanded)
-        # ============================================================
-        self.sample_types = {
-            # Vegetables
-            'خيار': 'خيار', 'الخيار': 'خيار',
-            'طماطم': 'طماطم', 'الطماطم': 'طماطم', 'طماطة': 'طماطم', 'بندورة': 'طماطم',
-            'باذنجان': 'باذنجان', 'الباذنجان': 'باذنجان',
-            'فلفل': 'فلفل', 'الفلفل': 'فلفل',
-            'كوسة': 'كوسة', 'الكوسة': 'كوسة', 'كوسا': 'كوسة', 'الكوسا': 'كوسة',
-            'جزر': 'جزر', 'الجزر': 'جزر',
-            'خس': 'خس', 'الخس': 'خس',
-            'بقدونس': 'بقدونس', 'البقدونس': 'بقدونس',
-            'سبانخ': 'سبانخ', 'السبانخ': 'سبانخ',
-            'بطاطس': 'بطاطس', 'البطاطس': 'بطاطس', 'بطاطا': 'بطاطس',
-            'فاصوليا': 'فاصوليا', 'الفاصوليا': 'فاصوليا', 'فاصولية': 'فاصوليا', 'فصولية': 'فاصوليا',
-            'بامية': 'بامية', 'البامية': 'بامية',
-            'بروكلي': 'بروكلي', 'البروكلي': 'بروكلي',
-            'بصل': 'بصل', 'البصل': 'بصل',
-            'جرجير': 'جرجير', 'الجرجير': 'جرجير',
-            'زهرة': 'زهرة', 'الزهرة': 'زهرة', 'قرنبيط': 'زهرة',
-            'شبت': 'شبت', 'الشبت': 'شبت',
-            'كزبرة': 'كزبرة', 'الكزبرة': 'كزبرة',
-            'ملوخية': 'ملوخية', 'الملوخية': 'ملوخية',
-            'نعناع': 'نعناع', 'النعناع': 'نعناع',
-            
-            # Fruits
-            'فراولة': 'فراولة', 'الفراولة': 'فراولة',
-            'عنب': 'عنب', 'العنب': 'عنب',
-            'تفاح': 'تفاح', 'التفاح': 'تفاح',
-            'برتقال': 'برتقال', 'البرتقال': 'برتقال',
-            'رمان': 'رمان', 'الرمان': 'رمان',
-            'كمثرى': 'كمثرى', 'الكمثرى': 'كمثرى',
-            'ليمون': 'ليمون', 'الليمون': 'ليمون',
-            'توت': 'توت', 'التوت': 'توت',
-            'تمر': 'تمر', 'التمر': 'تمر',
-            
-            # Grains
-            'قمح': 'قمح', 'القمح': 'قمح',
-            'رز': 'رز', 'الرز': 'رز', 'أرز': 'رز',
-            'ذرة': 'ذرة', 'الذرة': 'ذرة',
-            'عدس': 'عدس', 'العدس': 'عدس',
-            'دقيق': 'دقيق', 'الدقيق': 'دقيق', 'طحين': 'دقيق',
-            'شوفان': 'شوفان', 'الشوفان': 'شوفان',
-            
-            # Spices
-            'كمون': 'كمون', 'الكمون': 'كمون',
-            'زعتر': 'زعتر', 'الزعتر': 'زعتر',
-            'بهارات': 'بهارات', 'البهارات': 'بهارات',
-            'توابل': 'توابل', 'التوابل': 'توابل', 'بهار': 'توابل',
-            'قرنفل': 'قرنفل', 'القرنفل': 'قرنفل',
-            'هيل': 'هيل', 'الهيل': 'هيل', 'حبهان': 'هيل',
-            'يانسون': 'يانسون', 'اليانسون': 'يانسون',
-            'شمر': 'شمر', 'الشمر': 'شمر',
-            'محلب': 'محلب', 'المحلب': 'محلب',
-            
-            # Nuts
-            'مكسرات': 'مكسرات', 'المكسرات': 'مكسرات',
-            'لوز': 'لوز', 'اللوز': 'لوز',
-            'فستق': 'فستق', 'الفستق': 'فستق',
-            'كاجو': 'كاجو', 'الكاجو': 'كاجو',
-            'بندق': 'بندق', 'البندق': 'بندق',
-            'بيكان': 'بيكان', 'البيكان': 'بيكان',
-            'فول سوداني': 'فول سوداني',
-            'سمسم': 'سمسم', 'السمسم': 'سمسم',
-        }
-        
-        # English sample types
-        self.english_sample_types = {
-            'cucumber': 'خيار', 'tomato': 'طماطم', 'eggplant': 'باذنجان',
-            'aubergine': 'باذنجان', 'pepper': 'فلفل', 'zucchini': 'كوسة',
-            'squash': 'كوسة', 'carrot': 'جزر', 'lettuce': 'خس',
-            'parsley': 'بقدونس', 'spinach': 'سبانخ', 'potato': 'بطاطس',
-            'beans': 'فاصوليا', 'okra': 'بامية', 'broccoli': 'بروكلي',
-            'onion': 'بصل', 'arugula': 'جرجير', 'rocket': 'جرجير',
-            'cauliflower': 'زهرة', 'dill': 'شبت', 'coriander': 'كزبرة',
-            'cilantro': 'كزبرة', 'molokhia': 'ملوخية', 'mint': 'نعناع',
-            'strawberry': 'فراولة', 'grape': 'عنب', 'apple': 'تفاح',
-            'orange': 'برتقال', 'pomegranate': 'رمان', 'pear': 'كمثرى',
-            'lemon': 'ليمون', 'lime': 'ليمون', 'berry': 'توت',
-            'date': 'تمر', 'dates': 'تمر', 'wheat': 'قمح',
-            'rice': 'رز', 'corn': 'ذرة', 'lentil': 'عدس',
-            'flour': 'دقيق', 'oat': 'شوفان', 'oats': 'شوفان',
-            'cumin': 'كمون', 'thyme': 'زعتر', 'spices': 'بهارات',
-            'clove': 'قرنفل', 'cardamom': 'هيل', 'anise': 'يانسون',
-            'fennel': 'شمر', 'almond': 'لوز', 'pistachio': 'فستق',
-            'cashew': 'كاجو', 'hazelnut': 'بندق', 'pecan': 'بيكان',
-            'peanut': 'فول سوداني', 'peanuts': 'فول سوداني', 'sesame': 'سمسم',
-            'nuts': 'مكسرات',
-        }
-        
-        # Neighborhoods
-        self.neighborhood_patterns = {
-            'الاسكان': 'الإسكان', 'الإسكان': 'الإسكان', 'اسكان': 'الإسكان',
-            'الصفراء': 'الصفراء', 'صفراء': 'الصفراء',
-            'الموطأ': 'الموطأ', 'موطأ': 'الموطأ',
-            'الريان': 'الريان', 'ريان': 'الريان',
-            'النخيل': 'النخيل', 'نخيل': 'النخيل',
-            'الخليج': 'الخليج', 'خليج': 'الخليج',
-            'الفيصلية': 'الفيصلية', 'فيصلية': 'الفيصلية',
-            'النهضة': 'النهضة', 'نهضة': 'النهضة',
-            'السلام': 'السلام', 'سلام': 'السلام',
-            'الشفاء': 'الشفاء', 'شفاء': 'الشفاء',
-            'المنتزه': 'المنتزه', 'منتزه': 'المنتزه',
-            'العليا': 'العليا', 'عليا': 'العليا',
-            'الضاحي': 'الضاحي',
-            'الورود': 'الورود', 'ورود': 'الورود',
-            'المروج': 'المروج', 'مروج': 'المروج',
-            'البساتين': 'البساتين', 'بساتين': 'البساتين',
-            'الهلال': 'الهلال', 'هلال': 'الهلال',
-            'الأخضر': 'الأخضر', 'الاخضر': 'الأخضر', 'اخضر': 'الأخضر',
-            'الروضة': 'الروضة', 'روضة': 'الروضة',
-            'الفلاح': 'الفلاح', 'فلاح': 'الفلاح',
-            'الجردة': 'الجردة',
-            'الأفق': 'الأفق', 'الافق': 'الأفق',
-            'السالمية': 'السالمية', 'سالمية': 'السالمية',
-            'الفايزية': 'الفايزية',
-            'الشقة': 'الشقة',
-            'المنار': 'المنار', 'منار': 'المنار',
-        }
-        
-        # Pesticide mappings (expanded)
-        self.arabic_pesticide_map = {
-            # Common pesticides with multiple Arabic spellings
-            'البابروفيزن': 'buprofezin', 'بابروفيزن': 'buprofezin', 'بوبروفيزين': 'buprofezin',
-            'البايفنثرن': 'bifenthrin', 'بايفنثرين': 'bifenthrin', 'بايفنثرن': 'bifenthrin',
-            'الكلوربيريفوس': 'chlorpyrifos', 'كلوربيريفوس': 'chlorpyrifos',
-            'الايميداكلوبريد': 'imidacloprid', 'إيميداكلوبريد': 'imidacloprid', 
-            'ايميداكلوبرايد': 'imidacloprid', 'اميداكلوبريد': 'imidacloprid',
-            'الاسيتاميبريد': 'acetamiprid', 'اسيتاميبريد': 'acetamiprid', 'اسيتامبريد': 'acetamiprid',
-            'الازوكسيستروبين': 'azoxystrobin', 'ازوكسيستروبين': 'azoxystrobin',
-            'الدلتاميثرين': 'deltamethrin', 'دلتاميثرين': 'deltamethrin', 'دلتامثرين': 'deltamethrin',
-            'السايبرمثرين': 'cypermethrin', 'سايبرمثرين': 'cypermethrin', 'سيبرمثرين': 'cypermethrin',
-            'الثياميثوكسام': 'thiamethoxam', 'ثياميثوكسام': 'thiamethoxam',
-            'البروفينوفوس': 'profenofos', 'بروفينوفوس': 'profenofos',
-            'الميتالاكسيل': 'metalaxyl', 'ميتالاكسيل': 'metalaxyl',
-            'الكاربندازيم': 'carbendazim', 'كاربندازيم': 'carbendazim',
-            'الابامكتين': 'abamectin', 'ابامكتين': 'abamectin',
-            'الفيبرونيل': 'fipronil', 'فيبرونيل': 'fipronil', 'فبرونيل': 'fipronil',
-            'الايثيون': 'ethion', 'ايثيون': 'ethion', 'الايثون': 'ethion',
-            'لامدا سيهالوثرين': 'lambda-cyhalothrin', 'لامدا': 'lambda-cyhalothrin',
-            'الديميثويت': 'dimethoate', 'ديميثويت': 'dimethoate',
-            'الميثوميل': 'methomyl', 'ميثوميل': 'methomyl',
-            'البروكونازول': 'propiconazole', 'بروكونازول': 'propiconazole',
-            'التيبوكونازول': 'tebuconazole', 'تيبوكونازول': 'tebuconazole',
-            'السبينوساد': 'spinosad', 'سبينوساد': 'spinosad',
-            'الكلورانترانيليبرول': 'chlorantraniliprole', 'كلورانترانيليبرول': 'chlorantraniliprole',
-        }
+        self.sample_types = SAMPLE_CORRECTIONS
+        self.english_sample_types = SAMPLE_EN_TO_AR
+        self.neighborhood_patterns = NEIGHBORHOOD_CORRECTIONS
+        self.arabic_pesticide_map = PESTICIDE_AR_TO_EN
     
     def _get_connection(self) -> duckdb.DuckDBPyConnection:
         """Get database connection"""
         return duckdb.connect(self.db_path, read_only=True)
     
     def _normalize_query(self, query: str) -> str:
-        """
-        تطبيع الاستعلام - تحويل اللهجات المختلفة للفصحى
-        Normalize query - convert dialects to standard Arabic
-        """
-        # Step 1: Apply dialect synonyms
+        \"\"\"Normalize query: apply dialect synonyms then convert Arabic numerals.
+
+        Dialect synonyms are engine-specific (defined in _load_mappings).
+        Numeral conversion uses the centralized normalize_arabic_query().
+        \"\"\"
+        # Step 1: Apply dialect synonyms (engine-specific)
         for dialect, standard in self.dialect_synonyms.items():
             query = query.replace(dialect, standard)
-        
-        # Step 2: Arabic numerals conversion
-        num_map = {
-            '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
-            '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
-            # Arabic number words
-            'واحد': '1', 'واحده': '1', 'واحدة': '1',
-            'اثنين': '2', 'اتنين': '2', 'ثنتين': '2',
-            'ثلاثة': '3', 'ثلاث': '3', 'تلاتة': '3', 'تلات': '3',
-            'اربعة': '4', 'أربعة': '4', 'اربع': '4', 'أربع': '4',
-            'خمسة': '5', 'خمس': '5',
-            'ستة': '6', 'ست': '6',
-            'سبعة': '7', 'سبع': '7',
-            'ثمانية': '8', 'ثماني': '8', 'تمانية': '8', 'تماني': '8',
-            'تسعة': '9', 'تسع': '9',
-            'عشرة': '10', 'عشر': '10',
-        }
-        for ar, en in num_map.items():
-            query = query.replace(ar, en)
-        
-        return query
+        # Step 2: Convert Arabic numerals & number words (centralized)
+        return normalize_arabic_query(query)
     
     def _detect_sample_types(self, query: str) -> List[str]:
         """كشف أنواع العينات"""

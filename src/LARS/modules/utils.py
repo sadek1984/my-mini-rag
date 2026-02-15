@@ -4,6 +4,11 @@ import numpy as np
 import os
 import duckdb
 from scipy.stats import f_oneway
+from modules.data_access import (
+    load_dataframe as load_data_from_path,
+    get_duckdb_read as get_duckdb_connection,
+    get_duckdb_write as get_duckdb_connection_write,
+)
 
 def map_season_names(df):
     """
@@ -94,37 +99,3 @@ def perform_anova_analysis(df, group_by, target_col='reading'):
             'success': False,
             'error': str(e)
         }
-
-def load_data_from_path():
-    """
-    Helper to load data from standard paths.
-    """
-    possible_paths = [
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'processed_data_with_neighborhood.xlsx'),
-        'data/processed_data_with_neighborhood.xlsx',
-        'src/LARS/data/processed_data_with_neighborhood.xlsx',
-        '/app/src/LARS/data/processed_data_with_neighborhood.xlsx'
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            try:
-                if path.endswith('.csv'):
-                    return pd.read_csv(path)
-                elif path.endswith(('.xlsx', '.xls')):
-                    return pd.read_excel(path)
-            except Exception as e:
-                print(f"Error loading {path}: {e}")
-                continue
-    return None
-
-def get_duckdb_connection():
-    """Get read-only connection to DuckDB"""
-    # Assuming the db is in the LARS directory (parent of modules)
-    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lars_data.duckdb')
-    return duckdb.connect(database=db_path, read_only=True)
-
-def get_duckdb_connection_write():
-    """Get write connection to DuckDB"""
-    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lars_data.duckdb')
-    return duckdb.connect(database=db_path, read_only=False)

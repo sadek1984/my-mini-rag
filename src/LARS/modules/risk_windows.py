@@ -15,6 +15,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict, List, Any, Optional
 import re
+from modules.mappings import COMMODITY_TO_ARABIC
 
 # Import risk assessment functions
 try:
@@ -270,28 +271,6 @@ def show_monthly_iqr_trend(residue_data: List[Dict[str, Any]]):
     # Summary Info
     peak_month = trend_df.loc[trend_df['avg_iqr'].idxmax()]
     st.info(f"💡 **Peak Contamination:** {peak_month['الشهر (Month)']} (Avg IqR: {peak_month['avg_iqr']:.3f})")
-
-
-# Reverse mapping: English commodity to Arabic sample name
-COMMODITY_TO_ARABIC = {
-    'Tomato': 'طماطم',
-    'Cucumber': 'خيار',
-    'Pepper': 'فلفل',
-    'Eggplant': 'باذنجان',
-    'Zucchini': 'كوسة',
-    'Beans': 'فاصوليا',
-    'Okra': 'بامية',
-    'Lettuce': 'خس',
-    'Parsley': 'بقدونس',
-    'Coriander': 'كزبرة',
-    'Mint': 'نعناع',
-    'Leafy Greens': 'ورقيات',
-    'Cabbage': 'ملفوف',
-    'Root Vegetables': 'جزر',
-    'Total Vegetables': '',  # No filter for total
-    'Total Fruits': '',
-}
-
 
 """
 INSTRUCTIONS FOR UPDATING risk_windows.py

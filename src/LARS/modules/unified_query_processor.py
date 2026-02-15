@@ -58,12 +58,16 @@ class UnifiedQueryProcessor:
                 self.llm = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
             except:
                 self.llm = None
-        
-        # Load entity mappings
-        self.sample_types = self._load_sample_mappings()
-        self.pesticides = self._load_pesticide_mappings()
-        self.neighborhoods = self._load_neighborhood_mappings()
-        
+        self.sample_types = {
+            'ar_to_pattern': SAMPLE_CORRECTIONS,
+            'en_to_ar': SAMPLE_EN_TO_AR,
+        }
+        self.pesticides = {
+            'ar_to_en': PESTICIDE_AR_TO_EN,
+            'en_variants': {},  # Keep if you need English variant matching
+        }
+        self.neighborhoods = NEIGHBORHOOD_CORRECTIONS
+
         # SQL Templates
         self.sql_templates = self._load_sql_templates()
         
@@ -83,7 +87,7 @@ class UnifiedQueryProcessor:
         print(f"🔍 Processing query: {query[:100]}...")
         
         # Normalize query
-        query_normalized = self._normalize_query(query)
+        query_normalized = normalize_arabic_query(query)
         
         # ============================================================
         # Layer 1: Quick Pattern Matching
@@ -991,66 +995,14 @@ Generate ONLY the SQL:"""
             query = query.replace(word, num)
         
         return query
-    
-    def _load_sample_mappings(self) -> Dict:
-        """تحميل خرائط العينات"""
-        return {
-            'ar_to_pattern': {
-                'طماطم': 'طماطم', 'الطماطم': 'طماطم', 'طماطة': 'طماطم',
-                'خيار': 'خيار', 'الخيار': 'خيار',
-                'كوسة': 'كوسة', 'كوسا': 'كوسة', 'الكوسة': 'كوسة', 'الكوسا': 'كوسة',
-                'فلفل': 'فلفل', 'الفلفل': 'فلفل',
-                'باذنجان': 'باذنجان', 'الباذنجان': 'باذنجان',
-                'فاصوليا': 'فاصوليا', 'فصوليا': 'فاصوليا', 'فصولية': 'فاصوليا',
-                'هيل': 'هيل', 'الهيل': 'هيل', 'هيل هندي': 'هيل',
-                'فستق': 'فستق', 'الفستق': 'فستق',
-                'توابل': 'توابل', 'التوابل': 'توابل', 'بهارات': 'توابل',
-                'مكسرات': 'مكسرات', 'المكسرات': 'مكسرات',
-            },
-            'en_to_ar': {
-                'tomato': 'طماطم', 'tomatoes': 'طماطم',
-                'cucumber': 'خيار', 'cucumbers': 'خيار',
-                'zucchini': 'كوسة', 'squash': 'كوسة',
-                'pepper': 'فلفل', 'peppers': 'فلفل',
-                'eggplant': 'باذنجان', 'aubergine': 'باذنجان',
-                'beans': 'فاصوليا', 'bean': 'فاصوليا',
-                'cardamom': 'هيل',
-                'pistachio': 'فستق', 'pistachios': 'فستق',
-                'spices': 'توابل', 'spice': 'توابل',
-                'nuts': 'مكسرات',
-            }
-        }
-    
-    def _load_pesticide_mappings(self) -> Dict:
-        """تحميل خرائط المبيدات"""
-        return {
-            'ar_to_en': {
-                'البايفنثرن': 'bifenthrin', 'بايفنثرن': 'bifenthrin', 'بيفنثرين': 'bifenthrin',
-                'الفيبرونيل': 'fipronil', 'فيبرونيل': 'fipronil',
-                'الكلوربيريفوس': 'chlorpyrifos', 'كلوربيريفوس': 'chlorpyrifos',
-                'الايميداكلوبريد': 'imidacloprid', 'ايميداكلوبريد': 'imidacloprid', 'ايميداكلوبرايد': 'imidacloprid',
-                'البابروفيزن': 'buprofezin', 'بابروفيزن': 'buprofezin', 'بوبروفيزين': 'buprofezin',
-                'الايثيون': 'ethion', 'ايثيون': 'ethion',
-                'دلتامثرين': 'deltamethrin', 'الدلتامثرين': 'deltamethrin',
-                'سيبرمثرين': 'cypermethrin', 'السيبرمثرين': 'cypermethrin',
-                'ثياميثوكسام': 'thiamethoxam', 'الثياميثوكسام': 'thiamethoxam',
-                'كاربندازيم': 'carbendazim', 'الكاربندازيم': 'carbendazim',
-                'ابامكتين': 'abamectin', 'الابامكتين': 'abamectin',
-            },
-            'en_variants': {
-                'bifenthrin': ['bifenthrin', 'bifenazate'],
-                'fipronil': ['fipronil'],
-                'chlorpyrifos': ['chlorpyrifos', 'chlorpyriphos'],
-                'imidacloprid': ['imidacloprid', 'imidaclopride', 'imidaclprid'],
-                'buprofezin': ['buprofezin', 'buprofuzin', 'bupro'],
-                'ethion': ['ethion'],
-                'deltamethrin': ['deltamethrin'],
-                'cypermethrin': ['cypermethrin'],
-                'thiamethoxam': ['thiamethoxam'],
-                'carbendazim': ['carbendazim'],
-                'abamectin': ['abamectin'],
-            }
-        }
+    from modules.mappings import (
+    SAMPLE_CORRECTIONS,
+    SAMPLE_AR_TO_EN,
+    SAMPLE_EN_TO_AR,
+    PESTICIDE_AR_TO_EN,
+    NEIGHBORHOOD_CORRECTIONS,
+    normalize_arabic_query,
+)
     
     def _load_neighborhood_mappings(self) -> Dict:
         """تحميل خرائط الأحياء"""
