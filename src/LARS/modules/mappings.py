@@ -143,6 +143,54 @@ for _ar, _en in PESTICIDE_AR_TO_EN.items():
 
 
 # ============================================================================
+# PESTICIDE VARIANTS: Canonical English → List of Database Typos/Variants
+# ============================================================================
+# Used to ensure queries find all records, even those with typos in the DB.
+
+PESTICIDE_VARIANTS: Dict[str, List[str]] = {
+    # Buprofezin (Confirmed typos)
+    "buprofezin": ["buprofezin", "buprofuzin", "buprofuzibn"],
+    
+    # Detected potential typos
+    "chlorantraniliprole": ["chlorantraniliprole", "chlorantraniliprle", "chlorantraniliproel"],
+    "chlorpyrifos": ["chlorpyrifos", "chlorpyriphos"],
+    "clothianidin": ["clothianidin", "clothiandin", "clothindin"],
+    "cyantraniliprole": ["cyantraniliprole", "cyanantraniliprole"],
+    "cypermethrin": ["cypermethrin", "cyprtmethrin"],
+    "deltamethrin": ["deltamethrin", "deltamithrin"],
+    "etofenprox": ["etofenprox", "etofenoprox"],
+    "fenhexamid": ["fenhexamid", "fenhexamide"],
+    "fenpyroximate": ["fenpyroximate", "fenpyroxymate"],
+    "fluopyram": ["fluopyram", "fluoptram"],
+    "imidacloprid": ["imidacloprid", "imidaclopride", "imidaclprid"],
+    "mandipropamid": ["mandipropamid", "mandiprobamid"],
+    "metalaxyl": ["metalaxyl", "metalazyl"],
+    "methoxyfenozide": ["methoxyfenozide", "methoxyfenozid"],
+    "myclobutanil": ["myclobutanil", "myclobutanyl"],
+    "piperonyl butoxide": ["piperonyl butoxide", "pipronil butoxid", "pipronil-butoxid"],
+    "abamectin": ["abamectin", "abmectin"],
+    "acetamiprid": ["acetamiprid", "acetamiprod"],
+    "azoxystrobin": ["azoxystrobin", "azoxystrobn"],
+}
+
+def get_pesticide_variants(canonical_name: str) -> List[str]:
+    """Get all database variants for a pesticide name.
+    
+    Args:
+        canonical_name: The correct English name (e.g. 'buprofezin').
+        
+    Returns:
+        List of strings including the canonical name and any known typos.
+        e.g. ['buprofezin', 'buprofuzin', 'buprofuzibn']
+    """
+    name = canonical_name.lower().strip()
+    if name in PESTICIDE_VARIANTS:
+        return PESTICIDE_VARIANTS[name]
+    return [name] 
+
+
+
+# ============================================================================
 # KNOWN ARABIC PESTICIDE NAMES (for fuzzy STT matching)
 # ============================================================================
 

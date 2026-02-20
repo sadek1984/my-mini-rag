@@ -26,6 +26,7 @@ from modules.mappings import (
     NEIGHBORHOOD_CORRECTIONS,
     PESTICIDE_AR_TO_EN,
     normalize_arabic_query,
+    get_pesticide_variants,
 )
 
 # Semantic pattern recognizer (optional - graceful fallback if not available)
@@ -36,12 +37,23 @@ except ImportError:
     HAS_SEMANTIC = False
     get_semantic_recognizer = lambda: None
 
+# Intent-based query router (optional - graceful fallback if not available)
+try:
+    from modules.intent_router import IntentRouter, Intent, QueryEntities
+    HAS_INTENT_ROUTER = True
+except ImportError:
+    HAS_INTENT_ROUTER = False
+    IntentRouter = None
+    Intent = None
+    QueryEntities = None
+
 # Database path
 DB_PATH = Path(__file__).parent.parent / "data" / "lars_data.duckdb"
 
 # LLM Configuration
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:4b-it-qat")
+
 
 
 class CoreQueryEngine:
@@ -81,6 +93,14 @@ class CoreQueryEngine:
             print("✅ Semantic Pattern Recognizer loaded!")
         else:
             print("ℹ️ Semantic Pattern Recognizer not available, using keyword matching only")
+        
+        # Initialize intent-based query router (optional)
+        if HAS_INTENT_ROUTER:
+            self.router = IntentRouter(dialect_synonyms=self.dialect_synonyms)
+            print("✅ Intent Router loaded!")
+        else:
+            self.router = None
+            print("ℹ️ Intent Router not available, using pattern matching only")
     
     def _init_llm(self):
         """Initialize LLM client for fallback queries"""
@@ -123,13 +143,13 @@ class CoreQueryEngine:
             self.available_neighborhoods = []
     
     def _load_mappings(self):
-        \"\"\"Load query mappings.
+        """Load query mappings.
 
         Dialect synonyms and action/limit keywords are defined here
         because they are specific to the query engine. All entity
         dictionaries (samples, pesticides, neighborhoods) come from
         the centralized ``modules.mappings`` module.
-        \"\"\"
+        """
         # ============================================================
         # Egyptian & Saudi Arabic Dialect Synonyms (KEEP — engine-specific)
         # ============================================================
@@ -191,6 +211,19 @@ class CoreQueryEngine:
         ]
 
         # ============================================================
+        # Statistics keywords (KEEP — engine-specific)
+        # ============================================================
+        self.stats_keywords = {
+            'max': ['اعلى', 'أعلى', 'اكبر', 'أكبر', 'max', 'maximum', 'highest'],
+            'min': ['اقل', 'أقل', 'اصغر', 'أصغر', 'min', 'minimum', 'lowest'],
+            'avg': ['متوسط', 'المتوسط', 'معدل', 'average', 'mean', 'avg'],
+            'median': ['الوسيط', 'وسيط', 'median'],
+            'range': ['المدى', 'المدي', 'نطاق', 'range', 'spread'],
+            'count': ['عدد', 'تكرار', 'count', 'frequency'],
+            'unique': ['فريدة', 'فريد', 'مميزة', 'unique', 'distinct'],
+        }
+
+        # ============================================================
         # Entity dictionaries — FROM CENTRALIZED MAPPINGS
         # ============================================================
         self.sample_types = SAMPLE_CORRECTIONS
@@ -203,11 +236,11 @@ class CoreQueryEngine:
         return duckdb.connect(self.db_path, read_only=True)
     
     def _normalize_query(self, query: str) -> str:
-        \"\"\"Normalize query: apply dialect synonyms then convert Arabic numerals.
+        """Normalize query: apply dialect synonyms then convert Arabic numerals.
 
         Dialect synonyms are engine-specific (defined in _load_mappings).
         Numeral conversion uses the centralized normalize_arabic_query().
-        \"\"\"
+        """
         # Step 1: Apply dialect synonyms (engine-specific)
         for dialect, standard in self.dialect_synonyms.items():
             query = query.replace(dialect, standard)
@@ -522,6 +555,92 @@ class CoreQueryEngine:
             logging.warning(f"Error in semantic routing: {e}")
             return None
     
+    def _dispatch_by_intent(self, intent, entities) -> Optional[Tuple[str, Optional[pd.DataFrame]]]:
+        """Route an intent + entities to the correct handler.
+        
+        Args:
+            intent: Intent enum from IntentRouter
+            entities: QueryEntities object with extracted information
+        
+        Returns:
+            (response_text, dataframe) tuple or None if intent is UNKNOWN
+        
+        The handlers are the EXISTING methods — no changes needed to them.
+        This dispatcher just translates intent+entities into method calls.
+        """
+        if not HAS_INTENT_ROUTER or intent is None:
+            return None
+        
+        try:
+            query = entities.normalized_query
+            
+            # ── Neighborhood + Category analysis ──
+            if intent == Intent.COMPREHENSIVE_NEIGHBORHOOD or intent == Intent.LIST_TYPES_IN_NEIGHBORHOOD:
+                return self._handle_comprehensive_neighborhood(
+                    query, entities.samples, entities.neighborhoods
+                )
+            
+            if intent == Intent.NEIGHBORHOOD_PESTICIDES:
+                return self._handle_neighborhood_pesticides(
+                    entities.neighborhoods, entities.wants_separately
+                )
+            
+            if intent == Intent.NEIGHBORHOOD_RANKING:
+                return self._handle_neighborhood_ranking()
+            
+            # ── N pesticides ──
+            if intent == Intent.COUNT_N_PESTICIDES and entities.n_pesticides:
+                if len(entities.n_pesticides) > 1 and entities.wants_separately:
+                    return self._handle_multiple_n_pesticides(entities.n_pesticides, entities.samples)
+                return self._handle_n_pesticides(entities.n_pesticides[-1], entities.samples)
+            
+            # ── Pesticide queries ──
+            if intent == Intent.FIND_PESTICIDE_IN_SAMPLE and entities.pesticide and entities.samples:
+                if entities.wants_limit_breakdown:
+                    return self._handle_sample_pesticide_limit(
+                        entities.samples, entities.pesticide, 
+                        entities.is_above_limit if entities.is_above_limit is not None else True
+                    )
+                return self._handle_find_pesticide_in_sample(entities.pesticide, entities.samples)
+            
+            if intent == Intent.FIND_PESTICIDE_ALL and entities.pesticide:
+                return self._handle_find_pesticide_all(entities.pesticide)
+            
+            if intent == Intent.LIST_PESTICIDES_IN_SAMPLE and entities.samples:
+                return self._handle_list_pesticides(entities.samples)
+            
+            if intent == Intent.PESTICIDE_STATISTICS and entities.pesticide:
+                return self._handle_pesticide_stats(
+                    entities.pesticide, entities.samples, entities.stat_types
+                )
+            
+            # ── Sample counting ──
+            if intent == Intent.COUNT_SAMPLES_LIMIT and entities.samples:
+                return self._handle_count_samples_limit(
+                    entities.samples, entities.neighborhoods, entities.is_above_limit
+                )
+            
+            if intent == Intent.COUNT_SAMPLES_SIMPLE and entities.samples:
+                return self._handle_simple_sample_count(entities.samples, entities.neighborhoods)
+            
+            if intent == Intent.UNIQUE_COUNT and entities.samples:
+                return self._handle_unique_samples_count(entities.samples, entities.neighborhoods)
+            
+            # ── Other ──
+            if intent == Intent.COMPREHENSIVE_ANALYSIS and entities.samples:
+                return self._handle_comprehensive_analysis(entities.samples)
+            
+            if intent == Intent.FACILITY_SEARCH:
+                return self._handle_facility_search(query)
+            
+            if intent == Intent.RECIPIENT_SEARCH:
+                return self._handle_facility_search(query)  # Same handler for now
+        
+        except Exception as ex:
+            logging.warning(f"Intent dispatch error for {intent}: {ex}")
+        
+        return None  # UNKNOWN → falls through to patterns/LLM
+    
     def process(self, query: str) -> Tuple[str, Optional[pd.DataFrame]]:
         """
         معالجة الاستعلام وإرجاع (نص الاستجابة, DataFrame)
@@ -552,6 +671,23 @@ class CoreQueryEngine:
                 if result is not None:
                     return result
         
+        # ============================================================
+        # NEW: Intent-Based Router (Second Priority)
+        # Flexible intent+entity matching that handles query variations.
+        # Falls back to pattern matching if intent is UNKNOWN.
+        # ============================================================
+        if self.router:
+            intent, entities = self.router.analyze(query)
+            
+            if intent != Intent.UNKNOWN:
+                logging.info(f"🎯 Intent: {intent.name} | samples={entities.samples} "
+                             f"neighborhoods={entities.neighborhoods} category={entities.category} "
+                             f"pesticide={entities.pesticide}")
+                
+                result = self._dispatch_by_intent(intent, entities)
+                if result is not None:
+                    return result
+        
         
         # ============================================================
         # Pattern 0: Comprehensive neighborhood + sample type analysis
@@ -571,6 +707,24 @@ class CoreQueryEngine:
         if is_comprehensive_hood_query:
             return self._handle_comprehensive_neighborhood(query, detected_samples, detected_neighborhoods)
         
+        # ============================================================
+        # Pattern 0B: Category/types in neighborhood (WITHOUT limit keywords)
+        # "ما هي انواع التوابل في حي الاسكان"
+        # "التوابل في حي الريان"  
+        # "انواع الخضار في الاسكان"
+        # This catches queries that Pattern 0 misses because they
+        # don't mention limits. We route to the SAME handler — it
+        # already shows types + counts + limits in its output.
+        # ============================================================
+        category_names = ['توابل', 'التوابل', 'بهارات', 'خضار', 'الخضار', 'خضروات',
+                         'فاكهة', 'فواكه', 'ورقيات', 'الورقيات', 'مكسرات', 'المكسرات',
+                         'حبوب', 'الحبوب']
+        has_category = any(cat in query for cat in category_names)
+        has_type_question = any(kw in query for kw in category_keywords)  # "انواع", "الموجودة", etc.
+        
+        if (has_category or (has_type_question and detected_samples)) and detected_neighborhoods:
+            return self._handle_comprehensive_neighborhood(query, detected_samples, detected_neighborhoods)
+        
         # Continue with other patterns if not comprehensive
         con = self._get_connection()
         
@@ -578,12 +732,20 @@ class CoreQueryEngine:
         # Pattern 1: Samples with N pesticides (supports multiple counts)
         # "عدد العينات التي تحتوي على 6 مبيدات"
         # "عدد العينات التي تحتوي على 1 و 2 و 3 مبيدات كل على حده"
+        # "العينات الخالية من المبيدات والتي تحتوي على مبيد واحد وثلاث مبيدات"
         # ============================================================
         pesticide_count_keywords = ['مبيد', 'مبيدات', 'pesticide', 'pesticides']
+        zero_pesticide_keywords = ['خالية', 'الخالية', 'بدون مبيدات', 'لا تحتوي',
+                                   'خاليه', 'نظيفة', 'سليمة تماما', 'zero pesticide']
+        has_zero_request = any(kw in query for kw in zero_pesticide_keywords)
         
-        if any(kw in query for kw in pesticide_count_keywords):
+        if any(kw in query for kw in pesticide_count_keywords) or has_zero_request:
             # Extract all numbers from the query
             all_numbers = re.findall(r'(\d+)', query_normalized)
+            
+            # ★ إذا طلب "الخالية" أضف 0 للقائمة (بعد تعريف all_numbers)
+            if has_zero_request and '0' not in all_numbers:
+                all_numbers.insert(0, '0')
             
             if all_numbers:
                 # Check if it's asking for multiple counts ("كل علي حده" or "و")
@@ -595,14 +757,13 @@ class CoreQueryEngine:
                 
                 if (is_multiple or has_multiple_with_and) and len(all_numbers) > 1:
                     # Handle multiple pesticide counts
-                    pesticide_counts = [int(n) for n in all_numbers if int(n) <= 50]  # Filter reasonable numbers
+                    pesticide_counts = [int(n) for n in all_numbers if int(n) <= 50]
                     if pesticide_counts:
                         return self._handle_multiple_n_pesticides(pesticide_counts, detected_samples)
                 else:
                     # Single count - get the most relevant number
-                    # Prefer numbers mentioned near "مبيد" keyword
-                    n_pesticides = int(all_numbers[-1])  # Last number is usually the count
-                    if 1 <= n_pesticides <= 50:
+                    n_pesticides = int(all_numbers[-1])
+                    if 0 <= n_pesticides <= 50:  # ★ كان 1 <= أصبح 0 <=
                         return self._handle_n_pesticides(n_pesticides, detected_samples)
         
         # ============================================================
@@ -843,6 +1004,8 @@ class CoreQueryEngine:
     
     def _handle_n_pesticides(self, n: int, samples: List[str]) -> Tuple[str, pd.DataFrame]:
         """عينات بعدد N مبيدات"""
+        if n == 0:
+            return self._handle_multiple_n_pesticides([0], samples)
         con = self._get_connection()
         
         sample_filter = ""
@@ -887,98 +1050,127 @@ class CoreQueryEngine:
             response = f"⚠️ لم أجد عينات {sample_display} بـ {n} مبيدات"
         
         return response, df
-    
     def _handle_multiple_n_pesticides(self, counts: List[int], samples: List[str]) -> Tuple[str, pd.DataFrame]:
-        """
-        عينات بأعداد مختلفة من المبيدات (كل على حده)
-        "عدد العينات التي تحتوي على 1 و 2 و 3 مبيدات كل على حده"
-        """
-        con = self._get_connection()
-        
-        sample_filter = ""
-        if samples:
-            conditions = [f"\"اسم العينة\" LIKE '%{s}%'" for s in samples]
-            sample_filter = f"AND ({' OR '.join(conditions)})"
-        
-        # Build dynamic SQL to count samples for each pesticide count
-        count_cases = ", ".join([
-            f"SUM(CASE WHEN pesticide_count = {n} THEN 1 ELSE 0 END) as \"عينات_{n}_مبيد\""
-            for n in sorted(counts)
-        ])
-        
-        sql = f"""
-        WITH sample_pesticide_counts AS (
-            SELECT 
-                "كود العينة" as sample_code,
-                "اسم العينة" as sample_name,
-                COUNT(*) as pesticide_count
+    """
+    عينات بأعداد مختلفة من المبيدات (يشمل 0 = خالية)
+    يدعم: "العينات الخالية من المبيدات و التي تحتوي علي مبيد واحد و ثلاث مبيدات"
+    """
+    con = self._get_connection()
+    
+    sample_filter = ""
+    if samples:
+        conditions = [f'"اسم العينة" LIKE \'%{s}%\'' for s in samples]
+        sample_filter = f"AND ({' OR '.join(conditions)})"
+    
+    has_zero = 0 in counts
+    non_zero_counts = [c for c in counts if c > 0]
+    
+    all_dfs = []
+    summary_rows = []
+    details_responses = []
+    
+    # ── Part A: Zero-pesticide samples ──
+    if has_zero:
+        zero_sql = f"""
+        WITH detected_samples AS (
+            SELECT DISTINCT "كود العينة"
             FROM chemistry_tidy
-            WHERE is_detected = 1 
+            WHERE is_detected = 1
             AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
             {sample_filter}
-            GROUP BY "كود العينة", "اسم العينة"
         )
         SELECT 
-            sample_name as نوع_العينة,
-            {count_cases},
-            COUNT(*) as إجمالي_العينات
-        FROM sample_pesticide_counts
-        WHERE pesticide_count IN ({', '.join(map(str, counts))})
-        GROUP BY sample_name
-        ORDER BY إجمالي_العينات DESC
+            "كود العينة" as sample_code,
+            "اسم العينة" as sample_name,
+            0 as pesticide_count
+        FROM chemistry_tidy
+        WHERE "كود العينة" NOT IN (SELECT "كود العينة" FROM detected_samples)
+        {sample_filter}
+        GROUP BY "كود العينة", "اسم العينة"
+        ORDER BY "كود العينة" DESC
         """
+        zero_df = con.execute(zero_sql).df()
+        all_dfs.append(zero_df)
         
-        summary_df = con.execute(sql).df()
-        
-        # Also get detailed breakdown
-        detail_sql = f"""
-        WITH sample_pesticide_counts AS (
-            SELECT 
-                "كود العينة" as sample_code,
-                "اسم العينة" as sample_name,
-                COUNT(*) as pesticide_count
-            FROM chemistry_tidy
-            WHERE is_detected = 1 
-            AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
-            {sample_filter}
-            GROUP BY "كود العينة", "اسم العينة"
-        )
-        SELECT 
-            pesticide_count as عدد_المبيدات,
-            COUNT(*) as عدد_العينات,
-            GROUP_CONCAT(DISTINCT sample_name, ', ') as أنواع_العينات
-        FROM sample_pesticide_counts
-        WHERE pesticide_count IN ({', '.join(map(str, counts))})
-        GROUP BY pesticide_count
-        ORDER BY pesticide_count
-        """
-        
-        detail_df = con.execute(detail_sql).df()
-        con.close()
-        
-        sample_display = ' + '.join(samples) if samples else "جميع الأنواع"
-        counts_display = ' و '.join(map(str, sorted(counts)))
-        
-        if not detail_df.empty:
-            total_samples = int(detail_df['عدد_العينات'].sum())
+        if not zero_df.empty:
+            type_counts = zero_df['sample_name'].value_counts()
+            breakdown_parts = [f"{count} {name}" for name, count in type_counts.head(10).items()]
+            breakdown = "، ".join(breakdown_parts)
+            if len(type_counts) > 10:
+                breakdown += f"، و {len(type_counts) - 10} أنواع أخرى"
             
-            response = f"🔢 **عينات {sample_display} بأعداد مبيدات ({counts_display}) كل على حده:**\n\n"
-            response += f"✅ إجمالي: **{total_samples}** عينة\n\n"
-            
-            # Show breakdown for each count
-            response += "📊 **التفصيل:**\n"
-            for _, row in detail_df.iterrows():
-                n = int(row['عدد_المبيدات'])
-                count = int(row['عدد_العينات'])
-                types = row['أنواع_العينات']
-                response += f"• **{n} مبيد:** {count} عينة ({types})\n"
-            
-            response += "\n\n**جدول ملخص:**\n"
-            response += summary_df.to_markdown(index=False)
+            summary_rows.append({"عدد المبيدات": "0 (خالية)", "عدد العينات": len(zero_df)})
+            details_responses.append(
+                f"#### 🛡️ العينات الخالية من المبيدات (0 مبيد)\n\n"
+                f"- ✅ **العدد:** {len(zero_df)} عينة\n"
+                f"- 📋 **الأنواع:** {breakdown}\n"
+            )
         else:
-            response = f"⚠️ لم أجد عينات {sample_display} بأعداد مبيدات ({counts_display})"
+            details_responses.append("#### 🛡️ العينات الخالية\n\nلم أجد عينات خالية من المبيدات")
+    
+    # ── Part B: Non-zero pesticide counts ──
+    for n in sorted(non_zero_counts):
+        n_sql = f"""
+        SELECT 
+            "كود العينة" as sample_code,
+            "اسم العينة" as sample_name,
+            COUNT(*) as pesticide_count
+        FROM chemistry_tidy
+        WHERE is_detected = 1 
+        AND pesticide_name NOT IN ('NO DETECTION', 'NO DATA')
+        {sample_filter}
+        GROUP BY "كود العينة", "اسم العينة"
+        HAVING COUNT(*) = {n}
+        ORDER BY "كود العينة" DESC
+        """
+        n_df = con.execute(n_sql).df()
+        all_dfs.append(n_df)
         
-        return response, detail_df
+        label = "مبيد واحد" if n == 1 else f"{n} مبيدات"
+        icon = "🔹" if n == 1 else "🔸"
+        
+        if not n_df.empty:
+            type_counts = n_df['sample_name'].value_counts()
+            breakdown_parts = [f"{count} {name}" for name, count in type_counts.head(10).items()]
+            breakdown = "، ".join(breakdown_parts)
+            if len(type_counts) > 10:
+                breakdown += f"، و {len(type_counts) - 10} أنواع أخرى"
+            
+            summary_rows.append({"عدد المبيدات": n, "عدد العينات": len(n_df)})
+            details_responses.append(
+                f"#### {icon} العينات بـ {label}\n\n"
+                f"- ✅ **العدد:** {len(n_df)} عينة\n"
+                f"- 📋 **الأنواع:** {breakdown}\n"
+            )
+        else:
+            details_responses.append(f"#### {icon} العينات بـ {label}\n\nلم أجد عينات")
+    
+    con.close()
+    
+    # ── Summary table ──
+    summary_df = pd.DataFrame(summary_rows)
+    summary_df = summary_df.sort_values(by="عدد المبيدات" if "عدد المبيدات" in summary_df.columns else 0)
+    
+    # ── Build final response ──
+    counts_display = '، '.join(
+        ["الخالية (0)" if c == 0 else f"{c} مبيد" if c == 1 else f"{c} مبيدات" for c in sorted(counts)]
+    )
+    sample_display = ' + '.join(samples) if samples else "جميع الأنواع"
+    
+    response = f"## 📊 توزيع عينات {sample_display} حسب عدد المبيدات\n\n"
+    response += f"🔢 **المطلوب:** {counts_display}\n\n"
+    
+    if not summary_df.empty:
+        response += "### 📋 جدول ملخص\n\n"
+        response += summary_df.to_markdown(index=False)
+        response += "\n\n---\n\n"
+    
+    response += "### 🔍 تفاصيل كل فئة\n\n"
+    response += "\n\n---\n\n".join(details_responses)
+    
+    combined_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+    
+    return response, combined_df
     
     def _handle_count_samples_limit(self, samples: List[str], neighborhoods: List[str], 
                                      is_above: bool) -> Tuple[str, pd.DataFrame]:
@@ -1261,7 +1453,7 @@ class CoreQueryEngine:
             CASE WHEN is_compliant = 1 THEN 'مطابق' ELSE 'غير مطابق' END as الحالة
         FROM chemistry_tidy
         WHERE is_detected = 1 
-        AND pesticide_name ILIKE '%{pesticide}%'
+        AND pesticide_name IN ({', '.join([f"'{v}'" for v in get_pesticide_variants(pesticide)])})
         AND {sample_filter}
         ORDER BY concentration DESC
         LIMIT 50
@@ -1419,7 +1611,7 @@ class CoreQueryEngine:
             SUM(CASE WHEN is_above_limit = 1 THEN 1 ELSE 0 END) as التجاوزات
         FROM chemistry_tidy
         WHERE is_detected = 1
-        AND pesticide_name ILIKE '%{pesticide}%'
+        AND pesticide_name IN ({', '.join([f"'{v}'" for v in get_pesticide_variants(pesticide)])})
         {sample_filter}
         GROUP BY pesticide_name
         """
@@ -1541,7 +1733,7 @@ class CoreQueryEngine:
             ROUND(MAX(concentration), 4) as أعلى_تركيز
         FROM chemistry_tidy
         WHERE is_detected = 1
-        AND pesticide_name ILIKE '%{pesticide}%'
+        AND pesticide_name IN ({', '.join([f"'{v}'" for v in get_pesticide_variants(pesticide)])})
         GROUP BY "اسم العينة"
         ORDER BY عدد_الاكتشافات DESC
         LIMIT 50
@@ -1625,7 +1817,7 @@ class CoreQueryEngine:
             CASE WHEN is_compliant = 1 THEN 'مطابق' ELSE 'غير مطابق' END as الحالة
         FROM chemistry_tidy
         WHERE is_detected = 1
-        AND pesticide_name ILIKE '%{pesticide}%'
+        AND pesticide_name IN ({', '.join([f"'{v}'" for v in get_pesticide_variants(pesticide)])})
         ORDER BY concentration DESC
         LIMIT 100
         """
@@ -1741,7 +1933,6 @@ class CoreQueryEngine:
         
         return response, df
     
-        return response, df
     
     def _handle_sample_pesticide_limit(self, samples: List[str], pesticide: str, is_above: bool, 
                                         both: bool = False, limit_filter: str = None, limit_desc: str = None) -> Tuple[str, pd.DataFrame]:
@@ -1792,11 +1983,7 @@ class CoreQueryEngine:
             "الحى" as neighborhood
         FROM chemistry_tidy
         WHERE {sample_filter}
-        AND (
-            LOWER(pesticide_name) LIKE '%{pesticide_lower}%' 
-            OR pesticide_name_ar LIKE '%{pesticide}%'
-            {fuzzy_condition}
-        )
+        AND pesticide_name IN ({', '.join([f"'{v}'" for v in get_pesticide_variants(pesticide)])})
         AND is_detected = 1
         {limit_filter}
         ORDER BY is_above_limit DESC, concentration DESC
@@ -1818,10 +2005,7 @@ class CoreQueryEngine:
                 "الحى" as neighborhood
             FROM chemistry_tidy
             WHERE {sample_filter}
-            AND (
-                LOWER(pesticide_name) LIKE '%{pesticide_lower}%' 
-                {fuzzy_condition}
-            )
+            AND pesticide_name IN ({', '.join([f"'{v}'" for v in get_pesticide_variants(pesticide)])})
             AND is_detected = 1
             {limit_filter}
             ORDER BY is_above_limit DESC, concentration DESC

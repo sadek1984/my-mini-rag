@@ -15,6 +15,7 @@ from openai import OpenAI
 import google.generativeai as genai
 import random
 from modules.mappings import PESTICIDE_AR_TO_EN, translate_pesticide
+import logging
 
 # Import risk window components
 try:
@@ -367,6 +368,58 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
     [Logic Version: 2.1 - Enhanced Multi-Count & Arabic Word Support]
     """
     
+    # ================================================================
+    # PRIORITY 1: Try CoreQueryEngine (Pattern + Intent Router)
+    # Handles 95% of queries with pre-built handlers
+    # ================================================================
+    try:
+        from modules.core_query_engine import CoreQueryEngine
+        
+        # Initialize engine (cached in session state for performance)
+        if 'core_query_engine' not in st.session_state:
+            st.session_state.core_query_engine = CoreQueryEngine(enable_llm_fallback=False)
+        
+        engine = st.session_state.core_query_engine
+        
+        # Try to process with CoreQueryEngine
+        with st.spinner("🔍 Analyzing query..."):
+            response_text, result_df = engine.process(query)
+        
+        # If CoreQueryEngine handled it successfully
+        if result_df is not None and not result_df.empty:
+            st.success("✅ Query processed successfully!")
+            
+            # Display the response text
+            st.markdown(response_text)
+            
+            # Display the DataFrame
+            st.dataframe(result_df, use_container_width=True)
+            
+            # Offer download
+            csv = result_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Results (CSV)",
+                data=csv,
+                file_name="lars_results.csv",
+                mime="text/csv"
+            )
+            
+            return  # Success! Exit early
+        
+        elif "لم أتمكن من فهم" not in response_text and "I couldn't understand" not in response_text:
+            # CoreQueryEngine returned a text response (no DataFrame, but still valid)
+            st.markdown(response_text)
+            return
+    
+    except Exception as e:
+        # If CoreQueryEngine fails, fall through to LLM-based SQL generation
+        st.info(f"ℹ️ Falling back to AI SQL generation...")
+        import traceback
+        logging.debug(f"CoreQueryEngine error: {e}\n{traceback.format_exc()}")
+    
+    # ================================================================
+    # PRIORITY 2: Risk Assessment Windows
+    # ================================================================
     with st.spinner("🔄 Generating SQL query..."):
         try:
             # ===== RISK KEYWORD DETECTION =====

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import streamlit as st
+import logging
 
 # ── Internal modules ────────────────────────────────────────────
 from modules.api_service import API_BASE_URL, get_api_client
