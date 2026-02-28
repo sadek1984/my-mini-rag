@@ -123,7 +123,7 @@ find bifenthrin in all samples
 Find 'Buprofezin' more than 2 times the limit in tomato samples
 
 find non compliant samples with bifenthrin in cucumber samples 
-
+what tomato samples is non compliant with bifenthrin?
                         ـــــــــــــــــــــــــــــــــــــــ        
 
  ما عدد عينات الطماطم و الخيار و الكوسة كل علي حده
@@ -184,6 +184,8 @@ Show me violations by neighborhood
   احسب مؤشر الجودة لعينات الفلفل
 
   ماهي العينات التي تحتوي علي 10 مبيدات و صنف هذه المبيدات
+
+  what are the samples contain 10 pesticides?
 
 أعطني ملخص المجموعات الكيميائية لكل عينة تحتوي على أكثر من ٣ مبيدات
 

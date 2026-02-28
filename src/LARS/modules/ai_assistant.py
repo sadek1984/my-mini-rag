@@ -15,6 +15,8 @@ from openai import OpenAI
 import google.generativeai as genai
 import random
 from modules.mappings import PESTICIDE_AR_TO_EN, translate_pesticide
+# Bilingual translation utilities (Arabic ↔ English)
+from modules.translation_utils import detect_language, translate_dataframe, get_language_system_prompt
 import logging
 
 # Import risk window components
@@ -368,6 +370,10 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
     [Logic Version: 2.1 - Enhanced Multi-Count & Arabic Word Support]
     """
     
+    # === LANGUAGE DETECTION (runs once, used for all results in this function) ===
+    query_lang = detect_language(query)
+    lang_sql_instruction = get_language_system_prompt(query_lang)
+
     # ================================================================
     # PRIORITY 1: Try CoreQueryEngine (Pattern + Intent Router)
     # Handles 95% of queries with pre-built handlers
@@ -392,8 +398,9 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
             # Display the response text
             st.markdown(response_text)
             
-            # Display the DataFrame
-            st.dataframe(result_df, use_container_width=True)
+            # Display the DataFrame (auto-translated for English queries)
+            result_df_display = translate_dataframe(result_df, query_lang)
+            st.dataframe(result_df_display, use_container_width=True)
             
             # Offer download
             csv = result_df.to_csv(index=False).encode('utf-8')
@@ -856,7 +863,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                         *   ومنها **{total_below - total_clean}** عينة تحتوي على مبيدات ولكن ضمن الحدود المسموحة
                     """)
                     
-                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    st.dataframe(translate_dataframe(df, query_lang), use_container_width=True, hide_index=True)
                 else:
                     st.warning(f"⚠️ لم أجد عينات {category_name} في {hood_display}")
                 
@@ -975,14 +982,14 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
 
                 
                 # Try exact match
-                if detected_pesticide_name in mapping:
-                    english_pesticide_name = mapping[detected_pesticide_name]
+                if detected_pesticide_name in PESTICIDE_AR_TO_EN:
+                    english_pesticide_name = PESTICIDE_AR_TO_EN[detected_pesticide_name]
                 # Try with 'AL' prefix added
-                elif 'ال' + detected_pesticide_name in mapping:
-                    english_pesticide_name = mapping['ال' + detected_pesticide_name]
+                elif 'ال' + detected_pesticide_name in PESTICIDE_AR_TO_EN:
+                    english_pesticide_name = PESTICIDE_AR_TO_EN['ال' + detected_pesticide_name]
                 # Try with 'AL' prefix removed
-                elif detected_pesticide_name.startswith('ال') and detected_pesticide_name[2:] in mapping:
-                    english_pesticide_name = mapping[detected_pesticide_name[2:]]
+                elif detected_pesticide_name.startswith('ال') and detected_pesticide_name[2:] in PESTICIDE_AR_TO_EN:
+                    english_pesticide_name = PESTICIDE_AR_TO_EN[detected_pesticide_name[2:]]
                 
                 pesticide_search_term = english_pesticide_name if english_pesticide_name else detected_pesticide_name
                 
@@ -1074,7 +1081,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                     else:
                         st.success(f"✅ تم العثور على {len(df)} عينة")
                     
-                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    st.dataframe(translate_dataframe(df, query_lang), use_container_width=True, hide_index=True)
                 else:
                     st.warning(f"⚠️ لم يتم العثور على عينات {type_display} تحتوي على مبيد {detected_pesticide_name} {limit_desc}")
                 
@@ -1199,7 +1206,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 
                 if not pesticide_stats.empty:
                     # Highlight rows where ≥MRL > 0 (pesticides that caused exceedance)
-                    st.dataframe(pesticide_stats, use_container_width=True, hide_index=True)
+                    st.dataframe(translate_dataframe(pesticide_stats, query_lang), use_container_width=True, hide_index=True)
                     
                     # Show failing pesticides specifically
                     failing_pesticides = pesticide_stats[pesticide_stats['≥MRL'] > 0]
@@ -1298,7 +1305,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                     
                     st.success(f"✅ إجمالي العينات الفريدة: {total_samples} عينة — {total_above} عينة فوق الحد، {total_below} عينة تحت الحد")
                     st.caption("ملاحظة: العينة تُعتبر 'فوق الحد' إذا كان لديها مبيد واحد على الأقل متجاوز للحد المسموح")
-                    st.dataframe(result, use_container_width=True, hide_index=True)
+                    st.dataframe(translate_dataframe(result, query_lang), use_container_width=True, hide_index=True)
                 else:
                     st.warning(f"⚠️ لم يتم العثور على عينات {type_display}")
                 
@@ -1381,7 +1388,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                     
                     st.success(f"📌 **العينات {status_text}: {target_count}**")
                     st.caption("ملاحظة: هذه النتائج مبنية على عمود 'نتيجة العينة' الرسمي وليس على تجاوز الحد")
-                    st.dataframe(result, use_container_width=True, hide_index=True)
+                    st.dataframe(translate_dataframe(result, query_lang), use_container_width=True, hide_index=True)
                 else:
                     st.warning(f"⚠️ لم يتم العثور على عينات {type_display}")
                 
@@ -1458,10 +1465,10 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                     summary_result = con.execute(summary_query).df()
                     
                     st.markdown("### 📊 ملخص حسب الحي")
-                    st.dataframe(summary_result, use_container_width=True, hide_index=True)
+                    st.dataframe(translate_dataframe(summary_result, query_lang), use_container_width=True, hide_index=True)
                     
                     st.markdown("### 🔬 تفاصيل المبيدات")
-                    st.dataframe(result, use_container_width=True, hide_index=True)
+                    st.dataframe(translate_dataframe(result, query_lang), use_container_width=True, hide_index=True)
                 else:
                     st.warning(f"⚠️ لم يتم العثور على مبيدات في الأحياء: {neighborhoods_display}")
                     
@@ -1532,7 +1539,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 
                 if not result.empty:
                     st.success(f"✅ Found {len(result)} samples of **{samples_display}** containing **{detected_pesticide}**")
-                    st.dataframe(result, use_container_width=True, hide_index=True)
+                    st.dataframe(translate_dataframe(result, query_lang), use_container_width=True, hide_index=True)
                     
                     # Show summary
                     compliant = len(result[result['الحالة'] == 'مطابق'])
@@ -1774,7 +1781,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                                 
                                 # Show detailed breakdown table
                                 st.markdown("### 📊 جدول تفصيلي")
-                                st.dataframe(samples_by_failing, use_container_width=True, hide_index=True)
+                                st.dataframe(translate_dataframe(samples_by_failing, query_lang), use_container_width=True, hide_index=True)
                                 
                                 # Show detailed per-pesticide stats
                                 st.markdown("### 🧪 إحصائيات كل مبيد راسب")
@@ -1793,7 +1800,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                                 ORDER BY عدد_العينات_المتأثرة DESC
                                 """
                                 failing_stats = con.execute(failing_pesticide_stats_query).df()
-                                st.dataframe(failing_stats, use_container_width=True, hide_index=True)
+                                st.dataframe(translate_dataframe(failing_stats, query_lang), use_container_width=True, hide_index=True)
                             else:
                                 st.success("✅ لا توجد عينات راسبة - جميع العينات مطابقة للحد المسموح")
                     else:
@@ -1810,7 +1817,7 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                         
                         # Also show the table for reference
                         st.markdown("### 📊 Detailed Summary / ملخص تفصيلي")
-                        st.dataframe(result, use_container_width=True, hide_index=True)
+                        st.dataframe(translate_dataframe(result, query_lang), use_container_width=True, hide_index=True)
                     
                     # Store in session state
                     st.session_state.last_query_result = result
@@ -1983,10 +1990,10 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                             st.metric("تحت الحد", below_limit)
                         
                         with st.expander("🔍 عرض تفاصيل العينات"):
-                            st.dataframe(result, use_container_width=True, hide_index=True)
+                            st.dataframe(translate_dataframe(result, query_lang), use_container_width=True, hide_index=True)
                     else:
                         st.success(f"✅ وجد {len(result)} نتيجة{filter_msg}: {above_limit} فوق الحد، {below_limit} تحت الحد")
-                        st.dataframe(result, use_container_width=True, hide_index=True)
+                        st.dataframe(translate_dataframe(result, query_lang), use_container_width=True, hide_index=True)
                         
                     st.session_state.last_query = query
                     st.session_state.last_query_type = 'pesticide_specific'
@@ -2259,6 +2266,8 @@ DO NOT assume specific values exist. Write generic SQL based on column names onl
     - Example: Cucumber has 51 unique samples but 99 pesticide detection records.
     - CORRECT: `SELECT COUNT(DISTINCT "كود العينة") AS عدد_العينات`
     - WRONG: `SELECT COUNT(*) AS عدد_العينات`
+
+15. {lang_sql_instruction}
 
 **COLUMN REFERENCE (TIDY FORMAT - Separate columns for pesticide data!):**
 - `"كود العينة"`: Sample code (unique ID)
@@ -2717,7 +2726,9 @@ Generate ONLY the SQL query wrapped in ```sql``` markers:"""
                     pass
                 
                 # Display results
-                st.dataframe(result, use_container_width=True)
+                # Translate for English queries before final display
+                result_display = translate_dataframe(result, query_lang)
+                st.dataframe(result_display, use_container_width=True)
                 
                 # Download button
                 csv = result.to_csv(index=False)
@@ -2748,6 +2759,9 @@ Generate ONLY the SQL query wrapped in ```sql``` markers:"""
 def process_data_query(query: str, df: pd.DataFrame, model, include_risk: bool = False):
     """Process data analysis queries using Gemini with risk assessment option"""
     
+    # Language detection for pandas query engine
+    query_lang = detect_language(query)
+
     with st.spinner("🔄 Generating analysis code..."):
         try:
             # Enhanced prompt with risk assessment
@@ -3088,6 +3102,8 @@ Generate ONLY the Python code wrapped in ```python``` markers:"""
                 Example: `result = df.groupby(...).agg(...)`
                 """)
             elif isinstance(result, pd.DataFrame):
+                # Auto-translate for English queries
+                result = translate_dataframe(result, query_lang)
                 # Smart metrics display based on result type
                 result_cols = set(result.columns)
                 

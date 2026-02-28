@@ -129,9 +129,9 @@ def migrate_chemistry_sheet():
     """
     
     # Configuration (files are in ../data/ folder)
-    excel_file = Path(__file__).parent.parent / 'data' / 'bur_dataset.xlsx'
+    excel_file = Path(__file__).parent.parent / 'data' / 'chemistry_translated.xlsx'
     db_file = Path(__file__).parent.parent / 'data' / 'lars_data.duckdb'
-    sheet_name = "الكيمياء"  # Chemistry sheet in Arabic
+    sheet_name = "Chemistry"  # Chemistry sheet in translated dataset
     
     print("=" * 60)
     print("🧪 LARS Chemistry Sheet Migration")
@@ -152,8 +152,33 @@ def migrate_chemistry_sheet():
         df_chemistry = pd.read_excel(excel_file, sheet_name=sheet_name)
         print(f"   ✅ Loaded {len(df_chemistry):,} rows, {len(df_chemistry.columns)} columns")
         
+        # Map English columns to original Arabic columns for downstream compatibility
+        column_mapping = {
+            'sample_code': 'كود العينة',
+            'date': 'التاريخ',
+            'sample_name': 'اسم العينة',
+            'sample_type': 'نوع العينة',
+            'sample_classification': 'تصنيف العينة',
+            'test_type': 'نوع الاختبار',
+            'district': 'الحى',
+            'facility_name': 'اسم المنشاة',
+            'municipality': 'اسم البلدية',
+            'license_number': 'رقم الرخصة',
+            'sample_condition': 'حالة العينة',
+            'receiver_name': 'اسم المستلم',
+            'result': 'ch_tracking.نتيجة العينة\nResult',
+        }
+        
+        # Map contaminant columns
+        contaminants = [col for col in df_chemistry.columns if str(col).startswith('contaminant_')]
+        for col in contaminants:
+            idx = col.split('_')[1]
+            column_mapping[col] = f'ملوث {idx}'
+            
+        df_chemistry = df_chemistry.rename(columns=column_mapping)
+        
         # Show columns
-        print(f"\n📋 Columns found:")
+        print(f"\n📋 Columns after mapping:")
         for col in df_chemistry.columns:
             print(f"   - {col}")
         
