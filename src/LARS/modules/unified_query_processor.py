@@ -10,6 +10,15 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from enum import Enum
 
+from modules.mappings import (
+    SAMPLE_CORRECTIONS,
+    SAMPLE_AR_TO_EN,
+    SAMPLE_EN_TO_AR,
+    PESTICIDE_AR_TO_EN,
+    NEIGHBORHOOD_CORRECTIONS,
+    normalize_arabic_query,
+)
+
 # Try to import OpenAI, but make it optional
 try:
     from openai import OpenAI
@@ -450,6 +459,8 @@ Respond with just: Intent: <name>, Confidence: <0-1>"""
         
         if not self.llm:
             return None
+            
+        from modules.translation_utils import get_language_system_prompt, detect_language
         
         schema_info = self._get_schema_info()
         
@@ -461,6 +472,9 @@ Query Context:
 - Neighborhoods: {', '.join(context.neighborhoods) if context.neighborhoods else 'None'}
 - Filters: {context.filters}
 """
+
+        lang = detect_language(query)
+        lang_instructions = get_language_system_prompt(lang)
         
         prompt = f"""Generate a DuckDB SQL query.
 
@@ -470,6 +484,8 @@ Schema:
 {context_str}
 
 Question: "{query}"
+
+{lang_instructions}
 
 Rules:
 1. Use double quotes for Arabic columns: "اسم العينة"
@@ -995,14 +1011,6 @@ Generate ONLY the SQL:"""
             query = query.replace(word, num)
         
         return query
-    from modules.mappings import (
-    SAMPLE_CORRECTIONS,
-    SAMPLE_AR_TO_EN,
-    SAMPLE_EN_TO_AR,
-    PESTICIDE_AR_TO_EN,
-    NEIGHBORHOOD_CORRECTIONS,
-    normalize_arabic_query,
-)
     
     def _load_neighborhood_mappings(self) -> Dict:
         """تحميل خرائط الأحياء"""
@@ -1111,7 +1119,11 @@ Columns:
         """تنسيق فلتر العينات"""
         if not samples:
             return ""
-        conditions = [f"\"اسم العينة\" LIKE '%{s}%'" for s in samples]
+        from modules.mappings import SAMPLE_AR_TO_EN
+        conditions = []
+        for s in samples:
+            en_s = SAMPLE_AR_TO_EN.get(s, s)
+            conditions.append(f"(\"اسم العينة\" LIKE '%{s}%' OR LOWER(\"اسم العينة\") LIKE '%{en_s.lower()}%')")
         return f"AND ({' OR '.join(conditions)})"
     
     def _format_neighborhood_filter(self, neighborhoods: List[str]) -> str:

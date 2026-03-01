@@ -11,8 +11,6 @@ Author: LARS Team
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
 from typing import Dict, List, Any, Optional
 import re
 from modules.mappings import COMMODITY_TO_ARABIC
@@ -248,6 +246,7 @@ def show_monthly_iqr_trend(residue_data: List[Dict[str, Any]]):
     st.markdown("### 📈 Monthly IqR Trend Analysis / تحليل الترند الشهري")
     
     # Plotly Trend Chart
+    import plotly.express as px
     fig = px.line(
         trend_df, 
         x='الشهر (Month)', 
@@ -613,6 +612,7 @@ def show_health_risk_window(
                     chart_data = chart_data.groupby("Group").sum().reset_index()
                     chart_data = chart_data.sort_values("HQc", ascending=False)
                     
+                    import plotly.express as px
                     fig = px.bar(
                         chart_data,
                         x="Group",
@@ -798,6 +798,7 @@ def show_quality_index_window(
         chart_data = chart_data[chart_data['Count'] > 0]
         
         if not chart_data.empty:
+            import plotly.express as px
             fig = px.pie(
                 chart_data,
                 names="Category",

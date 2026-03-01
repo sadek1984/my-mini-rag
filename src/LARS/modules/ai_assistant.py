@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
 import os
 import re
 import json
@@ -11,12 +9,12 @@ import duckdb
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
-from openai import OpenAI
-import google.generativeai as genai
 import random
 from modules.mappings import PESTICIDE_AR_TO_EN, translate_pesticide
-# Bilingual translation utilities (Arabic ↔ English)
-from modules.translation_utils import detect_language, translate_dataframe, get_language_system_prompt
+# Bilingual translation utilities (Arabic <-> English)
+from modules.translation_utils import (
+    get_language_system_prompt
+)
 import logging
 
 # Import risk window components
@@ -31,12 +29,7 @@ try:
 except ImportError:
     RISK_WINDOWS_AVAILABLE = False
 
-# Import semantic pattern recognizer (optional - for improved query understanding)
-try:
-    from modules.semantic_pattern_recognizer import get_semantic_recognizer
-    SEMANTIC_RECOGNIZER = get_semantic_recognizer()
-except ImportError:
-    SEMANTIC_RECOGNIZER = None
+# Semantic pattern recognizer is used inside core_query_engine.py, no need to load it here at module level.
 
 
 
@@ -130,6 +123,7 @@ def generate_pie_chart(df: pd.DataFrame, query: str):
     """Generate an interactive pie chart from DataFrame"""
     try:
         import plotly.graph_objects as go
+        import plotly.express as px
         
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         text_cols = df.select_dtypes(include=['object']).columns.tolist()
@@ -370,8 +364,8 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
     [Logic Version: 2.1 - Enhanced Multi-Count & Arabic Word Support]
     """
     
-    # === LANGUAGE DETECTION (runs once, used for all results in this function) ===
-    query_lang = detect_language(query)
+    # === LANGUAGE DEFINITION (runs once, used for all results in this function) ===
+    query_lang = "english"
     lang_sql_instruction = get_language_system_prompt(query_lang)
 
     # ================================================================
@@ -395,12 +389,11 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
         if result_df is not None and not result_df.empty:
             st.success("✅ Query processed successfully!")
             
-            # Display the response text
+            # Display response text directly
             st.markdown(response_text)
             
-            # Display the DataFrame (auto-translated for English queries)
-            result_df_display = translate_dataframe(result_df, query_lang)
-            st.dataframe(result_df_display, use_container_width=True)
+            # Display the DataFrame
+            st.dataframe(result_df, use_container_width=True)
             
             # Offer download
             csv = result_df.to_csv(index=False).encode('utf-8')
@@ -784,31 +777,80 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                     for v in set(variants):
                         hood_conditions.append(f"\"الحى\" LIKE '%{v}%'")
                 neighborhood_filter = f"AND ({' OR '.join(hood_conditions)})"
-                
-                # Build category filter based on keywords
+                # Build category filter based on keywords (Arabic + English)
                 category_filter = ""
-                category_name = "العينات"
-                
-                if 'توابل' in query or 'التوابل' in query or 'بهارات' in query:
-                    category_filter = """AND ("تصنيف العينة" LIKE '%توابل%' OR "اسم العينة" IN ('كمون', 'هيل', 'زعتر', 'كركم', 'بهارات', 'فلفل اسود', 'قرفة', 'يانسون', 'كزبرة', 'شمر', 'قرنفل'))"""
-                    category_name = "التوابل"
-                elif 'خضار' in query or 'الخضار' in query or 'خضروات' in query:
-                     category_filter = """AND ("تصنيف العينة" LIKE '%خضار%' OR "اسم العينة" IN ('طماطم', 'خيار', 'كوسة', 'باذنجان', 'فلفل', 'بامية', 'فاصوليا', 'زهرة', 'بروكلي', 'ملفوف', 'خس', 'جرجير', 'بقدونس', 'كزبرة', 'شبت'))"""
-                     category_name = "الخضار"
-                elif 'فاكهة' in query or 'فواكه' in query:
-                     category_filter = """AND ("تصنيف العينة" LIKE '%فاكهة%' OR "اسم العينة" IN ('تفاح', 'برتقال', 'عنب', 'مانجو', 'توت', 'رمان', 'ليمون', 'يوسف افندي', 'كمثرى', 'فراولة', 'خوخ', 'مشمش'))"""
-                     category_name = "الفواكه"
-                elif 'ورقيات' in query or 'الورقيات' in query:
-                     category_filter = """AND ("تصنيف العينة" LIKE '%ورقيات%' OR "اسم العينة" IN ('خس', 'جرجير', 'بقدونس', 'كزبرة', 'شبت', 'نعناع', 'سبانخ', 'ملوخية', 'رجلة', 'سلق'))"""
-                     category_name = "الورقيات"
+                category_name_ar = "العينات"
+                category_name_en = "Samples"
+                q_lower_cat = query.lower()
+
+                if 'توابل' in query or 'التوابل' in query or 'بهارات' in query \
+                        or 'spice' in q_lower_cat or 'spices' in q_lower_cat:
+                    category_filter = """AND (
+                        LOWER("اسم العينة") IN ('cumin','cardamom','thyme','turmeric','spices','black pepper',
+                            'cinnamon','anise','fennel','coriander','clove','mahlab','saffron','black seed') OR
+                        "اسم العينة" IN ('كمون','هيل','زعتر','كركم','بهارات','فلفل اسود','قرفة','يانسون','كزبرة','شمر','قرنفل')
+                    )"""
+                    category_name_ar = "التوابل"
+                    category_name_en = "Spices"
+                elif 'خضار' in query or 'الخضار' in query or 'خضروات' in query \
+                        or 'vegetable' in q_lower_cat or 'vegetables' in q_lower_cat:
+                    category_filter = """AND (
+                        LOWER("اسم العينة") IN ('tomato','cucumber','zucchini','eggplant','pepper','okra',
+                            'beans','cauliflower','broccoli','cabbage','lettuce','arugula','parsley',
+                            'coriander','dill','potato','carrot','onion','spinach') OR
+                        "اسم العينة" IN ('طماطم','خيار','كوسة','باذنجان','فلفل','بامية','فاصوليا',
+                            'زهرة','بروكلي','ملفوف','خس','جرجير','بقدونس','كزبرة','شبت','بطاطس','جزر','بصل')
+                    )"""
+                    category_name_ar = "الخضار"
+                    category_name_en = "Vegetables"
+                elif 'فاكهة' in query or 'فواكه' in query \
+                        or 'fruit' in q_lower_cat or 'fruits' in q_lower_cat:
+                    category_filter = """AND (
+                        LOWER("اسم العينة") IN ('apple','orange','grape','mango','berries','pomegranate',
+                            'lemon','pear','strawberry','peach','apricot','mandarin','kiwi','pineapple','dates') OR
+                        "اسم العينة" IN ('تفاح','برتقال','عنب','مانجو','توت','رمان','ليمون','كمثرى','فراولة','خوخ','مشمش')
+                    )"""
+                    category_name_ar = "الفواكه"
+                    category_name_en = "Fruits"
+                elif 'ورقيات' in query or 'الورقيات' in query \
+                        or 'leafy' in q_lower_cat:
+                    category_filter = """AND (
+                        LOWER("اسم العينة") IN ('lettuce','arugula','parsley','coriander','dill','mint',
+                            'spinach','molokhia','purslane','swiss chard') OR
+                        "اسم العينة" IN ('خس','جرجير','بقدونس','كزبرة','شبت','نعناع','سبانخ','ملوخية','رجلة','سلق')
+                    )"""
+                    category_name_ar = "الورقيات"
+                    category_name_en = "Leafy Vegetables"
+                elif 'مكسرات' in query or 'المكسرات' in query \
+                        or 'nut' in q_lower_cat or 'nuts' in q_lower_cat:
+                    category_filter = """AND (
+                        LOWER("اسم العينة") IN ('almonds','pistachios','cashews','hazelnuts','pecans',
+                            'peanuts','sesame','walnuts') OR
+                        "اسم العينة" IN ('لوز','فستق','كاجو','بندق','بيكان','فول سوداني','سمسم','جوز')
+                    )"""
+                    category_name_ar = "المكسرات"
+                    category_name_en = "Nuts"
                 elif detected_sample_types:
-                    # Specific samples requested
-                    conditions = [f"\"اسم العينة\" LIKE '%{s}%'" for s in detected_sample_types]
+                    # Specific samples requested — dual-language SQL
+                    conditions = []
+                    for s in detected_sample_types:
+                        en_s = SAMPLE_AR_TO_EN.get(s, s)
+                        conditions.append(
+                            f"(\"اسم العينة\" LIKE '%{s}%' OR LOWER(\"اسم العينة\") LIKE '%{en_s.lower()}%')"
+                        )
                     category_filter = f"AND ({' OR '.join(conditions)})"
-                    category_name = " + ".join(detected_sample_types)
-                
+                    category_name_ar = " + ".join(detected_sample_types)
+                    category_name_en = " + ".join(
+                        SAMPLE_AR_TO_EN.get(s, s).capitalize() for s in detected_sample_types
+                    )
+
+                category_name = category_name_en if query_lang == "english" else category_name_ar
                 hood_display = " + ".join(detected_neighborhoods)
-                st.info(f"📊 تحليل شامل لـ **{category_name}** في حي **{hood_display}**...")
+
+                if query_lang == "english":
+                    st.info(f"📊 Comprehensive analysis for **{category_name_en}** in neighborhood **{hood_display}**...")
+                else:
+                    st.info(f"📊 تحليل شامل لـ **{category_name_ar}** في حي **{hood_display}**...")
                 
                 # Comprehensive SQL to get ALL samples (including empty ones)
                 # Using MAX(is_above_limit) per sample to detect violations
@@ -842,30 +884,46 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 con.close()
                 
                 if not df.empty:
-                    total = int(df['العدد_الكلي'].sum())
+                    total       = int(df['العدد_الكلي'].sum())
                     total_above = int(df['فوق_الحد'].sum())
                     total_below = int(df['تحت_الحد'].sum())
                     total_clean = int(df['خالية_من_المبيدات'].sum())
-                    
-                    # Metrics
+
+                    # Metrics — bilingual labels
                     col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("إجمالي العينات", f"{total}")
-                    col2.metric("🔴 فوق الحد", f"{total_above}")
-                    col3.metric("🟢 تحت الحد", f"{total_below}")
-                    col4.metric("🛡️ خالية تماماً", f"{total_clean}")
-                    
-                    st.success(f"✅ تم العثور على {total} عينة {category_name} في {hood_display}")
-                    st.markdown(f"""
-                    **تفاصيل الحالة:**
-                    *   **فوق الحد:** {total_above} عينة (تحتوي على مبيدات مخالفة)
-                    *   **تحت الحد:** {total_below} عينة (سليمة)
-                        *   منها **{total_clean}** عينة خالية تماماً من المبيدات
-                        *   ومنها **{total_below - total_clean}** عينة تحتوي على مبيدات ولكن ضمن الحدود المسموحة
-                    """)
-                    
+                    if query_lang == "english":
+                        col1.metric("Total Samples",     f"{total}")
+                        col2.metric("🔴 Above Limit",   f"{total_above}")
+                        col3.metric("🟢 Below Limit",   f"{total_below}")
+                        col4.metric("🛡️ Pesticide-Free", f"{total_clean}")
+                        st.success(f"✅ Found {total} {category_name_en} samples in {hood_display}")
+                        st.markdown(f"""
+**Status Details:**
+- **Above Limit:** {total_above} sample(s) (contain violating pesticides)
+- **Below Limit:** {total_below} sample(s) (safe)
+  - of which **{total_clean}** are completely pesticide-free
+  - and **{total_below - total_clean}** contain pesticides within allowed limits
+""")
+                    else:
+                        col1.metric("إجمالي العينات",     f"{total}")
+                        col2.metric("🔴 فوق الحد",        f"{total_above}")
+                        col3.metric("🟢 تحت الحد",       f"{total_below}")
+                        col4.metric("🛡️ خالية تماماً",   f"{total_clean}")
+                        st.success(f"✅ تم العثور على {total} عينة {category_name_ar} في {hood_display}")
+                        st.markdown(f"""
+**تفاصيل الحالة:**
+*   **فوق الحد:** {total_above} عينة (تحتوي على مبيدات مخالفة)
+*   **تحت الحد:** {total_below} عينة (سليمة)
+    *   منها **{total_clean}** عينة خالية تماماً من المبيدات
+    *   ومنها **{total_below - total_clean}** عينة تحتوي على مبيدات ولكن ضمن الحدود المسموحة
+""")
+
                     st.dataframe(translate_dataframe(df, query_lang), use_container_width=True, hide_index=True)
                 else:
-                    st.warning(f"⚠️ لم أجد عينات {category_name} في {hood_display}")
+                    if query_lang == "english":
+                        st.warning(f"⚠️ No {category_name_en} samples found in {hood_display}")
+                    else:
+                        st.warning(f"⚠️ لم أجد عينات {category_name_ar} في {hood_display}")
                 
                 return
 
@@ -962,11 +1020,12 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                     neighborhood_filter = f"AND ({' OR '.join(hood_conditions)})"
                     hood_display = f" في حي {' + '.join(detected_neighborhoods)}"
                 
-                # Sample filter
+                # Sample filter (Dual Language)
                 sample_filter_conditions = []
                 for t in detected_sample_types:
+                    en_t = SAMPLE_AR_TO_EN.get(t, t)
                     # Search in both sample name and sample type
-                    sample_filter_conditions.append(f"\"اسم العينة\" LIKE '%{t}%'")
+                    sample_filter_conditions.append(f"(\"اسم العينة\" LIKE '%{t}%' OR LOWER(\"اسم العينة\") LIKE '%{en_t.lower()}%' OR \"نوع العينة\" LIKE '%{t}%' OR LOWER(\"نوع العينة\") LIKE '%{en_t.lower()}%')")
                 sample_filter = f"({' OR '.join(sample_filter_conditions)})"
                 
                 type_display = " + ".join(detected_sample_types)
@@ -1110,7 +1169,8 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
             if detected_sample_type and (is_comprehensive_query or wants_failing_analysis) and not is_health_risk_query:
                 sample_filter_conditions = []
                 for t in detected_sample_types:
-                    sample_filter_conditions.append(f"\"اسم العينة\" LIKE '%{t}%'")
+                    en_t = SAMPLE_AR_TO_EN.get(t, t)
+                    sample_filter_conditions.append(f"(\"اسم العينة\" LIKE '%{t}%' OR LOWER(\"اسم العينة\") LIKE '%{en_t.lower()}%' OR \"نوع العينة\" LIKE '%{t}%' OR LOWER(\"نوع العينة\") LIKE '%{en_t.lower()}%')")
                 sample_filter = f"({' OR '.join(sample_filter_conditions)})"
                 type_display = " + ".join(detected_sample_types)
                 
@@ -1242,11 +1302,12 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 limit_condition = "is_above_limit = 1" if is_above_limit_query else "is_above_limit = 0"
                 limit_label = "فوق الحد" if is_above_limit_query else "تحت الحد"
                 
-                # Build sample filter (handle multiple) - check both اسم العينة and نوع العينة
+                # Build sample filter (handle multiple) - check both اسم العينة and نوع العينة (Dual language)
                 sample_conditions = []
                 for t in detected_sample_types:
-                    sample_conditions.append(f"\"اسم العينة\" LIKE '%{t}%'")
-                    sample_conditions.append(f"\"نوع العينة\" LIKE '%{t}%'")
+                    en_t = SAMPLE_AR_TO_EN.get(t, t)
+                    sample_conditions.append(f"(\"اسم العينة\" LIKE '%{t}%' OR LOWER(\"اسم العينة\") LIKE '%{en_t.lower()}%')")
+                    sample_conditions.append(f"(\"نوع العينة\" LIKE '%{t}%' OR LOWER(\"نوع العينة\") LIKE '%{en_t.lower()}%')")
                 
                 sample_filter = f"AND ({' OR '.join(sample_conditions)})"
                 type_display = " + ".join(detected_sample_types)
@@ -1327,8 +1388,9 @@ def process_data_query_sql(query: str, model, include_risk: bool = False):
                 # Build sample filter
                 sample_conditions = []
                 for t in detected_sample_types:
-                    sample_conditions.append(f"\"اسم العينة\" LIKE '%{t}%'")
-                    sample_conditions.append(f"\"نوع العينة\" LIKE '%{t}%'")
+                    en_t = SAMPLE_AR_TO_EN.get(t, t)
+                    sample_conditions.append(f"(\"اسم العينة\" LIKE '%{t}%' OR LOWER(\"اسم العينة\") LIKE '%{en_t.lower()}%')")
+                    sample_conditions.append(f"(\"نوع العينة\" LIKE '%{t}%' OR LOWER(\"نوع العينة\") LIKE '%{en_t.lower()}%')")
                 sample_filter = f"AND ({' OR '.join(sample_conditions)})"
                 type_display = " + ".join(detected_sample_types)
                 
@@ -2759,8 +2821,8 @@ Generate ONLY the SQL query wrapped in ```sql``` markers:"""
 def process_data_query(query: str, df: pd.DataFrame, model, include_risk: bool = False):
     """Process data analysis queries using Gemini with risk assessment option"""
     
-    # Language detection for pandas query engine
-    query_lang = detect_language(query)
+    # Language definition for pandas query engine
+    query_lang = "english"
 
     with st.spinner("🔄 Generating analysis code..."):
         try:
@@ -3542,6 +3604,7 @@ def show_chat_page(api_client):
         
         # Configure OpenAI Client
         try:
+            from openai import OpenAI
             model = OpenAI(api_key=api_key)
             model_name = "gpt-4o-mini"
             st.success("✅ OpenAI model ready")

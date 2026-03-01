@@ -10,6 +10,7 @@ Handles Arabic ↔ English translation for:
 - Column headers (عدد_العينات → sample_count)
 - DataFrame values and headers
 - AI prompt language instructions
+- Response text (translate_response_text)
 """
 
 import pandas as pd
@@ -190,6 +191,16 @@ ARABIC_TO_ENGLISH_COLUMNS = {
     "عدد_المبيدات_الراسبة": "failing_pesticide_count",
     "عدد_العينات_المتأثرة": "affected_sample_count",
     "متوسط_التركيز": "avg_concentration",
+    # Violations threshold handler
+    "نوع العينة": "sample_type",
+    "إجمالي السجلات": "total_records",
+    "عدد المخالفات": "violation_count",
+    "نسبة المخالفات (%)": "violation_rate_%",
+    # Count-limit handler columns
+    "نوع_العينة": "sample_type",
+    "عدد_العينات": "sample_count",
+    "عينات_فوق_الحد": "above_limit",
+    "عينات_تحت_الحد": "below_limit",
 }
 
 
@@ -334,14 +345,17 @@ def get_language_system_prompt(lang: str) -> str:
 The user's question is in ENGLISH. You MUST ensure ALL output is in English.
 - In your SQL query, use CASE statements or aliases to translate Arabic values if possible
 - All column aliases (AS ...) must be English words
+- **CRITICAL NOTE**: The `chemistry_tidy` table NOW CONTAINS ENGLISH values for `اسم العينة` (Sample Name). E.g., it contains 'Tomato' instead of 'طماطم'. IF querying for sample names, search for the English literal ('Tomato', 'Cucumber', 'Zucchini', etc.) OR use a case-insensitive `LOWER("اسم العينة") LIKE '%tomato%'` approach.
 - After you generate the SQL, the system will also auto-translate remaining Arabic values
-- Do NOT use Arabic characters anywhere in column aliases or string literals in the SQL
+- Do NOT use Arabic characters anywhere in column aliases or string literals in the SQL EXCEPT if specifically matching an Arabic district name (e.g., district remains Arabic).
 - Example: Instead of AS عدد_العينات, write AS sample_count
 - Example: Instead of AS المبيد, write AS pesticide_name
 - Example: Instead of AS الحالة, write AS status"""
     else:
         return """قاعدة اللغة: المستخدم يتحدث بالعربية. أجب باللغة العربية فقط.
-- استخدم الأسماء العربية للعينات والمبيدات في ردودك
+- **ملاحظة هامة جداً**: قاعدة البيانات `chemistry_tidy` تحتوي الآن على أسماء العينات باللغة الإنجليزية في عمود `اسم العينة`. \
+عند كتابة كود SQL، يجب أن تترجم اسم العينة إلى الإنجليزي في الـ WHERE clause. مثلاً، إذا سأل المستخدم عن 'طماطم'، اكتب `"اسم العينة" LIKE '%Tomato%'`، 'الخيار' هو 'Cucumber', 'الكوسة' هي 'Zucchini' وهكذا. \
+- استخدم الأسماء العربية للبيانات في ردودك النهائية للمستخدم.
 - أسماء أعمدة SQL يمكن أن تكون عربية أو إنجليزية"""
 
 
@@ -363,3 +377,10 @@ def translate_success_message(msg: str, lang: str) -> str:
     for ar, en in translations.items():
         result = result.replace(ar, en)
     return result
+
+
+def translate_response_text(text: str, lang: str) -> str:
+    """
+    Pass-through for response text. Handlers now output English directly.
+    """
+    return text
